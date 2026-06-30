@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Taxi Bo Phone Sender</title>
+  <meta name="theme-color" content="#20352c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Taxi Bo Sender">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link rel="stylesheet" href="styles.css?v=46">
+</head>
+<body class="phone-body">
+  <main class="phone-shell">
+    <section class="panel phone-card">
+      <p class="section-label">Taxi Bo sender</p>
+      <h1>Send the next order</h1>
+
+      <div id="phoneState" class="form-state empty-state">
+        While stopped: screenshot the order, accept it, then choose the latest screenshot.
+      </div>
+
+      <label class="quick-order-picker">
+        <span>Choose latest screenshot</span>
+        <input id="orderScreenshot" class="visually-hidden" type="file" accept="image/*">
+      </label>
+
+      <div id="lastSentPanel" class="phone-sent-panel" hidden>
+        <span>Sent to tablet</span>
+        <strong id="lastSentDestination"></strong>
+      </div>
+
+      <details id="phoneReview" class="phone-review">
+        <summary>Review or correct destination</summary>
+        <div class="phone-review-content">
+          <div id="screenshotPreviewWrap" class="phone-preview-wrap" hidden>
+            <img id="screenshotPreview" alt="Order screenshot preview">
+          </div>
+
+          <label class="field">
+            <span>Recognized order text</span>
+            <textarea id="orderText" rows="6" placeholder="Paste copied order text here if OCR needs help."></textarea>
+          </label>
+
+          <button id="extractDestinationButton" class="secondary-button" type="button">Find destination</button>
+
+          <label class="field">
+            <span>Destination to send</span>
+            <input id="phoneDestination" type="text" placeholder="Drop-off address">
+          </label>
+
+          <button id="sendDestinationButton" class="primary-button phone-send-button" type="button">Send corrected destination</button>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <script src="phone.js?v=46"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*.log
+taxi_bo.db
+taxi_bo.db-*
+server-test.out
+server-test.err
+.DS_Store

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Taxi Bo Route Recall</title>
+  <meta name="theme-color" content="#20352c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Taxi Bo">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link rel="stylesheet" href="styles.css?v=46">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero app-header">
+      <div class="brand-block">
+        <p class="eyebrow">Taxi Bo route recall</p>
+        <h1>Rehearse the drive before you pull away.</h1>
+        <p class="hero-copy">
+          Build a route from start to destination, save the turns as photo stops, then replay the junction sequence before the next fare.
+        </p>
+      </div>
+      <div class="route-preview" aria-label="Taxi Bo workflow">
+        <div class="preview-road">
+          <span class="road-node road-start"></span>
+          <span class="road-line"></span>
+          <span class="road-node road-photo"></span>
+          <span class="road-line"></span>
+          <span class="road-node road-end"></span>
+        </div>
+        <div class="preview-caption">
+          <strong>Start -> photo cues -> destination</strong>
+          <span>Turn memory becomes a visual route rehearsal.</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel finder-panel rehearse-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Drive rehearsal</p>
+            <h2>Pick a destination and replay the photo route</h2>
+          </div>
+          <span class="status-chip">Before the drive</span>
+        </div>
+
+        <div class="rehearsal-grid">
+          <div class="rehearsal-controls">
+            <label class="field">
+              <span>Destination to prepare</span>
+              <div class="voice-input-row">
+                <input id="destinationSearch" type="text" placeholder="Type or say the taxi destination address">
+                <button id="destinationVoiceButton" class="secondary-button voice-button" type="button" title="Speak destination" aria-label="Speak destination">Mic</button>
+              </div>
+            </label>
+
+            <label class="field">
+              <span>Saved route/start reference</span>
+              <select id="destinationSelect"></select>
+            </label>
+
+            <div class="finder-actions primary-actions">
+              <button id="prepareDestinationButton" class="primary-button" type="button">Go</button>
+            </div>
+
+            <div id="routeSummary" class="route-summary empty-state">
+              Choose a saved route to see its destination, notes, map, and junction photos.
+            </div>
+          </div>
+
+          <div class="route-stage">
+            <div id="routeMapState" class="route-map-state empty-state">
+              Add latitude and longitude to photo stops to draw them on the map.
+            </div>
+            <div id="routeMap" class="route-map" aria-label="Route map"></div>
+          </div>
+        </div>
+
+        <section class="cue-preview-strip in-panel" aria-label="Three photo cues">
+          <div class="cue-preview-header">
+            <p class="section-label">Next 3 photo cues</p>
+            <h2>What the driver should recognize next</h2>
+          </div>
+          <div class="drive-controls-row">
+            <button id="liveDriveStartButton" class="primary-button small-button" type="button">Start live drive</button>
+            <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button">Simulate tablet drive</button>
+            <button id="liveDriveStopButton" class="secondary-button small-button" type="button" disabled>Stop live drive</button>
+          </div>
+          <div id="liveDriveStatus" class="form-state empty-state">Choose a route with cue coordinates, then start live drive.</div>
+          <div id="topCuePreview" class="top-cue-preview"></div>
+        </section>
+
+        <div hidden>
+          <div id="liveDriveUpcoming"></div>
+        </div>
+
+      </section>
+
+      <details class="maintenance-drawer">
+        <summary>
+          <span>Route maintenance</span>
+          <strong>Build routes, add cue photos, and manage the database</strong>
+        </summary>
+        <div class="maintenance-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Route Builder</p>
+            <h2>Save the route details</h2>
+          </div>
+        </div>
+
+        <div id="routeFormState" class="form-state empty-state">Generate a route, save it to the database, then add photo cues below.</div>
+        <form id="routeForm" class="stack simple-route-form" autocomplete="off">
+          <div class="split-fields">
+            <label class="field">
+              <span>Route name</span>
+              <input id="routeName" name="routeName" type="text" placeholder="School run" autocomplete="off" autocapitalize="words" spellcheck="false" required>
+            </label>
+
+            <label class="field">
+              <span>Start</span>
+              <input id="routeStart" name="routeStart" type="text" placeholder="2 Shepherd Lane, Chapel Hill" autocomplete="street-address" autocapitalize="words" required>
+            </label>
+
+            <label class="field">
+              <span>Destination</span>
+              <input id="routeDestination" name="routeDestination" type="text" placeholder="East Chapel Hill High" autocomplete="off" autocapitalize="words" spellcheck="false" required>
+            </label>
+          </div>
+
+          <input id="routeVariant" name="routeVariant" type="hidden" value="Standard">
+          <input id="routeTimeWindow" name="routeTimeWindow" type="hidden">
+          <input id="routeTrafficPattern" name="routeTrafficPattern" type="hidden">
+          <input id="routeNotes" name="routeNotes" type="hidden">
+          <input id="routeStartLatitude" name="routeStartLatitude" type="hidden">
+          <input id="routeStartLongitude" name="routeStartLongitude" type="hidden">
+          <input id="routeDestinationLatitude" name="routeDestinationLatitude" type="hidden">
+          <input id="routeDestinationLongitude" name="routeDestinationLongitude" type="hidden">
+          <input id="routeGeometry" name="routeGeometry" type="hidden">
+          <input id="routeDistanceMeters" name="routeDistanceMeters" type="hidden">
+          <input id="routeDurationSeconds" name="routeDurationSeconds" type="hidden">
+
+          <div class="route-generate-bar">
+            <button id="generateRouteButton" class="primary-button" type="button">Generate and save route</button>
+            <button id="reviewRouteButton" class="secondary-button" type="button">Replay saved route</button>
+            <div id="generateRouteStatus" class="form-state empty-state">Enter the route name, start, and destination.</div>
+            <button id="routeSubmitButton" type="submit" hidden>Save route</button>
+            <button id="routeCancelEditButton" type="button" class="secondary-button" hidden>Cancel edit</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Junction Photos</p>
+            <h2>Capture the visual turning points</h2>
+          </div>
+        </div>
+
+        <div id="photoFormState" class="form-state empty-state">Add one cue at a time: what you will see, what to do there, and an optional map location.</div>
+        <form id="photoForm" class="stack" autocomplete="off">
+          <div class="photo-step-block">
+            <div class="step-badge">1</div>
+            <div class="database-route-picker">
+              <label class="field">
+                <span>Pick a saved route from the database</span>
+                <select id="photoRouteSelect" required></select>
+              </label>
+              <div class="route-picker-actions">
+                <button id="refreshRoutesButton" class="secondary-button small-button" type="button">Refresh routes</button>
+                <div id="photoRouteStatus" class="form-state empty-state">Routes load from SQLite.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="photo-step-block">
+            <div class="step-badge">2</div>
+            <div class="stack">
+              <div class="split-fields cue-fields">
+                <label class="field compact-field">
+                  <span>Cue</span>
+                  <select id="photoStep" name="photoStep" required></select>
+                </label>
+
+                <label class="field">
+                  <span>What should you recognize?</span>
+                  <input id="photoTitle" name="photoTitle" type="text" placeholder="Blue sign before the school turn" autocomplete="off" autocapitalize="sentences" required>
+                </label>
+              </div>
+
+              <label class="field">
+                <span>What should you do?</span>
+                <input id="photoInstruction" name="photoInstruction" type="text" placeholder="Keep right, then turn left at the next light" autocomplete="off" autocapitalize="sentences">
+              </label>
+              <div id="cueCoordinateStatus" class="cue-coordinate-status empty-state">Pick a generated cue to load its coordinates.</div>
+            </div>
+          </div>
+
+          <div class="photo-step-block">
+            <div class="step-badge">3</div>
+            <label class="field">
+              <span>Photo or screenshot</span>
+              <div id="photoPasteZone" class="photo-paste-zone" contenteditable="true" spellcheck="false" aria-label="Paste or choose a photo" data-placeholder="Paste a screenshot here, or choose an image file below.">
+                <div class="photo-paste-copy">
+                  <strong>Drop in the cue image</strong>
+                  <span>Paste a screenshot, or choose a photo from your device.</span>
+                </div>
+                <img id="photoPreview" class="photo-preview" alt="Selected photo preview" hidden>
+              </div>
+              <div class="file-row">
+                <input id="photoFile" name="photoFile" type="file" accept="image/*" capture="environment">
+                <button id="clearPhotoButton" class="secondary-button small-button" type="button">Clear photo</button>
+              </div>
+              <div id="photoInputStatus" class="form-state empty-state">No photo selected yet.</div>
+            </label>
+          </div>
+
+          <div class="photo-step-block">
+            <div class="step-badge optional-badge">4</div>
+            <div class="stack">
+              <label class="field">
+                <span>Landmark notes</span>
+                <textarea id="photoNotes" name="photoNotes" rows="2" placeholder="North entrance, school sign on the right, traffic light just before the turn."></textarea>
+              </label>
+
+              <details class="optional-location">
+                <summary>Optional: place this cue on the map</summary>
+                <div class="location-tools">
+                  <div class="picker-card">
+                    <p class="picker-title">Use an address or place</p>
+                    <p class="picker-copy">Search a place name, address, or landmark to fill the coordinates.</p>
+                    <div class="finder-actions">
+                      <input id="stopLookupInput" type="text" placeholder="School entrance, hotel address, traffic light" class="grow-input">
+                      <button id="stopLookupButton" class="secondary-button" type="button">Find place</button>
+                    </div>
+                  </div>
+
+                  <div class="picker-card">
+                    <p class="picker-title">Or click the map</p>
+                    <p class="picker-copy">Turn on picking, then click the route map to set this cue's position.</p>
+                    <button id="mapPickerButton" class="secondary-button" type="button">Pick on map</button>
+                  </div>
+
+                  <div class="split-fields">
+                    <label class="field">
+                      <span>Latitude</span>
+                      <input id="photoLatitude" name="photoLatitude" type="number" step="any" placeholder="35.899261">
+                    </label>
+
+                    <label class="field">
+                      <span>Longitude</span>
+                      <input id="photoLongitude" name="photoLongitude" type="number" step="any" placeholder="-79.055619">
+                    </label>
+                  </div>
+
+                  <div id="lookupStatus" class="form-state empty-state">Map placement is optional.</div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <div class="save-cue-bar">
+            <div>
+              <strong>Ready to save this cue?</strong>
+              <span>It will appear in the route rehearsal timeline.</span>
+            </div>
+            <div class="form-actions">
+              <button id="photoSubmitButton" type="submit" class="primary-button">Save photo cue</button>
+              <button id="photoCancelEditButton" type="button" class="secondary-button" hidden>Cancel edit</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel routes-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Saved cue photos</p>
+            <h2>Route photo timeline</h2>
+          </div>
+        </div>
+
+        <div id="routePhotos" class="photo-timeline"></div>
+      </section>
+
+      <section class="panel routes-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Backup</p>
+            <h2>Route library backup</h2>
+          </div>
+        </div>
+
+        <p class="picker-copy">Export, import, or connect a local JSON file while testing route libraries.</p>
+        <div class="finder-actions">
+          <button id="exportRoutesButton" class="secondary-button" type="button">Export routes</button>
+          <label class="secondary-button file-button" for="importRoutesInput">Import routes</label>
+          <input id="importRoutesInput" type="file" accept="application/json" hidden>
+          <button id="createDataFileButton" class="secondary-button" type="button">Create data file</button>
+          <button id="openDataFileButton" class="secondary-button" type="button">Open data file</button>
+          <button id="saveDataFileButton" class="secondary-button" type="button">Save to file now</button>
+        </div>
+        <div id="dataFileStatus" class="form-state empty-state">SQLite database is active when Taxi Bo is started with the local server.</div>
+      </section>
+
+      <section class="panel routes-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Saved Routes</p>
+            <h2>Route library</h2>
+          </div>
+          <div class="database-toolbar">
+            <span class="status-chip">SQLite database</span>
+            <button id="refreshRouteLibraryButton" class="secondary-button small-button" type="button">Refresh database</button>
+          </div>
+        </div>
+
+        <div id="routeLibraryStatus" class="form-state empty-state">Routes are loaded from SQLite.</div>
+        <div id="routeList" class="route-list"></div>
+      </section>
+        </div>
+      </details>
+    </main>
+  </div>
+
+  <template id="photoCardTemplate">
+    <article class="photo-card">
+      <div class="photo-card-image-wrap">
+        <img class="photo-card-image" alt="">
+      </div>
+      <div class="photo-card-copy">
+        <div class="photo-card-step"></div>
+        <h3 class="photo-card-title"></h3>
+        <p class="photo-card-instruction"></p>
+        <p class="photo-card-notes"></p>
+        <div class="photo-card-coordinates"></div>
+        <div class="photo-card-actions">
+          <button class="secondary-button small-button photo-edit-button" type="button">Edit stop</button>
+          <button class="secondary-button small-button photo-delete-button" type="button">Delete stop</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="app.js?v=46"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js");
+      });
+    }
+  </script>
+</body>
+</html>
