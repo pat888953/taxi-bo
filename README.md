@@ -97,4 +97,6 @@ healthCheckPath: /api/health
 
 The server reads Render's `PORT` automatically. Local runs continue to use SQLite whenever `DATABASE_URL` is not set.
 
+Render is pinned to Python 3.12 through `.python-version` because the OCR runtime currently requires Python below 3.13.
+
 Existing local routes are not uploaded automatically. Export the route library locally, then import it through the cloud app after PostgreSQL is connected.
