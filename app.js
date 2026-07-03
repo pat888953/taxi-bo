@@ -128,6 +128,7 @@ let speedWarnings = [];
 let lastSpeedSample = null;
 let speedAudioContext = null;
 let lastSpeedAlert = { id: "", at: 0, overspeed: false };
+let lastSpokenCueId = "";
 
 render();
 initializeMap();
@@ -323,6 +324,13 @@ liveDriveSimulateButton.addEventListener("click", () => {
 
 addSpeedWarningButton.addEventListener("click", () => {
   addSpeedWarningAtCurrentLocation();
+});
+
+topCuePreview.addEventListener("click", (event) => {
+  const control = event.target.closest("[data-cue-title]");
+  if (control) {
+    speakCueTitle(control.dataset.cueTitle, true);
+  }
 });
 
 liveDriveStopButton.addEventListener("click", () => {
@@ -1068,10 +1076,11 @@ function renderTopCuePreview(route = getActiveRoute()) {
 
   topCuePreview.innerHTML = cues
     .map((cue, index) => `
-      <article class="top-cue-card photo-card">
+      <article class="top-cue-card photo-card" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
+        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" aria-label="Speak cue title" title="Speak cue title">&#9654;</button>
         <div class="top-cue-copy photo-card-copy">
           <span class="photo-card-step">Upcoming ${index + 1} - Step ${cue.step}</span>
           <strong class="photo-card-title">${escapeHtml(cue.title || "Untitled cue")}</strong>
@@ -1107,10 +1116,11 @@ function renderCuePreviewCards(cues) {
 
   topCuePreview.innerHTML = cues
     .map((cue, index) => `
-      <article class="top-cue-card photo-card">
+      <article class="top-cue-card photo-card" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
+        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" aria-label="Speak cue title" title="Speak cue title">&#9654;</button>
         <div class="top-cue-copy photo-card-copy">
           <span class="photo-card-step">Upcoming ${index + 1} - Step ${cue.step}</span>
           <strong class="photo-card-title">${escapeHtml(cue.title || "Untitled cue")}</strong>
@@ -2901,6 +2911,8 @@ function stopLiveDrive(updateStatus = true) {
 
   if (updateStatus) {
     liveDrivePosition = null;
+    lastSpokenCueId = "";
+    window.speechSynthesis?.cancel();
     updateSpeedAwareness(null);
     liveDriveUpcoming.innerHTML = "";
     setLiveDriveStatus("Live drive stopped.");
@@ -3080,9 +3092,30 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   const nearest = upcoming[0];
   const distance = haversineDistance(currentLatLng, [nearest.latitude, nearest.longitude]);
+  if (distance <= 500 && lastSpokenCueId !== nearest.id) {
+    lastSpokenCueId = nearest.id;
+    speakCueTitle(nearest.title);
+  }
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
+}
+
+function speakCueTitle(title, force = false) {
+  const text = String(title || "").trim();
+  if (!text || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") {
+    return;
+  }
+
+  if (force) {
+    window.speechSynthesis.cancel();
+  }
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = /[\u3400-\u9fff]/.test(text) ? "zh-HK" : "en-US";
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
 }
 
 function updateLiveDriveMap(latLng, accuracy, nextCue) {
