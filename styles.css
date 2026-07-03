@@ -319,6 +319,11 @@ h3 {
   box-shadow: none;
 }
 
+.cue-preview-strip.top-driver-bar {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
 .cue-preview-header {
   display: flex;
   justify-content: space-between;

@@ -17,11 +17,46 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=48">
+  <link rel="stylesheet" href="styles.css?v=49">
 </head>
 <body>
   <div class="page-shell">
     <main class="layout">
+      <section class="cue-preview-strip top-driver-bar" aria-label="Three photo cues">
+        <div class="cue-preview-header">
+          <p class="section-label">Next 3 photo cues</p>
+          <h2>What the driver should recognize next</h2>
+        </div>
+        <div class="drive-controls-row">
+          <button id="liveDriveStartButton" class="primary-button small-button" type="button">Start live drive</button>
+          <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button">Simulate tablet drive</button>
+          <button id="liveDriveStopButton" class="secondary-button small-button" type="button" disabled>Stop live drive</button>
+        </div>
+        <section id="routeRecorder" class="route-recorder" data-state="idle" aria-live="polite">
+          <div class="route-recorder-header">
+            <span id="routeRecorderBadge" class="recording-badge">Ready</span>
+            <strong id="routeRecorderState">Route recording starts with live drive</strong>
+          </div>
+          <div class="recording-metrics" aria-label="Recorded trip metrics">
+            <div><span>Elapsed</span><strong id="recordingElapsed">00:00</strong></div>
+            <div><span>Distance</span><strong id="recordingDistance">0.0 mi</strong></div>
+            <div><span>GPS points</span><strong id="recordingPointCount">0</strong></div>
+          </div>
+          <div id="recordingCompletion" class="recording-completion" hidden>
+            <label class="field compact-recording-field">
+              <span>Save this actual drive as</span>
+              <input id="recordedRouteVariant" type="text" value="Passenger shortcut" maxlength="80">
+            </label>
+            <div class="recording-actions">
+              <button id="saveRecordedRouteButton" class="primary-button small-button" type="button">Save recorded route</button>
+              <button id="discardRecordingButton" class="secondary-button small-button" type="button">Discard recording</button>
+            </div>
+          </div>
+        </section>
+        <div id="liveDriveStatus" class="form-state empty-state">Choose a route with cue coordinates, then start live drive.</div>
+        <div id="topCuePreview" class="top-cue-preview"></div>
+      </section>
+
       <section class="panel finder-panel rehearse-panel">
         <div class="panel-header">
           <div>
@@ -62,41 +97,6 @@
             <div id="routeMap" class="route-map" aria-label="Route map"></div>
           </div>
         </div>
-
-        <section class="cue-preview-strip in-panel" aria-label="Three photo cues">
-          <div class="cue-preview-header">
-            <p class="section-label">Next 3 photo cues</p>
-            <h2>What the driver should recognize next</h2>
-          </div>
-          <div class="drive-controls-row">
-            <button id="liveDriveStartButton" class="primary-button small-button" type="button">Start live drive</button>
-            <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button">Simulate tablet drive</button>
-            <button id="liveDriveStopButton" class="secondary-button small-button" type="button" disabled>Stop live drive</button>
-          </div>
-          <section id="routeRecorder" class="route-recorder" data-state="idle" aria-live="polite">
-            <div class="route-recorder-header">
-              <span id="routeRecorderBadge" class="recording-badge">Ready</span>
-              <strong id="routeRecorderState">Route recording starts with live drive</strong>
-            </div>
-            <div class="recording-metrics" aria-label="Recorded trip metrics">
-              <div><span>Elapsed</span><strong id="recordingElapsed">00:00</strong></div>
-              <div><span>Distance</span><strong id="recordingDistance">0.0 mi</strong></div>
-              <div><span>GPS points</span><strong id="recordingPointCount">0</strong></div>
-            </div>
-            <div id="recordingCompletion" class="recording-completion" hidden>
-              <label class="field compact-recording-field">
-                <span>Save this actual drive as</span>
-                <input id="recordedRouteVariant" type="text" value="Passenger shortcut" maxlength="80">
-              </label>
-              <div class="recording-actions">
-                <button id="saveRecordedRouteButton" class="primary-button small-button" type="button">Save recorded route</button>
-                <button id="discardRecordingButton" class="secondary-button small-button" type="button">Discard recording</button>
-              </div>
-            </div>
-          </section>
-          <div id="liveDriveStatus" class="form-state empty-state">Choose a route with cue coordinates, then start live drive.</div>
-          <div id="topCuePreview" class="top-cue-preview"></div>
-        </section>
 
         <div hidden>
           <div id="liveDriveUpcoming"></div>
@@ -357,7 +357,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=49"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
