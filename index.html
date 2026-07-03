@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=53">
+  <link rel="stylesheet" href="styles.css?v=54">
 </head>
 <body>
   <div class="page-shell">
@@ -364,6 +364,31 @@
     </main>
   </div>
 
+  <dialog id="cueCaptureDialog" class="cue-capture-dialog">
+    <form method="dialog" class="cue-capture-header">
+      <div>
+        <p class="section-label">Cue photo capture</p>
+        <h2 id="cueCaptureTitle">Replace cue photo</h2>
+      </div>
+      <button class="dialog-close-button" type="submit" aria-label="Close" title="Close">&times;</button>
+    </form>
+    <p id="cueCaptureCoordinates" class="cue-capture-coordinates"></p>
+    <div class="cue-capture-actions">
+      <button id="openCueStreetViewButton" class="secondary-button" type="button">Open Google Street View</button>
+      <label class="secondary-button file-button" for="cueCaptureFileInput">Choose screenshot</label>
+      <input id="cueCaptureFileInput" type="file" accept="image/*" hidden>
+    </div>
+    <div id="cueCapturePasteZone" class="cue-capture-paste-zone" tabindex="0">
+      <strong>Paste the captured junction image here</strong>
+      <span>Press Ctrl+V after taking the screenshot, or choose an image file.</span>
+      <img id="cueCapturePreview" alt="Cue screenshot preview" hidden>
+    </div>
+    <div id="cueCaptureStatus" class="form-state empty-state">Street View will open at this cue's coordinates.</div>
+    <div class="cue-capture-footer">
+      <button id="uploadCueCaptureButton" class="primary-button" type="button" disabled>Upload photo to route</button>
+    </div>
+  </dialog>
+
   <template id="photoCardTemplate">
     <article class="photo-card">
       <div class="photo-card-image-wrap">
@@ -388,7 +413,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=53"></script>
+  <script src="app.js?v=54"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

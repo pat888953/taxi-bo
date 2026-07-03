@@ -84,6 +84,15 @@ const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryBu
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
+const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
+const cueCaptureTitle = document.querySelector("#cueCaptureTitle");
+const cueCaptureCoordinates = document.querySelector("#cueCaptureCoordinates");
+const openCueStreetViewButton = document.querySelector("#openCueStreetViewButton");
+const cueCaptureFileInput = document.querySelector("#cueCaptureFileInput");
+const cueCapturePasteZone = document.querySelector("#cueCapturePasteZone");
+const cueCapturePreview = document.querySelector("#cueCapturePreview");
+const cueCaptureStatus = document.querySelector("#cueCaptureStatus");
+const uploadCueCaptureButton = document.querySelector("#uploadCueCaptureButton");
 
 let routes = [];
 let map;
@@ -129,6 +138,8 @@ let lastSpeedSample = null;
 let speedAudioContext = null;
 let lastSpeedAlert = { id: "", at: 0, overspeed: false };
 let lastSpokenCueId = "";
+let captureCueId = "";
+let captureImageData = null;
 
 render();
 initializeMap();
@@ -327,11 +338,42 @@ addSpeedWarningButton.addEventListener("click", () => {
 });
 
 topCuePreview.addEventListener("click", (event) => {
-  const control = event.target.closest("[data-cue-title]");
-  if (control) {
-    speakCueTitle(control.dataset.cueTitle, true);
+  const audioControl = event.target.closest(".cue-audio-button");
+  if (audioControl) {
+    speakCueTitle(audioControl.dataset.cueTitle, true);
+    return;
+  }
+
+  const image = event.target.closest(".top-cue-image, .top-cue-image-wrap");
+  const cueCard = image?.closest("[data-cue-id]");
+  if (cueCard) {
+    openCueCapture(cueCard.dataset.cueId);
   }
 });
+
+openCueStreetViewButton.addEventListener("click", () => openCueStreetView());
+
+cueCapturePasteZone.addEventListener("click", () => cueCapturePasteZone.focus());
+
+cueCapturePasteZone.addEventListener("paste", async (event) => {
+  const imageItem = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith("image/"));
+  const file = imageItem?.getAsFile();
+  if (file) {
+    event.preventDefault();
+    await setCueCaptureImage(file);
+  }
+});
+
+cueCaptureFileInput.addEventListener("change", async () => {
+  const file = cueCaptureFileInput.files?.[0];
+  if (file) {
+    await setCueCaptureImage(file);
+  }
+});
+
+uploadCueCaptureButton.addEventListener("click", () => uploadCueCapture());
+
+cueCaptureDialog.addEventListener("close", () => resetCueCapture());
 
 liveDriveStopButton.addEventListener("click", () => {
   stopLiveDrive();
@@ -1076,7 +1118,7 @@ function renderTopCuePreview(route = getActiveRoute()) {
 
   topCuePreview.innerHTML = cues
     .map((cue, index) => `
-      <article class="top-cue-card photo-card" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
+      <article class="top-cue-card photo-card" data-cue-id="${escapeHtml(cue.id)}" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
@@ -1116,7 +1158,7 @@ function renderCuePreviewCards(cues) {
 
   topCuePreview.innerHTML = cues
     .map((cue, index) => `
-      <article class="top-cue-card photo-card" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
+      <article class="top-cue-card photo-card" data-cue-id="${escapeHtml(cue.id)}" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}">
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
@@ -1211,6 +1253,130 @@ function clearMap() {
   }
 
   clearLiveDriveMap();
+}
+
+function getCaptureCue() {
+  const activeCue = getActiveRoute()?.photos?.find((photo) => photo.id === captureCueId);
+  if (activeCue) {
+    return activeCue;
+  }
+
+  for (const route of routes) {
+    const cue = route.photos.find((photo) => photo.id === captureCueId);
+    if (cue) {
+      return cue;
+    }
+  }
+
+  return null;
+}
+
+function openCueCapture(cueId) {
+  captureCueId = cueId;
+  captureImageData = null;
+  const cue = getCaptureCue();
+
+  if (!cue) {
+    return;
+  }
+
+  cueCaptureTitle.textContent = cue.title || `Photo cue ${cue.step}`;
+  const hasCoordinates = Number.isFinite(cue.latitude) && Number.isFinite(cue.longitude);
+  cueCaptureCoordinates.textContent = hasCoordinates
+    ? `Coordinates: ${cue.latitude.toFixed(6)}, ${cue.longitude.toFixed(6)}`
+    : "This cue does not have coordinates yet.";
+  openCueStreetViewButton.disabled = !hasCoordinates;
+  cueCaptureStatus.className = "form-state empty-state";
+  cueCaptureStatus.textContent = hasCoordinates
+    ? "Street View is opening at this cue. Capture the junction, then paste it below."
+    : "Add coordinates to this cue before opening Street View.";
+  cueCaptureDialog.showModal();
+  cueCapturePasteZone.focus();
+
+  if (hasCoordinates) {
+    openCueStreetView(cue);
+  }
+}
+
+function openCueStreetView(cue = getCaptureCue()) {
+  if (!cue || !Number.isFinite(cue.latitude) || !Number.isFinite(cue.longitude)) {
+    cueCaptureStatus.className = "form-state";
+    cueCaptureStatus.textContent = "This cue has no coordinates to open in Street View.";
+    return;
+  }
+
+  const url = new URL("https://www.google.com/maps/@");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("map_action", "pano");
+  url.searchParams.set("viewpoint", `${cue.latitude},${cue.longitude}`);
+  const streetViewWindow = window.open(url.toString(), "_blank");
+  if (streetViewWindow) {
+    streetViewWindow.opener = null;
+  }
+  if (!streetViewWindow) {
+    cueCaptureStatus.className = "form-state";
+    cueCaptureStatus.textContent = "Chrome blocked the Street View tab. Select Open Google Street View to try again.";
+  }
+}
+
+async function setCueCaptureImage(file) {
+  if (!file.type.startsWith("image/")) {
+    cueCaptureStatus.className = "form-state";
+    cueCaptureStatus.textContent = "Choose or paste an image file.";
+    return;
+  }
+
+  captureImageData = await fileToDataUrl(file);
+  cueCapturePreview.src = captureImageData;
+  cueCapturePreview.hidden = false;
+  cueCapturePasteZone.classList.add("has-image");
+  uploadCueCaptureButton.disabled = false;
+  cueCaptureStatus.className = "form-state";
+  cueCaptureStatus.textContent = "Screenshot ready. Upload it to replace this cue photo.";
+}
+
+async function uploadCueCapture() {
+  if (!captureImageData || !captureCueId) {
+    return;
+  }
+
+  const savedRoute = routes.find((route) => route.photos.some((photo) => photo.id === captureCueId));
+  const savedCue = savedRoute?.photos.find((photo) => photo.id === captureCueId);
+  if (!savedCue) {
+    cueCaptureStatus.className = "form-state";
+    cueCaptureStatus.textContent = "This cue is not attached to a saved database route.";
+    return;
+  }
+
+  uploadCueCaptureButton.disabled = true;
+  cueCaptureStatus.className = "form-state empty-state";
+  cueCaptureStatus.textContent = "Uploading the cue photo to the database...";
+
+  try {
+    savedCue.image = captureImageData;
+    const preparedCue = preparedRoute?.photos?.find((photo) => photo.id === captureCueId);
+    if (preparedCue) {
+      preparedCue.image = captureImageData;
+    }
+    await saveRoutes();
+    render();
+    displaySelectedRoute();
+    cueCaptureDialog.close();
+  } catch (error) {
+    cueCaptureStatus.className = "form-state";
+    cueCaptureStatus.textContent = error.message || "Could not upload the cue photo.";
+    uploadCueCaptureButton.disabled = false;
+  }
+}
+
+function resetCueCapture() {
+  captureCueId = "";
+  captureImageData = null;
+  cueCaptureFileInput.value = "";
+  cueCapturePreview.removeAttribute("src");
+  cueCapturePreview.hidden = true;
+  cueCapturePasteZone.classList.remove("has-image");
+  uploadCueCaptureButton.disabled = true;
 }
 
 function fileToDataUrl(file) {
