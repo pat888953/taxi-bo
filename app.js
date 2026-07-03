@@ -3,6 +3,7 @@ const GENERATE_ROUTE_API = "/api/generate-route";
 const GENERATE_CUES_API = "/api/generate-cues";
 const PREPARE_ROUTE_API = "/api/prepare-route";
 const INCOMING_ORDER_API = "/api/incoming-order";
+const ROUTE_RECORDING_API = "/api/route-recording";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
@@ -31,6 +32,16 @@ const liveDriveSimulateButton = document.querySelector("#liveDriveSimulateButton
 const liveDriveStopButton = document.querySelector("#liveDriveStopButton");
 const liveDriveStatus = document.querySelector("#liveDriveStatus");
 const liveDriveUpcoming = document.querySelector("#liveDriveUpcoming");
+const routeRecorder = document.querySelector("#routeRecorder");
+const routeRecorderBadge = document.querySelector("#routeRecorderBadge");
+const routeRecorderState = document.querySelector("#routeRecorderState");
+const recordingElapsed = document.querySelector("#recordingElapsed");
+const recordingDistance = document.querySelector("#recordingDistance");
+const recordingPointCount = document.querySelector("#recordingPointCount");
+const recordingCompletion = document.querySelector("#recordingCompletion");
+const recordedRouteVariant = document.querySelector("#recordedRouteVariant");
+const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton");
+const discardRecordingButton = document.querySelector("#discardRecordingButton");
 const routeFormState = document.querySelector("#routeFormState");
 const routeSubmitButton = document.querySelector("#routeSubmitButton");
 const routeCancelEditButton = document.querySelector("#routeCancelEditButton");
@@ -70,6 +81,7 @@ let liveDriveMarker;
 let liveDriveAccuracyCircle;
 let liveDriveNextCueMarker;
 let liveDriveAheadLine;
+let liveDriveRecordedLine;
 let filteredRoutes = [];
 let isMapPicking = false;
 let mapPickMarker;
@@ -94,6 +106,12 @@ let liveDriveSimulationId = null;
 let liveDriveSimulationIndex = 0;
 let lastIncomingOrderId = sessionStorage.getItem("taxiBoLastIncomingOrderId") || "";
 let incomingOrderPollInFlight = false;
+let activeRouteRecording = null;
+let completedRouteRecording = null;
+let recordingFlushTimeoutId = null;
+let recordingFlushInFlight = false;
+let recordingFlushPromise = null;
+let hasCheckedInterruptedRecording = false;
 
 render();
 initializeMap();
@@ -101,6 +119,7 @@ setupInstallPrompt();
 setupDestinationVoiceInput();
 loadRoutes();
 startIncomingOrderPolling();
+renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
 
 reviewRouteButton.addEventListener("click", () => {
@@ -287,6 +306,18 @@ liveDriveStopButton.addEventListener("click", () => {
   stopLiveDrive();
 });
 
+saveRecordedRouteButton.addEventListener("click", () => {
+  saveCompletedRecordingAsRoute();
+});
+
+discardRecordingButton.addEventListener("click", () => {
+  discardCompletedRecording();
+});
+
+window.addEventListener("pagehide", () => {
+  flushRouteRecording(true);
+});
+
 routeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -467,6 +498,7 @@ async function loadRoutes() {
     displaySelectedRoute();
     updatePhotoRouteStatus();
     updateRouteLibraryStatus();
+    await recoverInterruptedRouteRecording();
   } catch (error) {
     routes = [];
     render();
@@ -2164,11 +2196,422 @@ function renderSimulation(route = routes.find((item) => item.id === destinationS
   });
 }
 
+async function recoverInterruptedRouteRecording() {
+  if (hasCheckedInterruptedRecording || activeRouteRecording || completedRouteRecording) {
+    return;
+  }
+
+  hasCheckedInterruptedRecording = true;
+
+  try {
+    const response = await fetch(`${ROUTE_RECORDING_API}/active`, {
+      headers: { Accept: "application/json", "Cache-Control": "no-store" },
+      cache: "no-store"
+    });
+    const result = await response.json().catch(() => ({}));
+    const saved = result.recording;
+
+    if (!response.ok || !result.ok || !saved?.id || !Array.isArray(saved.points) || !saved.points.length) {
+      return;
+    }
+
+    const sourceRoute = routes.find((route) => route.id === saved.sourceRouteId) || null;
+    const startedAtMs = Date.parse(saved.startedAt) || saved.points[0].timestamp || Date.now();
+    const lastTimestamp = saved.points.at(-1)?.timestamp || Date.now();
+    completedRouteRecording = {
+      id: saved.id,
+      sourceRouteId: saved.sourceRouteId || "",
+      routeName: saved.routeName || "Recovered drive",
+      startLabel: saved.startLabel || "Recorded start",
+      destination: saved.destination || "Recorded destination",
+      startedAt: saved.startedAt,
+      startedAtMs,
+      endedAt: new Date().toISOString(),
+      points: saved.points,
+      distanceMeters: Number(saved.distanceMeters) || 0,
+      durationSeconds: Math.max(Number(saved.durationSeconds) || 0, (lastTimestamp - startedAtMs) / 1000),
+      sourceRoute,
+      serverStarted: true,
+      syncError: "",
+      recovered: true
+    };
+    renderRouteRecorder();
+
+    try {
+      await persistRouteRecording(completedRouteRecording, "finish");
+    } catch (error) {
+      completedRouteRecording.syncError = error.message || "Recovered trip could not be finalized.";
+      renderRouteRecorder();
+    }
+  } catch {
+    // Route recording recovery is optional when the server is temporarily unavailable.
+  }
+}
+
+async function beginRouteRecording(route, position) {
+  const firstPoint = createRecordingPoint(position);
+  const startedAtMs = firstPoint.timestamp;
+
+  activeRouteRecording = {
+    id: crypto.randomUUID(),
+    sourceRouteId: route.id || "",
+    routeName: route.name || "Recorded drive",
+    startLabel: route.start || "Current location",
+    destination: route.destination || destinationSearch.value.trim(),
+    startedAt: new Date(startedAtMs).toISOString(),
+    startedAtMs,
+    endedAt: null,
+    points: [firstPoint],
+    distanceMeters: 0,
+    durationSeconds: 0,
+    sourceRoute: route,
+    serverStarted: false,
+    syncError: ""
+  };
+  completedRouteRecording = null;
+  renderRouteRecorder();
+
+  try {
+    await persistRouteRecording(activeRouteRecording, "start");
+  } catch (error) {
+    activeRouteRecording.syncError = error.message || "Database sync is waiting.";
+    renderRouteRecorder();
+  }
+}
+
+function appendRouteRecordingPoint(position) {
+  const recording = activeRouteRecording;
+
+  if (!recording) {
+    return;
+  }
+
+  const point = createRecordingPoint(position);
+  const previous = recording.points.at(-1);
+  const elapsedMilliseconds = point.timestamp - previous.timestamp;
+  recording.durationSeconds = Math.max(0, (point.timestamp - recording.startedAtMs) / 1000);
+
+  if (elapsedMilliseconds <= 0 || (Number.isFinite(point.accuracy) && point.accuracy > 150)) {
+    renderRouteRecorder();
+    return;
+  }
+
+  const segmentDistance = haversineDistance(
+    [previous.latitude, previous.longitude],
+    [point.latitude, point.longitude]
+  );
+  const calculatedSpeed = segmentDistance / (elapsedMilliseconds / 1000);
+
+  if (calculatedSpeed > 75 && segmentDistance > 100) {
+    renderRouteRecorder();
+    return;
+  }
+
+  const noiseThreshold = Math.max(3, Math.min(Number(point.accuracy) || 10, 24) / 2);
+  const shouldKeepStationaryPoint = elapsedMilliseconds >= 15000;
+
+  if (segmentDistance < noiseThreshold && !shouldKeepStationaryPoint) {
+    renderRouteRecorder();
+    return;
+  }
+
+  if (!Number.isFinite(point.speed)) {
+    point.speed = calculatedSpeed;
+  }
+
+  if (segmentDistance >= noiseThreshold) {
+    recording.distanceMeters += segmentDistance;
+  }
+
+  recording.points.push(point);
+  recording.syncError = "";
+  renderRouteRecorder();
+  updateRecordedRouteLine();
+  scheduleRecordingFlush();
+}
+
+function createRecordingPoint(position) {
+  const coords = position?.coords || {};
+  return {
+    latitude: Number(coords.latitude),
+    longitude: Number(coords.longitude),
+    timestamp: Number(position?.timestamp) || Date.now(),
+    accuracy: finiteOrNull(coords.accuracy),
+    speed: Number(coords.speed) >= 0 ? finiteOrNull(coords.speed) : null,
+    heading: finiteOrNull(coords.heading)
+  };
+}
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function scheduleRecordingFlush() {
+  if (recordingFlushTimeoutId !== null) {
+    return;
+  }
+
+  recordingFlushTimeoutId = window.setTimeout(() => {
+    recordingFlushTimeoutId = null;
+    flushRouteRecording();
+  }, 12000);
+}
+
+async function flushRouteRecording(useBeacon = false) {
+  const recording = activeRouteRecording;
+
+  if (!recording || recordingFlushInFlight) {
+    return;
+  }
+
+  if (useBeacon && recording.serverStarted && navigator.sendBeacon) {
+    const body = new Blob([JSON.stringify(recordingPayload(recording))], { type: "application/json" });
+    navigator.sendBeacon(`${ROUTE_RECORDING_API}/update`, body);
+    return;
+  }
+
+  recordingFlushInFlight = true;
+  recordingFlushPromise = persistRouteRecording(recording, "update");
+
+  try {
+    await recordingFlushPromise;
+    recording.syncError = "";
+  } catch (error) {
+    recording.syncError = error.message || "Database sync is waiting.";
+  } finally {
+    recordingFlushInFlight = false;
+    recordingFlushPromise = null;
+    renderRouteRecorder();
+  }
+}
+
+function finishRouteRecording() {
+  const recording = activeRouteRecording;
+
+  if (!recording) {
+    return;
+  }
+
+  activeRouteRecording = null;
+  completedRouteRecording = recording;
+  recording.endedAt = new Date().toISOString();
+  recording.durationSeconds = Math.max(
+    recording.durationSeconds,
+    (Date.now() - recording.startedAtMs) / 1000
+  );
+
+  if (recordingFlushTimeoutId !== null) {
+    window.clearTimeout(recordingFlushTimeoutId);
+    recordingFlushTimeoutId = null;
+  }
+
+  renderRouteRecorder();
+  const pendingCheckpoint = recordingFlushPromise
+    ? recordingFlushPromise.catch(() => {})
+    : Promise.resolve();
+
+  pendingCheckpoint
+    .then(() => persistRouteRecording(recording, "finish"))
+    .then(() => {
+      recording.syncError = "";
+      renderRouteRecorder();
+    })
+    .catch((error) => {
+      recording.syncError = error.message || "The completed trip has not synced yet.";
+      renderRouteRecorder();
+    });
+}
+
+async function persistRouteRecording(recording, action) {
+  if (!recording.serverStarted) {
+    await postRouteRecording("start", recordingPayload(recording));
+    recording.serverStarted = true;
+
+    if (action === "start") {
+      return;
+    }
+  }
+
+  await postRouteRecording(action, recordingPayload(recording));
+}
+
+async function postRouteRecording(action, payload) {
+  const response = await fetch(`${ROUTE_RECORDING_API}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Could not save the route recording.");
+  }
+
+  return result.recording;
+}
+
+function recordingPayload(recording) {
+  return {
+    id: recording.id,
+    sourceRouteId: recording.sourceRouteId,
+    routeName: recording.routeName,
+    startLabel: recording.startLabel,
+    destination: recording.destination,
+    startedAt: recording.startedAt,
+    endedAt: recording.endedAt,
+    distanceMeters: recording.distanceMeters,
+    durationSeconds: recording.durationSeconds,
+    points: recording.points
+  };
+}
+
+function renderRouteRecorder() {
+  if (!routeRecorder) {
+    return;
+  }
+
+  const recording = activeRouteRecording || completedRouteRecording;
+
+  if (!recording) {
+    routeRecorder.dataset.state = "idle";
+    routeRecorderBadge.textContent = "Ready";
+    routeRecorderState.textContent = "Route recording starts with live drive";
+    recordingElapsed.textContent = "00:00";
+    recordingDistance.textContent = "0.0 mi";
+    recordingPointCount.textContent = "0";
+    recordingCompletion.hidden = true;
+    return;
+  }
+
+  recordingElapsed.textContent = formatRecordingDuration(recording.durationSeconds);
+  recordingDistance.textContent = formatDistance(recording.distanceMeters);
+  recordingPointCount.textContent = String(recording.points.length);
+
+  if (activeRouteRecording) {
+    routeRecorder.dataset.state = "recording";
+    routeRecorderBadge.textContent = "REC";
+    routeRecorderState.textContent = recording.syncError
+      ? "Recording GPS - database sync will retry"
+      : `Recording actual drive to ${shortPlaceName(recording.destination)}`;
+    recordingCompletion.hidden = true;
+    return;
+  }
+
+  routeRecorder.dataset.state = recording.syncError ? "error" : "completed";
+  routeRecorderBadge.textContent = recording.syncError ? "Unsynced" : "Saved";
+  routeRecorderState.textContent = recording.syncError
+    ? "Trip complete, but database sync failed. Keep this page open and try saving the route."
+    : recording.recovered
+      ? "Interrupted drive recovered. Save it as a reusable route variant or discard it."
+      : "Actual drive recorded. Save it as a reusable route variant or discard it.";
+  recordingCompletion.hidden = false;
+}
+
+function formatRecordingDuration(seconds) {
+  const totalSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+  const clock = [minutes, remainingSeconds].map((part) => String(part).padStart(2, "0")).join(":");
+  return hours ? `${hours}:${clock}` : clock;
+}
+
+async function saveCompletedRecordingAsRoute() {
+  const recording = completedRouteRecording;
+
+  if (!recording || recording.points.length < 2) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = "At least two reliable GPS points are needed to save this route.";
+    return;
+  }
+
+  const variant = recordedRouteVariant.value.trim() || "Passenger shortcut";
+  const sourceRoute = recording.sourceRoute || {};
+  const first = recording.points[0];
+  const last = recording.points.at(-1);
+  const routeId = crypto.randomUUID();
+  const recordedRoute = normalizeImportedRoute({
+    id: routeId,
+    name: `${sourceRoute.name || shortPlaceName(recording.destination)} - recorded`,
+    variant,
+    start: recording.startLabel || "Recorded start",
+    destination: recording.destination,
+    notes: `Actual drive recorded ${new Date(recording.startedAt).toLocaleString()}.`,
+    startLatitude: first.latitude,
+    startLongitude: first.longitude,
+    destinationLatitude: last.latitude,
+    destinationLongitude: last.longitude,
+    routeGeometry: recording.points.map((point) => [point.latitude, point.longitude]),
+    routeDistanceMeters: recording.distanceMeters,
+    routeDurationSeconds: recording.durationSeconds,
+    photos: Array.isArray(sourceRoute.photos)
+      ? sourceRoute.photos.map((photo) => ({ ...photo, id: crypto.randomUUID() }))
+      : []
+  });
+
+  saveRecordedRouteButton.disabled = true;
+  discardRecordingButton.disabled = true;
+  routeRecorderState.textContent = "Saving recorded route to the route library...";
+
+  try {
+    routes.push(recordedRoute);
+    await saveRoutes();
+    completedRouteRecording = null;
+    preparedRoute = null;
+    destinationSearch.value = "";
+    render();
+    destinationSelect.value = routeId;
+    photoRouteSelect.value = routeId;
+    displayRoute(recordedRoute);
+    renderRouteRecorder();
+    setLiveDriveStatus(`Saved actual drive as route variant "${variant}".`);
+  } catch (error) {
+    routes = routes.filter((route) => route.id !== routeId);
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = error.message || "Could not save the recorded route.";
+  } finally {
+    saveRecordedRouteButton.disabled = false;
+    discardRecordingButton.disabled = false;
+  }
+}
+
+async function discardCompletedRecording() {
+  const recording = completedRouteRecording;
+
+  if (!recording) {
+    return;
+  }
+
+  discardRecordingButton.disabled = true;
+
+  try {
+    if (recording.serverStarted) {
+      await postRouteRecording("discard", { id: recording.id });
+    }
+    completedRouteRecording = null;
+    recordedRouteVariant.value = "Passenger shortcut";
+    renderRouteRecorder();
+    setLiveDriveStatus("Recorded drive discarded.");
+  } catch (error) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = error.message || "Could not discard the recording.";
+  } finally {
+    discardRecordingButton.disabled = false;
+  }
+}
+
 async function startLiveDrive() {
   const route = getActiveRoute();
 
   if (!route) {
     setLiveDriveStatus("Choose a route before starting live drive.", true);
+    return;
+  }
+
+  if (completedRouteRecording) {
+    setLiveDriveStatus("Save or discard the completed recording before starting another live drive.", true);
     return;
   }
 
@@ -2197,6 +2640,7 @@ async function startLiveDrive() {
 
   try {
     const firstPosition = await getCurrentPosition();
+    await beginRouteRecording(route, firstPosition);
     handleLivePosition(firstPosition, route);
     liveDriveWatchId = navigator.geolocation.watchPosition(
       (position) => handleLivePosition(position, route),
@@ -2213,6 +2657,7 @@ async function startLiveDrive() {
 }
 
 function stopLiveDrive(updateStatus = true) {
+  finishRouteRecording();
   clearLiveDriveTimeout();
   stopLiveDriveSimulation(false);
   clearLiveDriveMap();
@@ -2331,6 +2776,7 @@ function sampleSimulationPath(points, count) {
 function handleLivePosition(position, route) {
   clearLiveDriveTimeout();
   liveDrivePosition = position;
+  appendRouteRecordingPoint(position);
   liveDriveStartButton.disabled = true;
   liveDriveStopButton.disabled = false;
   renderLiveDrive(route);
@@ -2442,6 +2888,7 @@ function updateLiveDriveMap(latLng, accuracy, nextCue) {
 
     updateNextCueMarker(nextCue);
     updateRouteAheadLine(latLng, nextCue);
+    updateRecordedRouteLine();
 
     if (Number.isFinite(accuracy) && typeof L.circle === "function") {
       const radius = Math.max(5, Math.min(accuracy, 120));
@@ -2537,6 +2984,29 @@ function updateRouteAheadLine(latLng, nextCue) {
   }
 }
 
+function updateRecordedRouteLine() {
+  if (!map || !window.L) {
+    return;
+  }
+
+  const recording = activeRouteRecording || completedRouteRecording;
+  const points = recording?.points?.map((point) => [point.latitude, point.longitude]) || [];
+
+  if (points.length < 2) {
+    return;
+  }
+
+  if (!liveDriveRecordedLine) {
+    liveDriveRecordedLine = L.polyline(points, {
+      color: "#0f7a5a",
+      weight: 6,
+      opacity: 0.9
+    }).addTo(map);
+  } else {
+    liveDriveRecordedLine.setLatLngs(points);
+  }
+}
+
 function setMapDriverMode(isActive) {
   const container = document.querySelector("#routeMap");
 
@@ -2566,6 +3036,11 @@ function clearLiveDriveMap() {
   if (liveDriveAheadLine) {
     liveDriveAheadLine.remove();
     liveDriveAheadLine = null;
+  }
+
+  if (liveDriveRecordedLine) {
+    liveDriveRecordedLine.remove();
+    liveDriveRecordedLine = null;
   }
 }
 

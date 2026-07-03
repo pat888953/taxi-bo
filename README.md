@@ -27,6 +27,9 @@ Taxi Bo is a lightweight route-recall app for drivers. You save a route, attach 
 - Store route data locally in `taxi_bo.db`
 - Send an OCR-extracted destination from the phone page to the tablet page
 - Use PostgreSQL automatically when `DATABASE_URL` is configured
+- Record the actual GPS path whenever live drive is running
+- Checkpoint active recordings to the database and recover interrupted trips
+- Save a completed drive as a reusable route variant such as `Passenger shortcut`
 
 ## How to use it
 
@@ -61,6 +64,8 @@ Taxi Bo is a lightweight route-recall app for drivers. You save a route, attach 
 12. Use the place lookup boxes when you want coordinates from an address instead of entering them manually.
 13. Use variant name, best time, and traffic pattern fields when you have different routes for the same destination.
 14. Use Simulation mode to test the next 3 upcoming photos on a non-moving PC.
+15. Start Live Drive to record the actual GPS path, then stop the drive and save or discard the recording.
+16. Save a passenger-recommended route with a descriptive variant name so it can be selected on a future trip.
 
 ## Notes
 
@@ -75,6 +80,7 @@ Taxi Bo is a lightweight route-recall app for drivers. You save a route, attach 
 - Road routing uses the public OSRM demo service when available, and falls back to a straight-line preview for photo-stop routes if not.
 - Exported JSON files include your route details and stored image data URLs.
 - The service worker caches the app shell, but live map tiles still depend on network availability.
+- Active route recordings are checkpointed approximately every 12 seconds. If the page closes unexpectedly, the latest active trip is offered for recovery on the next load.
 
 ## Deploy to Render
 

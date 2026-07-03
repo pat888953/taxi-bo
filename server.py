@@ -132,6 +132,30 @@ def initialize_db():
 
             CREATE INDEX IF NOT EXISTS idx_incoming_orders_pending
               ON incoming_orders(consumed_at, created_at);
+
+            CREATE TABLE IF NOT EXISTS route_recordings (
+              id TEXT PRIMARY KEY,
+              source_route_id TEXT NOT NULL DEFAULT '',
+              route_name TEXT NOT NULL DEFAULT '',
+              start_label TEXT NOT NULL DEFAULT '',
+              destination TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'recording',
+              points_json TEXT NOT NULL DEFAULT '[]',
+              distance_meters REAL NOT NULL DEFAULT 0,
+              duration_seconds REAL NOT NULL DEFAULT 0,
+              point_count INTEGER NOT NULL DEFAULT 0,
+              start_latitude REAL,
+              start_longitude REAL,
+              end_latitude REAL,
+              end_longitude REAL,
+              started_at TEXT NOT NULL,
+              ended_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_route_recordings_started
+              ON route_recordings(started_at DESC);
             """
         )
         ensure_route_columns(db)
@@ -352,6 +376,189 @@ def acknowledge_incoming_order(payload):
         )
 
     return {"id": order_id}
+
+
+def create_route_recording(payload):
+    recording = normalize_route_recording(payload)
+
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO route_recordings (
+              id, source_route_id, route_name, start_label, destination,
+              status, points_json, distance_meters, duration_seconds,
+              point_count, start_latitude, start_longitude, end_latitude,
+              end_longitude, started_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'recording', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                recording["id"],
+                recording["sourceRouteId"],
+                recording["routeName"],
+                recording["startLabel"],
+                recording["destination"],
+                json.dumps(recording["points"]),
+                recording["distanceMeters"],
+                recording["durationSeconds"],
+                len(recording["points"]),
+                recording["startLatitude"],
+                recording["startLongitude"],
+                recording["endLatitude"],
+                recording["endLongitude"],
+                recording["startedAt"],
+            ),
+        )
+
+    return recording_summary(recording, "recording")
+
+
+def update_route_recording(payload, finish=False):
+    recording = normalize_route_recording(payload)
+    status = "completed" if finish else "recording"
+    ended_at = recording["endedAt"] if finish else None
+
+    with connect_db() as db:
+        cursor = db.execute(
+            """
+            UPDATE route_recordings
+            SET points_json = ?, distance_meters = ?, duration_seconds = ?,
+                point_count = ?, end_latitude = ?, end_longitude = ?,
+                status = ?, ended_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                json.dumps(recording["points"]),
+                recording["distanceMeters"],
+                recording["durationSeconds"],
+                len(recording["points"]),
+                recording["endLatitude"],
+                recording["endLongitude"],
+                status,
+                ended_at,
+                recording["id"],
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise ValueError("Route recording was not found.")
+
+    return recording_summary(recording, status)
+
+
+def discard_route_recording(payload):
+    recording_id = str(payload.get("id", "")).strip()
+
+    if not recording_id:
+        raise ValueError("Recording id is required.")
+
+    with connect_db() as db:
+        db.execute("DELETE FROM route_recordings WHERE id = ?", (recording_id,))
+
+    return {"id": recording_id, "status": "discarded"}
+
+
+def fetch_active_route_recording():
+    with connect_db() as db:
+        row = db.execute(
+            """
+            SELECT id, source_route_id, route_name, start_label, destination,
+                   points_json, distance_meters, duration_seconds, started_at
+            FROM route_recordings
+            WHERE status = 'recording'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "sourceRouteId": row["source_route_id"],
+        "routeName": row["route_name"],
+        "startLabel": row["start_label"],
+        "destination": row["destination"],
+        "points": json.loads(row["points_json"] or "[]"),
+        "distanceMeters": row["distance_meters"],
+        "durationSeconds": row["duration_seconds"],
+        "startedAt": row["started_at"],
+        "status": "recording",
+    }
+
+
+def normalize_route_recording(payload):
+    recording_id = str(payload.get("id", "")).strip()
+    started_at = str(payload.get("startedAt", "")).strip()
+
+    if not recording_id or not started_at:
+        raise ValueError("Recording id and start time are required.")
+
+    raw_points = payload.get("points")
+    if not isinstance(raw_points, list) or not raw_points:
+        raise ValueError("At least one GPS point is required.")
+    if len(raw_points) > 25000:
+        raise ValueError("This recording contains too many GPS points.")
+
+    points = [normalize_recording_point(point) for point in raw_points]
+    first = points[0]
+    last = points[-1]
+
+    return {
+        "id": recording_id,
+        "sourceRouteId": str(payload.get("sourceRouteId", "")).strip(),
+        "routeName": str(payload.get("routeName", "")).strip(),
+        "startLabel": str(payload.get("startLabel", "")).strip(),
+        "destination": str(payload.get("destination", "")).strip(),
+        "points": points,
+        "distanceMeters": max(0.0, float(payload.get("distanceMeters") or 0)),
+        "durationSeconds": max(0.0, float(payload.get("durationSeconds") or 0)),
+        "startLatitude": first["latitude"],
+        "startLongitude": first["longitude"],
+        "endLatitude": last["latitude"],
+        "endLongitude": last["longitude"],
+        "startedAt": started_at,
+        "endedAt": str(payload.get("endedAt", "")).strip() or None,
+    }
+
+
+def normalize_recording_point(point):
+    if not isinstance(point, dict):
+        raise ValueError("Invalid GPS point.")
+
+    latitude = float(point.get("latitude"))
+    longitude = float(point.get("longitude"))
+    timestamp = int(point.get("timestamp"))
+
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180 or timestamp <= 0:
+        raise ValueError("Invalid GPS point coordinates or timestamp.")
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timestamp": timestamp,
+        "accuracy": optional_float(point.get("accuracy")),
+        "speed": optional_float(point.get("speed")),
+        "heading": optional_float(point.get("heading")),
+    }
+
+
+def optional_float(value):
+    if value is None or value == "":
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def recording_summary(recording, status):
+    return {
+        "id": recording["id"],
+        "status": status,
+        "pointCount": len(recording["points"]),
+        "distanceMeters": recording["distanceMeters"],
+        "durationSeconds": recording["durationSeconds"],
+    }
 
 
 def recognize_order_image(payload):
@@ -1001,6 +1208,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "order": fetch_pending_order()})
             return
 
+        if path == "/api/route-recording/active":
+            self.send_json({"ok": True, "recording": fetch_active_route_recording()})
+            return
+
         super().do_GET()
 
     def do_PUT(self):
@@ -1023,7 +1234,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/ocr-order"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard"}:
             self.send_error(404, "Not found")
             return
 
@@ -1041,6 +1252,22 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/ocr-order":
                 self.send_json({"ok": True, "ocr": recognize_order_image(payload)})
+                return
+
+            if path == "/api/route-recording/start":
+                self.send_json({"ok": True, "recording": create_route_recording(payload)})
+                return
+
+            if path == "/api/route-recording/update":
+                self.send_json({"ok": True, "recording": update_route_recording(payload)})
+                return
+
+            if path == "/api/route-recording/finish":
+                self.send_json({"ok": True, "recording": update_route_recording(payload, finish=True)})
+                return
+
+            if path == "/api/route-recording/discard":
+                self.send_json({"ok": True, "recording": discard_route_recording(payload)})
                 return
 
             if path == "/api/generate-route":

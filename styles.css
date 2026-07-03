@@ -338,6 +338,116 @@ h3 {
   align-items: center;
 }
 
+.route-recorder {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.route-recorder[data-state="recording"] {
+  border-color: #d9a23b;
+  background: #fffaf0;
+}
+
+.route-recorder[data-state="completed"] {
+  border-color: #91b8a4;
+  background: var(--surface-tint);
+}
+
+.route-recorder[data-state="error"] {
+  border-color: #d6a06a;
+  background: var(--danger-soft);
+}
+
+.route-recorder-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.route-recorder-header strong {
+  min-width: 0;
+  font-size: 0.94rem;
+}
+
+.recording-badge {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #dfe8e2;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.route-recorder[data-state="recording"] .recording-badge {
+  background: #b84531;
+  color: #ffffff;
+}
+
+.recording-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+}
+
+.recording-metrics > div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.recording-metrics span,
+.recording-metrics strong {
+  display: block;
+}
+
+.recording-metrics span {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.recording-metrics strong {
+  font-size: 1.12rem;
+}
+
+.recording-completion {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.recording-completion[hidden] {
+  display: none;
+}
+
+.compact-recording-field {
+  margin: 0;
+}
+
+.recording-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .cue-preview-strip #liveDriveStatus {
   margin-bottom: 0;
 }
@@ -1220,6 +1330,14 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 720px) {
+  .recording-completion {
+    grid-template-columns: 1fr;
+  }
+
+  .recording-actions button {
+    flex: 1 1 180px;
+  }
+
   .top-cue-preview,
   .top-cue-card {
     grid-template-columns: 1fr;
@@ -1238,6 +1356,10 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 560px) {
+  .recording-metrics {
+    grid-template-columns: 1fr;
+  }
+
   .panel-header {
     flex-direction: column;
   }
