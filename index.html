@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=50">
+  <link rel="stylesheet" href="styles.css?v=51">
 </head>
 <body>
   <div class="page-shell">
@@ -32,6 +32,37 @@
           <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button">Simulate tablet drive</button>
           <button id="liveDriveStopButton" class="secondary-button small-button" type="button" disabled>Stop live drive</button>
         </div>
+        <section id="speedAwareness" class="speed-awareness" data-state="idle" aria-live="assertive">
+          <div class="speed-readout">
+            <span>Current speed</span>
+            <strong><span id="currentSpeed">--</span> <small>mph</small></strong>
+          </div>
+          <div class="speed-warning-copy">
+            <span id="speedWarningBadge" class="speed-warning-badge">Monitoring</span>
+            <strong id="speedWarningTitle">No nearby speed warning</strong>
+            <p id="speedWarningStatus">Start live drive to monitor database warning points.</p>
+          </div>
+          <details class="speed-warning-manager">
+            <summary>Manage warning points</summary>
+            <div class="speed-warning-form">
+              <label class="field">
+                <span>Warning name</span>
+                <input id="speedWarningLabel" type="text" value="Speed camera" maxlength="120">
+              </label>
+              <label class="field compact-number-field">
+                <span>Limit (mph)</span>
+                <input id="speedWarningLimit" type="number" min="5" max="100" step="5" value="35">
+              </label>
+              <label class="field compact-number-field">
+                <span>Warn within (m)</span>
+                <input id="speedWarningRadius" type="number" min="100" max="3000" step="100" value="600">
+              </label>
+              <button id="addSpeedWarningButton" class="secondary-button" type="button" disabled>Mark current location</button>
+            </div>
+            <div id="speedWarningManagerStatus" class="form-state empty-state">Start GPS or simulation before marking a location.</div>
+            <div id="speedWarningList" class="speed-warning-list"></div>
+          </details>
+        </section>
         <section id="routeRecorder" class="route-recorder" data-state="idle" aria-live="polite">
           <div class="route-recorder-header">
             <span id="routeRecorderBadge" class="recording-badge">Ready</span>
@@ -357,7 +388,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=50"></script>
+  <script src="app.js?v=51"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

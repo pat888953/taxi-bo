@@ -343,6 +343,125 @@ h3 {
   align-items: center;
 }
 
+.speed-awareness {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 2px solid #9bb7a8;
+  border-radius: var(--radius);
+  background: #f5faf7;
+}
+
+.speed-awareness[data-state="warning"] {
+  border-color: #d58b19;
+  background: #fff7e6;
+}
+
+.speed-awareness[data-state="overspeed"] {
+  border-color: #bd3e2d;
+  background: #fff0ed;
+  box-shadow: 0 0 0 3px rgba(189, 62, 45, 0.15);
+}
+
+.speed-readout {
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+
+.speed-readout > span,
+.speed-warning-copy > span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.speed-readout strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.speed-readout small {
+  font-size: 0.8rem;
+}
+
+.speed-warning-copy {
+  min-width: 0;
+}
+
+.speed-warning-copy strong,
+.speed-warning-copy p {
+  display: block;
+  margin: 3px 0 0;
+}
+
+.speed-warning-badge {
+  color: var(--accent-dark) !important;
+}
+
+.speed-awareness[data-state="warning"] .speed-warning-badge {
+  color: #9a5a00 !important;
+}
+
+.speed-awareness[data-state="overspeed"] .speed-warning-badge {
+  color: #a1271b !important;
+}
+
+.speed-warning-manager {
+  min-width: 220px;
+}
+
+.speed-warning-manager > summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.speed-warning-manager[open] {
+  grid-column: 1 / -1;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.speed-warning-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px 150px auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.speed-warning-form .field {
+  margin: 0;
+}
+
+.speed-warning-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.speed-warning-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.speed-warning-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .route-recorder {
   display: grid;
   gap: 12px;
@@ -1343,6 +1462,23 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 720px) {
+  .speed-awareness,
+  .speed-warning-form {
+    grid-template-columns: 1fr;
+  }
+
+  .speed-readout {
+    padding-right: 0;
+    padding-bottom: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .speed-warning-manager,
+  .speed-warning-manager[open] {
+    grid-column: 1;
+  }
+
   .top-cue-preview {
     grid-auto-columns: minmax(280px, 86vw);
   }

@@ -4,6 +4,7 @@ const GENERATE_CUES_API = "/api/generate-cues";
 const PREPARE_ROUTE_API = "/api/prepare-route";
 const INCOMING_ORDER_API = "/api/incoming-order";
 const ROUTE_RECORDING_API = "/api/route-recording";
+const SPEED_WARNINGS_API = "/api/speed-warnings";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
@@ -42,6 +43,17 @@ const recordingCompletion = document.querySelector("#recordingCompletion");
 const recordedRouteVariant = document.querySelector("#recordedRouteVariant");
 const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton");
 const discardRecordingButton = document.querySelector("#discardRecordingButton");
+const speedAwareness = document.querySelector("#speedAwareness");
+const currentSpeed = document.querySelector("#currentSpeed");
+const speedWarningBadge = document.querySelector("#speedWarningBadge");
+const speedWarningTitle = document.querySelector("#speedWarningTitle");
+const speedWarningStatus = document.querySelector("#speedWarningStatus");
+const speedWarningLabel = document.querySelector("#speedWarningLabel");
+const speedWarningLimit = document.querySelector("#speedWarningLimit");
+const speedWarningRadius = document.querySelector("#speedWarningRadius");
+const addSpeedWarningButton = document.querySelector("#addSpeedWarningButton");
+const speedWarningManagerStatus = document.querySelector("#speedWarningManagerStatus");
+const speedWarningList = document.querySelector("#speedWarningList");
 const routeFormState = document.querySelector("#routeFormState");
 const routeSubmitButton = document.querySelector("#routeSubmitButton");
 const routeCancelEditButton = document.querySelector("#routeCancelEditButton");
@@ -112,12 +124,17 @@ let recordingFlushTimeoutId = null;
 let recordingFlushInFlight = false;
 let recordingFlushPromise = null;
 let hasCheckedInterruptedRecording = false;
+let speedWarnings = [];
+let lastSpeedSample = null;
+let speedAudioContext = null;
+let lastSpeedAlert = { id: "", at: 0, overspeed: false };
 
 render();
 initializeMap();
 setupInstallPrompt();
 setupDestinationVoiceInput();
 loadRoutes();
+loadSpeedWarnings();
 startIncomingOrderPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
@@ -295,11 +312,17 @@ if (simulationResetButton) {
 }
 
 liveDriveStartButton.addEventListener("click", () => {
+  armSpeedAudio();
   startLiveDrive();
 });
 
 liveDriveSimulateButton.addEventListener("click", () => {
+  armSpeedAudio();
   startLiveDriveSimulation();
+});
+
+addSpeedWarningButton.addEventListener("click", () => {
+  addSpeedWarningAtCurrentLocation();
 });
 
 liveDriveStopButton.addEventListener("click", () => {
@@ -2600,6 +2623,213 @@ async function discardCompletedRecording() {
   }
 }
 
+async function loadSpeedWarnings() {
+  try {
+    const response = await fetch(SPEED_WARNINGS_API, { cache: "no-store" });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not load speed warnings.");
+    }
+    speedWarnings = Array.isArray(result.warnings) ? result.warnings : [];
+    renderSpeedWarningList();
+  } catch (error) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = error.message || "Could not load speed warnings.";
+  }
+}
+
+async function addSpeedWarningAtCurrentLocation() {
+  if (!liveDrivePosition) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = "Start live GPS or simulation before marking a warning point.";
+    return;
+  }
+
+  const payload = {
+    label: speedWarningLabel.value.trim() || "Speed camera",
+    latitude: liveDrivePosition.coords.latitude,
+    longitude: liveDrivePosition.coords.longitude,
+    speedLimitMph: Number(speedWarningLimit.value),
+    radiusMeters: Number(speedWarningRadius.value)
+  };
+
+  addSpeedWarningButton.disabled = true;
+  speedWarningManagerStatus.className = "form-state empty-state";
+  speedWarningManagerStatus.textContent = "Saving warning point to the database...";
+
+  try {
+    const response = await fetch(SPEED_WARNINGS_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not save this warning point.");
+    }
+    speedWarnings.unshift(result.warning);
+    renderSpeedWarningList();
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = `${result.warning.label} saved at the current GPS position.`;
+    updateSpeedAwareness(liveDrivePosition);
+  } catch (error) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = error.message || "Could not save this warning point.";
+  } finally {
+    addSpeedWarningButton.disabled = !liveDrivePosition;
+  }
+}
+
+async function deleteSpeedWarning(id) {
+  try {
+    const response = await fetch(`${SPEED_WARNINGS_API}/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not delete this warning point.");
+    }
+    speedWarnings = speedWarnings.filter((warning) => warning.id !== id);
+    renderSpeedWarningList();
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = "Warning point deleted from the database.";
+    updateSpeedAwareness(liveDrivePosition);
+  } catch (error) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = error.message || "Could not delete this warning point.";
+  }
+}
+
+function renderSpeedWarningList() {
+  if (!speedWarnings.length) {
+    speedWarningList.innerHTML = '<div class="form-state empty-state">No speed-warning points saved yet.</div>';
+    return;
+  }
+
+  speedWarningList.innerHTML = speedWarnings.map((warning) => `
+    <div class="speed-warning-item">
+      <div>
+        <strong>${escapeHtml(warning.label)}</strong>
+        <span>${Math.round(warning.speedLimitMph)} mph · warns within ${Math.round(warning.radiusMeters)} m · ${Number(warning.latitude).toFixed(5)}, ${Number(warning.longitude).toFixed(5)}</span>
+      </div>
+      <button class="secondary-button small-button" type="button" data-delete-speed-warning="${escapeHtml(warning.id)}">Delete</button>
+    </div>
+  `).join("");
+
+  speedWarningList.querySelectorAll("[data-delete-speed-warning]").forEach((button) => {
+    button.addEventListener("click", () => deleteSpeedWarning(button.dataset.deleteSpeedWarning));
+  });
+}
+
+function updateSpeedAwareness(position) {
+  addSpeedWarningButton.disabled = !position;
+
+  if (!position) {
+    currentSpeed.textContent = "--";
+    speedAwareness.dataset.state = "idle";
+    speedWarningBadge.textContent = "Monitoring";
+    speedWarningTitle.textContent = "No nearby speed warning";
+    speedWarningStatus.textContent = "Start live drive to monitor database warning points.";
+    lastSpeedSample = null;
+    return;
+  }
+
+  const speedMph = calculateSpeedMph(position);
+  currentSpeed.textContent = Number.isFinite(speedMph) ? String(Math.round(speedMph)) : "--";
+
+  if (!speedWarnings.length) {
+    speedAwareness.dataset.state = "idle";
+    speedWarningBadge.textContent = "No points";
+    speedWarningTitle.textContent = "No speed warnings in the database";
+    speedWarningStatus.textContent = "Open Manage warning points to mark a known camera or enforcement area.";
+    return;
+  }
+
+  const here = [position.coords.latitude, position.coords.longitude];
+  const nearest = speedWarnings
+    .map((warning) => ({ warning, distance: haversineDistance(here, [Number(warning.latitude), Number(warning.longitude)]) }))
+    .sort((a, b) => a.distance - b.distance)[0];
+  const isApproaching = nearest.distance <= Number(nearest.warning.radiusMeters);
+  const isOverspeed = isApproaching && Number.isFinite(speedMph) && speedMph > Number(nearest.warning.speedLimitMph);
+
+  if (!isApproaching) {
+    speedAwareness.dataset.state = "idle";
+    speedWarningBadge.textContent = "Monitoring";
+    speedWarningTitle.textContent = `Nearest: ${nearest.warning.label}`;
+    speedWarningStatus.textContent = `${formatMeters(nearest.distance)} away · ${Math.round(nearest.warning.speedLimitMph)} mph warning point.`;
+    return;
+  }
+
+  speedAwareness.dataset.state = isOverspeed ? "overspeed" : "warning";
+  speedWarningBadge.textContent = isOverspeed ? "Slow down" : "Warning ahead";
+  speedWarningTitle.textContent = `${nearest.warning.label} · ${Math.round(nearest.warning.speedLimitMph)} mph`;
+  speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${Math.round(speedMph)} mph` : ""}.`;
+  maybeSoundSpeedAlert(nearest.warning.id, isOverspeed);
+}
+
+function calculateSpeedMph(position) {
+  const directSpeed = Number(position.coords.speed);
+  let speedMetersPerSecond = Number.isFinite(directSpeed) && directSpeed >= 0 ? directSpeed : null;
+  const sample = {
+    latitude: Number(position.coords.latitude),
+    longitude: Number(position.coords.longitude),
+    timestamp: Number(position.timestamp) || Date.now()
+  };
+
+  if (speedMetersPerSecond === null && lastSpeedSample) {
+    const elapsed = (sample.timestamp - lastSpeedSample.timestamp) / 1000;
+    if (elapsed > 0) {
+      const distance = haversineDistance(
+        [lastSpeedSample.latitude, lastSpeedSample.longitude],
+        [sample.latitude, sample.longitude]
+      );
+      const calculated = distance / elapsed;
+      if (calculated <= 55) {
+        speedMetersPerSecond = calculated;
+      }
+    }
+  }
+
+  lastSpeedSample = sample;
+  return speedMetersPerSecond === null ? null : speedMetersPerSecond * 2.236936;
+}
+
+function armSpeedAudio() {
+  try {
+    speedAudioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (speedAudioContext.state === "suspended") {
+      speedAudioContext.resume();
+    }
+  } catch (_error) {
+    speedAudioContext = null;
+  }
+}
+
+function maybeSoundSpeedAlert(warningId, overspeed) {
+  const now = Date.now();
+  const repeatAfter = overspeed ? 12000 : 60000;
+  const shouldSound = lastSpeedAlert.id !== warningId
+    || lastSpeedAlert.overspeed !== overspeed
+    || now - lastSpeedAlert.at >= repeatAfter;
+
+  if (!shouldSound || !speedAudioContext) {
+    return;
+  }
+
+  lastSpeedAlert = { id: warningId, at: now, overspeed };
+  const oscillator = speedAudioContext.createOscillator();
+  const gain = speedAudioContext.createGain();
+  oscillator.frequency.value = overspeed ? 880 : 620;
+  gain.gain.setValueAtTime(0.0001, speedAudioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.18, speedAudioContext.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, speedAudioContext.currentTime + 0.28);
+  oscillator.connect(gain).connect(speedAudioContext.destination);
+  oscillator.start();
+  oscillator.stop(speedAudioContext.currentTime + 0.3);
+}
+
 async function startLiveDrive() {
   const route = getActiveRoute();
 
@@ -2671,6 +2901,7 @@ function stopLiveDrive(updateStatus = true) {
 
   if (updateStatus) {
     liveDrivePosition = null;
+    updateSpeedAwareness(null);
     liveDriveUpcoming.innerHTML = "";
     setLiveDriveStatus("Live drive stopped.");
     setMapDriverMode(false);
@@ -2714,6 +2945,7 @@ function startLiveDriveSimulation() {
   const tick = () => {
     const point = simulationPoints[liveDriveSimulationIndex];
     liveDrivePosition = createSimulatedPosition(point);
+    updateSpeedAwareness(liveDrivePosition);
     renderLiveDrive(route);
     liveDriveSimulationIndex += 1;
 
@@ -2750,7 +2982,8 @@ function createSimulatedPosition(point) {
     coords: {
       latitude: point[0],
       longitude: point[1],
-      accuracy: 5
+      accuracy: 5,
+      speed: 15.65
     },
     timestamp: Date.now()
   };
@@ -2774,6 +3007,7 @@ function sampleSimulationPath(points, count) {
 function handleLivePosition(position, route) {
   clearLiveDriveTimeout();
   liveDrivePosition = position;
+  updateSpeedAwareness(position);
   appendRouteRecordingPoint(position);
   liveDriveStartButton.disabled = true;
   liveDriveStopButton.disabled = false;

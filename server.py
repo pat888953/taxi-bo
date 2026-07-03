@@ -156,6 +156,20 @@ def initialize_db():
 
             CREATE INDEX IF NOT EXISTS idx_route_recordings_started
               ON route_recordings(started_at DESC);
+
+            CREATE TABLE IF NOT EXISTS speed_warnings (
+              id TEXT PRIMARY KEY,
+              label TEXT NOT NULL,
+              latitude REAL NOT NULL,
+              longitude REAL NOT NULL,
+              speed_limit_mph REAL NOT NULL,
+              radius_meters REAL NOT NULL DEFAULT 600,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_speed_warnings_location
+              ON speed_warnings(latitude, longitude);
             """
         )
         ensure_route_columns(db)
@@ -549,6 +563,79 @@ def optional_float(value):
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def fetch_speed_warnings():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, label, latitude, longitude, speed_limit_mph, radius_meters
+            FROM speed_warnings
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "label": row["label"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "speedLimitMph": row["speed_limit_mph"],
+            "radiusMeters": row["radius_meters"],
+        }
+        for row in rows
+    ]
+
+
+def create_speed_warning(payload):
+    label = str(payload.get("label", "Speed awareness point")).strip()[:120] or "Speed awareness point"
+    latitude = float(payload.get("latitude"))
+    longitude = float(payload.get("longitude"))
+    speed_limit = float(payload.get("speedLimitMph"))
+    radius = float(payload.get("radiusMeters") or 600)
+
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError("Invalid warning coordinates.")
+    if not 5 <= speed_limit <= 100:
+        raise ValueError("Speed limit must be between 5 and 100 mph.")
+    if not 100 <= radius <= 3000:
+        raise ValueError("Warning distance must be between 100 and 3000 meters.")
+
+    warning = {
+        "id": str(uuid4()),
+        "label": label,
+        "latitude": latitude,
+        "longitude": longitude,
+        "speedLimitMph": speed_limit,
+        "radiusMeters": radius,
+    }
+
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO speed_warnings (
+              id, label, latitude, longitude, speed_limit_mph, radius_meters
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                warning["id"], warning["label"], warning["latitude"],
+                warning["longitude"], warning["speedLimitMph"], warning["radiusMeters"],
+            ),
+        )
+
+    return warning
+
+
+def delete_speed_warning(payload):
+    warning_id = str(payload.get("id", "")).strip()
+    if not warning_id:
+        raise ValueError("Warning id is required.")
+
+    with connect_db() as db:
+        db.execute("DELETE FROM speed_warnings WHERE id = ?", (warning_id,))
+
+    return {"id": warning_id}
 
 
 def recording_summary(recording, status):
@@ -1212,6 +1299,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "recording": fetch_active_route_recording()})
             return
 
+        if path == "/api/speed-warnings":
+            self.send_json({"ok": True, "warnings": fetch_speed_warnings()})
+            return
+
         super().do_GET()
 
     def do_PUT(self):
@@ -1234,7 +1325,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
             self.send_error(404, "Not found")
             return
 
@@ -1268,6 +1359,14 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/route-recording/discard":
                 self.send_json({"ok": True, "recording": discard_route_recording(payload)})
+                return
+
+            if path == "/api/speed-warnings":
+                self.send_json({"ok": True, "warning": create_speed_warning(payload)})
+                return
+
+            if path == "/api/speed-warnings/delete":
+                self.send_json({"ok": True, "warning": delete_speed_warning(payload)})
                 return
 
             if path == "/api/generate-route":
