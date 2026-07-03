@@ -978,8 +978,7 @@ function renderTopCuePreview(route = getActiveRoute()) {
 
   const cues = route?.photos
     ?.slice()
-    .sort((a, b) => a.step - b.step)
-    .slice(0, 3) || [];
+    .sort((a, b) => a.step - b.step) || [];
 
   renderCuePreviewCards(cues);
 }
@@ -1026,8 +1025,7 @@ function renderTopCuePreview(route = getActiveRoute()) {
 
   const cues = route?.photos
     ?.slice()
-    .sort((a, b) => a.step - b.step)
-    .slice(0, 3) || [];
+    .sort((a, b) => a.step - b.step) || [];
 
   if (!cues.length) {
     topCuePreview.innerHTML = [1, 2, 3]
@@ -1037,7 +1035,7 @@ function renderTopCuePreview(route = getActiveRoute()) {
           <div class="top-cue-copy">
             <span>Photo cue ${number}</span>
             <strong>Choose a saved route</strong>
-            <p>The first three route photos will appear here.</p>
+            <p>All route photos will appear in this scrollable bar.</p>
           </div>
         </article>
       `)
@@ -1076,7 +1074,7 @@ function renderCuePreviewCards(cues) {
           <div class="top-cue-copy">
             <span>Photo cue ${number}</span>
             <strong>Choose a saved route</strong>
-            <p>The first three route photos will appear here.</p>
+            <p>All route photos will appear in this scrollable bar.</p>
           </div>
         </article>
       `)
@@ -2826,7 +2824,7 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   if (!liveDrivePosition) {
     setLiveDriveStatus("Live drive is ready. Start GPS tracking to show the next three cues.");
-    renderCuePreviewCards(locatedCues.slice(0, 3));
+    renderCuePreviewCards(locatedCues);
     renderPhotoCards(locatedCues.slice(0, 3), liveDriveUpcoming, (photo, index) => `Upcoming ${index + 1} - Step ${photo.step}`);
     return;
   }
@@ -2849,7 +2847,7 @@ function renderLiveDrive(route = getActiveRoute()) {
   const nearest = upcoming[0];
   const distance = haversineDistance(currentLatLng, [nearest.latitude, nearest.longitude]);
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
-  renderCuePreviewCards(upcoming.slice(0, 3));
+  renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
 }
 
