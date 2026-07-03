@@ -1340,29 +1340,48 @@ async function uploadCueCapture() {
     return;
   }
 
-  const savedRoute = routes.find((route) => route.photos.some((photo) => photo.id === captureCueId));
-  const savedCue = savedRoute?.photos.find((photo) => photo.id === captureCueId);
+  let savedRoute = routes.find((route) => route.photos.some((photo) => photo.id === captureCueId));
+  let savedCue = savedRoute?.photos.find((photo) => photo.id === captureCueId);
+  let addedPreparedRoute = false;
+
+  if (!savedCue && preparedRoute) {
+    const preparedCue = preparedRoute.photos.find((photo) => photo.id === captureCueId);
+    if (preparedCue) {
+      savedRoute = preparedRoute;
+      savedCue = preparedCue;
+      if (!routes.some((route) => route.id === preparedRoute.id)) {
+        routes.push(preparedRoute);
+        addedPreparedRoute = true;
+      }
+    }
+  }
+
   if (!savedCue) {
     cueCaptureStatus.className = "form-state";
-    cueCaptureStatus.textContent = "This cue is not attached to a saved database route.";
+    cueCaptureStatus.textContent = "Could not find this cue in the prepared or saved route.";
     return;
   }
 
+  const previousImage = savedCue.image;
   uploadCueCaptureButton.disabled = true;
   cueCaptureStatus.className = "form-state empty-state";
-  cueCaptureStatus.textContent = "Uploading the cue photo to the database...";
+  cueCaptureStatus.textContent = addedPreparedRoute
+    ? "Saving this prepared route and cue photo to the database..."
+    : "Uploading the cue photo to the database...";
 
   try {
     savedCue.image = captureImageData;
-    const preparedCue = preparedRoute?.photos?.find((photo) => photo.id === captureCueId);
-    if (preparedCue) {
-      preparedCue.image = captureImageData;
-    }
     await saveRoutes();
     render();
+    destinationSelect.value = savedRoute.id;
+    photoRouteSelect.value = savedRoute.id;
     displaySelectedRoute();
     cueCaptureDialog.close();
   } catch (error) {
+    savedCue.image = previousImage;
+    if (addedPreparedRoute) {
+      routes = routes.filter((route) => route.id !== savedRoute.id);
+    }
     cueCaptureStatus.className = "form-state";
     cueCaptureStatus.textContent = error.message || "Could not upload the cue photo.";
     uploadCueCaptureButton.disabled = false;
