@@ -1773,11 +1773,11 @@ async function generateRouteOnServer(payload) {
 
 async function prepareRouteFromDestination() {
   const selectedRoute = routes.find((item) => item.id === destinationSelect.value);
-  const fallbackStartRoute = selectedRoute || routes[0] || null;
   const typedDestination = destinationSearch.value.trim();
   const destination = typedDestination || selectedRoute?.destination || "";
-  const start = fallbackStartRoute?.start || "";
+  const start = typedDestination ? "" : selectedRoute?.start || "";
   let currentPosition = null;
+  let locationContext = "";
 
   if (!destination) {
     routeSummary.className = "route-summary";
@@ -1801,6 +1801,8 @@ async function prepareRouteFromDestination() {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude
       };
+      const accuracy = Number(current.coords.accuracy);
+      locationContext = ` Start supplied by this device: ${current.coords.latitude.toFixed(5)}, ${current.coords.longitude.toFixed(5)}${Number.isFinite(accuracy) ? ` (accuracy about ${Math.round(accuracy)} m)` : ""}.`;
     }
 
     const generatedRoute = await prepareRouteOnServer({
@@ -1833,7 +1835,7 @@ async function prepareRouteFromDestination() {
     routeSummary.innerHTML = `
       <strong>${escapeHtml(preparedRoute.name)}</strong><br>
       Destination: ${escapeHtml(preparedRoute.destination)}<br>
-      Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}
+      Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
     `;
   } catch (error) {
     routeSummary.className = "route-summary";
