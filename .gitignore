@@ -1,4 +1,7 @@
 __pycache__/
+android-companion/.gradle/
+android-companion/local.properties
+android-companion/**/build/
 *.py[cod]
 *.log
 taxi_bo.db
