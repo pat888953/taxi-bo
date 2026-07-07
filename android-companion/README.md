@@ -6,7 +6,7 @@ This version is intentionally read-only. It captures the screen only after Andro
 
 ## Mi 8 test
 
-1. Open **Taxi BO Companion**.
+1. Tap the **Taxi BO Scan** icon on the phone.
 2. Select **Start FlyTaxi reader**.
 3. Allow **Display over other apps** when MIUI opens that setting.
 4. Return to the companion and select **Start FlyTaxi reader** again.
