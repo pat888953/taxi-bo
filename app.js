@@ -684,16 +684,19 @@ function setupDestinationVoiceInput() {
   }
 
   destinationRecognition = new SpeechRecognition();
-  destinationRecognition.lang = "en-US";
+  destinationRecognition.lang = "zh-HK";
   destinationRecognition.interimResults = true;
   destinationRecognition.continuous = false;
+  destinationRecognition.maxAlternatives = 3;
+  destinationVoiceButton.title = "Speak destination in Cantonese";
+  destinationVoiceButton.setAttribute("aria-label", "Speak destination in Cantonese");
 
   destinationRecognition.addEventListener("start", () => {
     isListeningForDestination = true;
     destinationVoiceButton.classList.add("listening");
-    destinationVoiceButton.textContent = "Listening";
+    destinationVoiceButton.textContent = "\u8046\u807d\u4e2d";
     routeSummary.className = "route-summary empty-state";
-    routeSummary.textContent = "Listening for destination address...";
+    routeSummary.textContent = "\u6b63\u5728\u8046\u807d\u5ee3\u6771\u8a71\u76ee\u7684\u5730\u5740...";
   });
 
   destinationRecognition.addEventListener("result", (event) => {
