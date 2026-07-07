@@ -23,6 +23,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.Toast;
@@ -52,6 +53,7 @@ public class FlyTaxiCaptureService extends Service {
     private Handler captureHandler;
     private Handler mainHandler;
     private WindowManager windowManager;
+    private WindowManager.LayoutParams scanButtonParams;
     private Button scanButton;
     private TextRecognizer recognizer;
     private boolean processing;
@@ -134,7 +136,7 @@ public class FlyTaxiCaptureService extends Service {
         scanButton.setBackgroundColor(0xEE0D5B44);
         scanButton.setOnClickListener(view -> scanVisibleScreen());
 
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+        scanButtonParams = new WindowManager.LayoutParams(
             dp(92),
             dp(52),
             Build.VERSION.SDK_INT >= 26
@@ -143,10 +145,75 @@ public class FlyTaxiCaptureService extends Service {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         );
-        params.gravity = Gravity.TOP | Gravity.END;
-        params.x = dp(12);
-        params.y = dp(180);
-        windowManager.addView(scanButton, params);
+        scanButtonParams.gravity = Gravity.TOP | Gravity.START;
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int defaultX = Math.max(0, metrics.widthPixels - dp(104));
+        scanButtonParams.x = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt("scan_x", defaultX);
+        scanButtonParams.y = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt("scan_y", dp(180));
+        constrainOverlayPosition();
+        installDragBehavior();
+        windowManager.addView(scanButton, scanButtonParams);
+    }
+
+    private void installDragBehavior() {
+        scanButton.setOnTouchListener(new android.view.View.OnTouchListener() {
+            private float downRawX;
+            private float downRawY;
+            private int startX;
+            private int startY;
+            private boolean dragged;
+
+            @Override
+            public boolean onTouch(android.view.View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downRawX = event.getRawX();
+                        downRawY = event.getRawY();
+                        startX = scanButtonParams.x;
+                        startY = scanButtonParams.y;
+                        dragged = false;
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float deltaX = event.getRawX() - downRawX;
+                        float deltaY = event.getRawY() - downRawY;
+                        if (Math.abs(deltaX) > dp(6) || Math.abs(deltaY) > dp(6)) {
+                            dragged = true;
+                        }
+                        scanButtonParams.x = startX + Math.round(deltaX);
+                        scanButtonParams.y = startY + Math.round(deltaY);
+                        constrainOverlayPosition();
+                        windowManager.updateViewLayout(scanButton, scanButtonParams);
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                        if (dragged) {
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                                .edit()
+                                .putInt("scan_x", scanButtonParams.x)
+                                .putInt("scan_y", scanButtonParams.y)
+                                .apply();
+                        } else {
+                            view.performClick();
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_CANCEL:
+                        return true;
+
+                    default:
+                        return false;
+                }
+            }
+        });
+    }
+
+    private void constrainOverlayPosition() {
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int maxX = Math.max(0, metrics.widthPixels - scanButtonParams.width);
+        int maxY = Math.max(0, metrics.heightPixels - scanButtonParams.height);
+        scanButtonParams.x = Math.max(0, Math.min(scanButtonParams.x, maxX));
+        scanButtonParams.y = Math.max(0, Math.min(scanButtonParams.y, maxY));
     }
 
     private void scanVisibleScreen() {

@@ -12,7 +12,7 @@ This version is intentionally read-only. It captures the screen only after Andro
 4. Return to the companion and select **Start FlyTaxi reader** again.
 5. Select **Start now** in Android's screen-capture dialog.
 6. FlyTaxi opens. Keep a complete unlocked order visible.
-7. Tap the floating **SCAN** button.
+7. Drag the floating **SCAN** button to a convenient position, then tap it.
 8. Tap the Taxi BO notification to review the OCR result.
 9. Return to the companion and select **Stop reader** when finished.
 
