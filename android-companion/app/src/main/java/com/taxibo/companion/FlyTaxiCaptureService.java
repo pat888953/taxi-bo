@@ -20,6 +20,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.WindowManager;
@@ -49,6 +50,7 @@ public class FlyTaxiCaptureService extends Service {
     private ImageReader imageReader;
     private HandlerThread captureThread;
     private Handler captureHandler;
+    private Handler mainHandler;
     private WindowManager windowManager;
     private Button scanButton;
     private TextRecognizer recognizer;
@@ -62,6 +64,7 @@ public class FlyTaxiCaptureService extends Service {
         captureThread = new HandlerThread("FlyTaxiCapture");
         captureThread.start();
         captureHandler = new Handler(captureThread.getLooper());
+        mainHandler = new Handler(Looper.getMainLooper());
     }
 
     @Override
@@ -214,7 +217,7 @@ public class FlyTaxiCaptureService extends Service {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         manager.notify(NOTIFICATION_ID, buildNotification(message + " Tap to review.", text));
 
-        captureHandler.post(() -> {
+        mainHandler.post(() -> {
             processing = false;
             if (scanButton != null) {
                 scanButton.setAlpha(1f);
