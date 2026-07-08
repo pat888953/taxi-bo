@@ -1411,6 +1411,16 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def end_headers(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/") and (
+            path.endswith((".html", ".js", ".css")) or path in {"/", "/sw.js"}
+        ):
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_GET(self):
         path = urlparse(self.path).path
 
