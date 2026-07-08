@@ -16,13 +16,11 @@ const photoRouteSelect = document.querySelector("#photoRouteSelect");
 const refreshRoutesButton = document.querySelector("#refreshRoutesButton");
 const photoRouteStatus = document.querySelector("#photoRouteStatus");
 const reviewRouteButton = document.querySelector("#reviewRouteButton");
-const enterRouteButton = document.querySelector("#enterRouteButton");
 const goDestinationButton = document.querySelector("#goDestinationButton");
 const destinationModeRadio = document.querySelector("#destinationModeRadio");
 const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
 const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
-const savedRouteActions = document.querySelector("#savedRouteActions");
 const exportRoutesButton = document.querySelector("#exportRoutesButton");
 const importRoutesInput = document.querySelector("#importRoutesInput");
 const mapPickerButton = document.querySelector("#mapPickerButton");
@@ -180,11 +178,6 @@ reviewRouteButton.addEventListener("click", () => {
   displaySelectedRoute();
 });
 
-enterRouteButton.addEventListener("click", () => {
-  preparedRoute = null;
-  displaySelectedRoute();
-});
-
 goDestinationButton.addEventListener("click", () => {
   prepareRouteFromDestination(true);
 });
@@ -230,11 +223,9 @@ function setRouteEntryMode(mode) {
   destinationVoiceButton.disabled = !destinationActive;
   goDestinationButton.disabled = !destinationActive;
   destinationSelect.disabled = destinationActive;
-  enterRouteButton.disabled = destinationActive;
 
   destinationEntryGroup.classList.toggle("is-disabled", !destinationActive);
   savedRouteEntryGroup.classList.toggle("is-disabled", destinationActive);
-  savedRouteActions.classList.toggle("is-disabled", destinationActive);
   destinationEntryGroup.setAttribute("aria-disabled", String(!destinationActive));
   savedRouteEntryGroup.setAttribute("aria-disabled", String(destinationActive));
 }
