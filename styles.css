@@ -946,6 +946,35 @@ h3 {
   order: 1;
 }
 
+.saved-cues-panel .photo-timeline {
+  max-height: min(70vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.saved-cues-panel .photo-timeline {
+  scrollbar-color: var(--accent) var(--surface-soft);
+  scrollbar-width: auto;
+}
+
+.saved-cues-panel .photo-timeline::-webkit-scrollbar {
+  width: 12px;
+}
+
+.saved-cues-panel .photo-timeline::-webkit-scrollbar-track {
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.saved-cues-panel .photo-timeline::-webkit-scrollbar-thumb {
+  border: 3px solid var(--surface-soft);
+  border-radius: 6px;
+  background: var(--accent);
+}
+
 .junction-photo-panel {
   order: 2;
 }
