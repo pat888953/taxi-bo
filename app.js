@@ -16,6 +16,7 @@ const refreshRoutesButton = document.querySelector("#refreshRoutesButton");
 const photoRouteStatus = document.querySelector("#photoRouteStatus");
 const reviewRouteButton = document.querySelector("#reviewRouteButton");
 const enterRouteButton = document.querySelector("#enterRouteButton");
+const goDestinationButton = document.querySelector("#goDestinationButton");
 const exportRoutesButton = document.querySelector("#exportRoutesButton");
 const importRoutesInput = document.querySelector("#importRoutesInput");
 const mapPickerButton = document.querySelector("#mapPickerButton");
@@ -166,6 +167,10 @@ enterRouteButton.addEventListener("click", () => {
   displaySelectedRoute();
 });
 
+goDestinationButton.addEventListener("click", () => {
+  prepareRouteFromDestination();
+});
+
 destinationVoiceButton.addEventListener("click", () => {
   toggleDestinationVoiceInput();
 });
@@ -180,8 +185,8 @@ destinationSearch.addEventListener("input", (event) => {
   if (destinationSearch.value.trim()) {
     routeSummary.className = "route-summary empty-state";
     routeSummary.textContent = destinationSelect.value
-      ? "Press Enter to display this saved route and its photo cues."
-      : "No saved route matches this destination.";
+      ? "Press Enter to display this saved route, or GO to prepare driving cues."
+      : "Press GO to prepare driving cues for this destination.";
   } else {
     displaySelectedRoute();
   }
@@ -1924,7 +1929,7 @@ async function prepareRouteFromDestination() {
     return;
   }
 
-  enterRouteButton.disabled = true;
+  goDestinationButton.disabled = true;
   routeSummary.className = "route-summary";
   routeSummary.innerHTML = `<strong>Preparing route.</strong><br>Generating from ${escapeHtml(start || "current location")} and matching saved photo cues near its turns...`;
 
@@ -1979,7 +1984,7 @@ async function prepareRouteFromDestination() {
     routeSummary.className = "route-summary";
     routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
   } finally {
-    enterRouteButton.disabled = false;
+    goDestinationButton.disabled = false;
   }
 }
 
