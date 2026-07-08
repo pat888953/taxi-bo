@@ -80,6 +80,8 @@ const routePhotos = document.querySelector("#routePhotos");
 const routeForm = document.querySelector("#routeForm");
 const photoForm = document.querySelector("#photoForm");
 const routeList = document.querySelector("#routeList");
+const routeLibrarySearch = document.querySelector("#routeLibrarySearch");
+const routeLibraryFilter = document.querySelector("#routeLibraryFilter");
 const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryButton");
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
@@ -481,6 +483,9 @@ refreshRoutesButton.addEventListener("click", () => {
 refreshRouteLibraryButton.addEventListener("click", () => {
   loadRoutes();
 });
+
+routeLibrarySearch.addEventListener("input", () => renderRouteList());
+routeLibraryFilter.addEventListener("change", () => renderRouteList());
 
 photoRouteSelect.addEventListener("change", () => {
   updatePhotoRouteStatus();
@@ -906,28 +911,56 @@ function renderRouteList() {
     return;
   }
 
-  routes.forEach((route) => {
+  const query = routeLibrarySearch.value.trim().toLowerCase();
+  const filter = routeLibraryFilter.value;
+  const visibleRoutes = routes.filter((route) => {
+    const type = getRouteLibraryType(route);
+    const matchesType = filter === "all" || filter === type;
+    const searchable = `${route.name} ${route.variant} ${route.start} ${route.destination} ${route.notes}`.toLowerCase();
+    return matchesType && (!query || searchable.includes(query));
+  }).sort((first, second) => {
+    const priority = { recorded: 0, prepared: 1, standard: 2 };
+    return priority[getRouteLibraryType(first)] - priority[getRouteLibraryType(second)];
+  });
+
+  if (!visibleRoutes.length) {
+    routeList.innerHTML = `<div class="route-summary empty-state">No routes match this search and route type.</div>`;
+    return;
+  }
+
+  visibleRoutes.forEach((route) => {
     const article = document.createElement("article");
-    article.className = "route-item";
+    const routeType = getRouteLibraryType(route);
+    article.className = `route-item route-item-${routeType}`;
 
     const photoCount = route.photos.length;
+    const pointCount = normalizeRouteGeometry(route.routeGeometry).length;
+    const typeLabel = routeType === "recorded" ? "Recorded drive" : routeType === "prepared" ? "Prepared route" : "Saved route";
 
     article.innerHTML = `
-      <div>
+      <div class="route-item-copy">
+        <div class="route-item-heading">
+          <span class="route-type-badge route-type-${routeType}">${typeLabel}</span>
+          <span class="route-variant">${escapeHtml(route.variant || "Standard")}</span>
+        </div>
         <h3>${escapeHtml(route.name || "Untitled route")}</h3>
+        <p class="route-start">Start: ${escapeHtml(route.start || "Unknown start")}</p>
         <p class="route-destination">Destination: ${escapeHtml(route.destination)}</p>
         <p class="route-meta">${escapeHtml(formatRouteContext(route))}</p>
       </div>
       <div class="route-item-actions">
-        <span class="pill">${photoCount} photo${photoCount === 1 ? "" : "s"}</span>
+        <span class="pill">${pointCount.toLocaleString()} GPS points</span>
+        <span class="pill">${photoCount} cue${photoCount === 1 ? "" : "s"}</span>
         <button class="secondary-button small-button route-review-button" data-route-id="${route.id}" type="button">View</button>
         <button class="secondary-button small-button route-cues-button" data-route-id="${route.id}" type="button">${photoCount ? "Rebuild cues" : "Generate cues"}</button>
-        <button class="secondary-button small-button route-edit-button" data-route-id="${route.id}" type="button">Regenerate</button>
+        <button class="secondary-button small-button route-edit-button" data-route-id="${route.id}" type="button">${routeType === "recorded" ? "Edit details" : "Regenerate"}</button>
         <button class="secondary-button small-button route-delete-button" data-route-id="${route.id}" type="button">Delete from DB</button>
       </div>
     `;
 
     article.querySelector(".route-review-button").addEventListener("click", () => {
+      preparedRoute = null;
+      destinationSearch.value = "";
       destinationSelect.value = route.id;
       displayRoute(route);
     });
@@ -950,6 +983,20 @@ function renderRouteList() {
   updateRouteLibraryStatus();
 }
 
+function getRouteLibraryType(route) {
+  const name = String(route.name || "").toLowerCase();
+  const notes = String(route.notes || "").toLowerCase();
+  const variant = String(route.variant || "").toLowerCase();
+
+  if (name.includes("recorded") || notes.includes("actual drive recorded")) {
+    return "recorded";
+  }
+  if (variant === "prepared" || name.startsWith("prepared:")) {
+    return "prepared";
+  }
+  return "standard";
+}
+
 function updateRouteLibraryStatus(message, isError = false) {
   if (message) {
     routeLibraryStatus.className = isError ? "form-state" : "form-state empty-state";
@@ -959,8 +1006,10 @@ function updateRouteLibraryStatus(message, isError = false) {
 
   const routeCount = routes.length;
   const cueCount = routes.reduce((total, route) => total + route.photos.length, 0);
+  const recordedCount = routes.filter((route) => getRouteLibraryType(route) === "recorded").length;
+  const preparedCount = routes.filter((route) => getRouteLibraryType(route) === "prepared").length;
   routeLibraryStatus.className = "form-state empty-state";
-  routeLibraryStatus.textContent = `${routeCount} route${routeCount === 1 ? "" : "s"} and ${cueCount} cue${cueCount === 1 ? "" : "s"} loaded from SQLite. Use Regenerate or Delete from DB to maintain saved routes.`;
+  routeLibraryStatus.textContent = `${routeCount} routes: ${recordedCount} recorded, ${preparedCount} prepared, ${cueCount} total cues. Use the filter to maintain recorded drives.`;
 }
 
 function displaySelectedRoute() {

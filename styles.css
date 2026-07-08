@@ -1467,6 +1467,17 @@ input[type="range"]:focus {
   gap: 12px;
 }
 
+.route-library-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.route-library-tools .field {
+  margin: 0;
+}
+
 #routeLibraryStatus {
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -1483,6 +1494,57 @@ input[type="range"]:focus {
   border-radius: var(--radius);
   background: #fff;
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.route-item-recorded {
+  border-left: 5px solid var(--accent);
+}
+
+.route-item-prepared {
+  border-left: 5px solid var(--amber);
+}
+
+.route-item-copy {
+  min-width: 0;
+  flex: 1 1 520px;
+}
+
+.route-item-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+
+.route-type-badge,
+.route-variant {
+  display: inline-flex;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.route-type-recorded {
+  background: var(--accent);
+  color: #fff;
+}
+
+.route-type-prepared {
+  background: #f4dcae;
+  color: #61400f;
+}
+
+.route-type-standard,
+.route-variant {
+  background: var(--surface-tint);
+  color: var(--accent-dark);
+}
+
+.route-start {
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .route-item:hover {
@@ -1521,6 +1583,10 @@ input[type="range"]:focus {
 
   .maintenance-drawer > summary {
     display: grid;
+  }
+
+  .route-library-tools {
+    grid-template-columns: 1fr;
   }
 
   .cue-preview-header {

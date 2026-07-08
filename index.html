@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=56">
+  <link rel="stylesheet" href="styles.css?v=59">
 </head>
 <body>
   <div class="page-shell">
@@ -351,12 +351,27 @@
             <h2>Route library</h2>
           </div>
           <div class="database-toolbar">
-            <span class="status-chip">SQLite database</span>
+            <span class="status-chip">Route database</span>
             <button id="refreshRouteLibraryButton" class="secondary-button small-button" type="button">Refresh database</button>
           </div>
         </div>
 
-        <div id="routeLibraryStatus" class="form-state empty-state">Routes are loaded from SQLite.</div>
+        <div id="routeLibraryStatus" class="form-state empty-state">Routes are loaded from the database.</div>
+        <div class="route-library-tools">
+          <label class="field">
+            <span>Find a route</span>
+            <input id="routeLibrarySearch" type="search" placeholder="Name, destination, start, or variant">
+          </label>
+          <label class="field route-library-filter-field">
+            <span>Route type</span>
+            <select id="routeLibraryFilter">
+              <option value="all">All routes</option>
+              <option value="recorded">Recorded drives</option>
+              <option value="prepared">Prepared routes</option>
+              <option value="standard">Other routes</option>
+            </select>
+          </label>
+        </div>
         <div id="routeList" class="route-list"></div>
       </section>
         </div>
@@ -413,7 +428,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=58"></script>
+  <script src="app.js?v=59"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
