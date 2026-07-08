@@ -1059,8 +1059,12 @@ h3 {
   align-items: center;
 }
 
+.voice-input-row input {
+  min-width: 0;
+}
+
 .voice-button {
-  min-width: 74px;
+  min-width: 62px;
   white-space: nowrap;
 }
 
