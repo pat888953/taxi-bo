@@ -1899,9 +1899,19 @@ async function prepareRouteFromDestination() {
   // text, otherwise the app incorrectly falls back to the device location.
   const destination = selectedRoute?.destination || typedDestination || "";
   const acceptedPickup = String(acceptedTripContext?.pickup || "").trim();
-  const start = acceptedPickup || selectedRoute?.start || "";
-  let currentPosition = null;
+  const hasSavedStartCoordinates = !acceptedPickup &&
+    Number.isFinite(selectedRoute?.startLatitude) &&
+    Number.isFinite(selectedRoute?.startLongitude);
+  const start = acceptedPickup || (hasSavedStartCoordinates ? "" : selectedRoute?.start || "");
+  let currentPosition = hasSavedStartCoordinates ? {
+    latitude: selectedRoute.startLatitude,
+    longitude: selectedRoute.startLongitude
+  } : null;
   let locationContext = "";
+
+  if (hasSavedStartCoordinates) {
+    locationContext = ` Start supplied by the saved route coordinates: ${selectedRoute.startLatitude.toFixed(5)}, ${selectedRoute.startLongitude.toFixed(5)}.`;
+  }
 
   if (!destination) {
     routeSummary.className = "route-summary";
@@ -1915,7 +1925,7 @@ async function prepareRouteFromDestination() {
   routeSummary.innerHTML = `<strong>Preparing route.</strong><br>Generating from ${escapeHtml(start || "current location")} and matching saved photo cues near its turns...`;
 
   try {
-    if (!start) {
+    if (!start && !currentPosition) {
       if (!navigator.geolocation) {
         throw new Error("Choose a saved route with a start point, or use a device/browser that supports current location.");
       }
