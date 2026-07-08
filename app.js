@@ -15,7 +15,7 @@ const photoRouteSelect = document.querySelector("#photoRouteSelect");
 const refreshRoutesButton = document.querySelector("#refreshRoutesButton");
 const photoRouteStatus = document.querySelector("#photoRouteStatus");
 const reviewRouteButton = document.querySelector("#reviewRouteButton");
-const prepareDestinationButton = document.querySelector("#prepareDestinationButton");
+const enterRouteButton = document.querySelector("#enterRouteButton");
 const exportRoutesButton = document.querySelector("#exportRoutesButton");
 const importRoutesInput = document.querySelector("#importRoutesInput");
 const mapPickerButton = document.querySelector("#mapPickerButton");
@@ -161,8 +161,9 @@ reviewRouteButton.addEventListener("click", () => {
   displaySelectedRoute();
 });
 
-prepareDestinationButton.addEventListener("click", () => {
-  prepareRouteFromDestination();
+enterRouteButton.addEventListener("click", () => {
+  preparedRoute = null;
+  displaySelectedRoute();
 });
 
 destinationVoiceButton.addEventListener("click", () => {
@@ -175,9 +176,12 @@ destinationSearch.addEventListener("input", (event) => {
     acceptedTripState.hidden = true;
   }
   preparedRoute = null;
+  renderDestinationSelect();
   if (destinationSearch.value.trim()) {
     routeSummary.className = "route-summary empty-state";
-    routeSummary.textContent = "Click Go to generate a route and match saved photo cues from SQLite.";
+    routeSummary.textContent = destinationSelect.value
+      ? "Press Enter to display this saved route and its photo cues."
+      : "No saved route matches this destination.";
   } else {
     displaySelectedRoute();
   }
@@ -802,10 +806,10 @@ async function lookupStopPlace() {
 function renderDestinationSelect() {
   const previousValue = destinationSelect.value;
   destinationSelect.innerHTML = "";
-  filteredRoutes = routes;
+  filteredRoutes = getFilteredRoutes();
 
   if (!filteredRoutes.length) {
-    const option = new Option("No saved routes yet", "");
+    const option = new Option(routes.length ? "No matching saved routes" : "No saved routes yet", "");
     destinationSelect.append(option);
     return;
   }
@@ -1024,7 +1028,7 @@ function displaySelectedRoute() {
 
   if (!route) {
     routeSummary.textContent = destinationSearch.value.trim()
-      ? "No saved route matches this text. Click Go to generate a route and match saved photo cues by coordinates."
+      ? "No saved route matches this destination."
       : "Pick a destination to review the saved route.";
     routeSummary.className = "route-summary empty-state";
     routePhotos.innerHTML = "";
@@ -1920,7 +1924,7 @@ async function prepareRouteFromDestination() {
     return;
   }
 
-  prepareDestinationButton.disabled = true;
+  enterRouteButton.disabled = true;
   routeSummary.className = "route-summary";
   routeSummary.innerHTML = `<strong>Preparing route.</strong><br>Generating from ${escapeHtml(start || "current location")} and matching saved photo cues near its turns...`;
 
@@ -1975,7 +1979,7 @@ async function prepareRouteFromDestination() {
     routeSummary.className = "route-summary";
     routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
   } finally {
-    prepareDestinationButton.disabled = false;
+    enterRouteButton.disabled = false;
   }
 }
 

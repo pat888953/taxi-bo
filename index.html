@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=64">
+  <link rel="stylesheet" href="styles.css?v=65">
 </head>
 <body>
   <div class="page-shell">
@@ -105,7 +105,7 @@
         <div class="rehearsal-grid">
           <div class="rehearsal-controls">
             <label class="field">
-              <span>Destination to prepare</span>
+              <span>Enter Destination for Giving Cue</span>
               <div class="voice-input-row">
                 <input id="destinationSearch" type="text" placeholder="Type or say the taxi destination address">
                 <button id="destinationVoiceButton" class="secondary-button voice-button" type="button" title="Speak destination" aria-label="Speak destination">Mic</button>
@@ -118,7 +118,7 @@
             </label>
 
             <div class="finder-actions primary-actions">
-              <button id="prepareDestinationButton" class="primary-button" type="button">Go</button>
+              <button id="enterRouteButton" class="primary-button" type="button">Enter</button>
             </div>
 
             <div id="routeSummary" class="route-summary empty-state">
@@ -433,7 +433,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=64"></script>
+  <script src="app.js?v=65"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
