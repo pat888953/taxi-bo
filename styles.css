@@ -941,6 +941,24 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.saved-cues-panel {
+  grid-column: auto;
+  order: 1;
+}
+
+.junction-photo-panel {
+  order: 2;
+}
+
+.route-builder-panel {
+  grid-column: 1 / -1;
+  order: 3;
+}
+
+.maintenance-grid > .routes-panel:not(.saved-cues-panel) {
+  order: 4;
+}
+
 .panel {
   padding: 22px;
   border: 1px solid var(--line);
