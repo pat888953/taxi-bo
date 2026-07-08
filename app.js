@@ -1832,9 +1832,12 @@ async function generateRouteOnServer(payload) {
 async function prepareRouteFromDestination() {
   const selectedRoute = routes.find((item) => item.id === destinationSelect.value);
   const typedDestination = destinationSearch.value.trim();
-  const destination = typedDestination || selectedRoute?.destination || "";
+  // A route-name search may remain in the text box after the driver picks a
+  // saved route. In that case the database endpoints must win over the search
+  // text, otherwise the app incorrectly falls back to the device location.
+  const destination = selectedRoute?.destination || typedDestination || "";
   const acceptedPickup = String(acceptedTripContext?.pickup || "").trim();
-  const start = acceptedPickup || (typedDestination ? "" : selectedRoute?.start || "");
+  const start = acceptedPickup || selectedRoute?.start || "";
   let currentPosition = null;
   let locationContext = "";
 
