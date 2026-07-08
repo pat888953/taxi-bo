@@ -2290,25 +2290,46 @@ function getCurrentPosition() {
 async function deleteRoute(routeId) {
   const route = routes.find((item) => item.id === routeId);
 
-  if (!route || !confirm(`Delete "${route.name}" and all its cue records from the SQLite database?`)) {
+  if (!route || !confirm(`Delete "${route.name}" and all its cue records from the database?`)) {
     return;
   }
 
-  routes = routes.filter((item) => item.id !== routeId);
-  simulationIndex = 0;
+  updateRouteLibraryStatus(`Deleting "${route.name}"...`);
 
-  if (editingRouteId === routeId) {
-    resetRouteForm();
+  try {
+    const response = await fetch(`${ROUTES_API}/${encodeURIComponent(routeId)}`, {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-store"
+      },
+      cache: "no-store"
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not delete this route from the database.");
+    }
+
+    simulationIndex = 0;
+
+    if (editingRouteId === routeId) {
+      resetRouteForm();
+    }
+
+    if (editingPhoto && editingPhoto.routeId === routeId) {
+      resetPhotoForm();
+    }
+
+    await loadRoutes();
+    updateRouteLibraryStatus(
+      result.deleted
+        ? `Deleted "${route.name}" from the database.`
+        : `"${route.name}" was already absent from the database.`
+    );
+  } catch (error) {
+    updateRouteLibraryStatus(error.message || "Could not delete this route from the database.", true);
   }
-
-  if (editingPhoto && editingPhoto.routeId === routeId) {
-    resetPhotoForm();
-  }
-
-  await saveRoutes();
-  render();
-  displaySelectedRoute();
-  updateRouteLibraryStatus(`Deleted "${route.name}" from SQLite.`);
 }
 
 async function generateCuesForSavedRoute(routeId) {

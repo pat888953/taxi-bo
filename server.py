@@ -8,7 +8,7 @@ import re
 import sys
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -371,6 +371,13 @@ def replace_routes(routes):
                         photo.get("longitude"),
                     ),
                 )
+
+
+def delete_route(route_id):
+    with connect_db() as db:
+        db.execute("DELETE FROM photo_stops WHERE route_id = ?", (route_id,))
+        result = db.execute("DELETE FROM routes WHERE id = ?", (route_id,))
+        return result.rowcount > 0
 
 
 def create_incoming_order(payload):
@@ -1533,6 +1540,26 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             replace_routes(payload)
             self.send_json({"ok": True, "routes": len(payload)})
+        except Exception as error:
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        route_prefix = "/api/routes/"
+
+        if not path.startswith(route_prefix):
+            self.send_error(404, "Not found")
+            return
+
+        route_id = unquote(path[len(route_prefix):]).strip()
+
+        if not route_id or "/" in route_id:
+            self.send_json({"ok": False, "error": "A valid route ID is required."}, status=400)
+            return
+
+        try:
+            deleted = delete_route(route_id)
+            self.send_json({"ok": True, "deleted": deleted, "routeId": route_id})
         except Exception as error:
             self.send_json({"ok": False, "error": str(error)}, status=400)
 
