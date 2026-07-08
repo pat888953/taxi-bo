@@ -1,4 +1,4 @@
-# Taxi BO FlyTaxi Companion
+# TaxiBo 4-in-One FlyTaxi Adapter
 
 Prototype Android screen reader for `com.flytaxi`.
 
@@ -6,17 +6,19 @@ This version is intentionally read-only. It captures the screen only after Andro
 
 ## Mi 8 test
 
-1. Tap the **Taxi BO Scan** icon on the phone.
+1. Tap the **TaxiBo 4-in-One Scan** icon on the phone.
 2. Select **Start FlyTaxi reader**.
 3. Allow **Display over other apps** when MIUI opens that setting.
-4. Return to the companion and select **Start FlyTaxi reader** again.
+4. Return to the scanner and select **Start FlyTaxi reader** again.
 5. Select **Start now** in Android's screen-capture dialog.
 6. FlyTaxi opens. Keep a complete unlocked order visible.
 7. Drag the floating **SCAN** button to a convenient position, then tap it.
-8. Tap the Taxi BO notification to review the OCR result.
-9. Return to the companion and select **Stop reader** when finished.
+8. The default server is `https://taxi-bo.onrender.com`; change it only for local testing.
+9. The adapter converts the OCR result into pickup, destination, fare, waiting time, and lock status, then sends it to TaxiBo 4-in-One.
+10. On the tablet, choose **Verify & open FlyTaxi**. Acceptance remains manual in FlyTaxi.
+11. Return to the scanner and select **Stop reader** when finished.
 
-On MIUI, overlay permission may also appear under **Settings > Apps > Manage apps > Taxi BO Companion > Other permissions > Display pop-up windows while running in the background**.
+On MIUI, overlay permission may also appear under **Settings > Apps > Manage apps > TaxiBo 4-in-One Scan > Other permissions > Display pop-up windows while running in the background**.
 
 ## Build
 

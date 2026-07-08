@@ -123,7 +123,13 @@ def initialize_db():
 
             CREATE TABLE IF NOT EXISTS incoming_orders (
               id TEXT PRIMARY KEY,
+              pickup TEXT NOT NULL DEFAULT '',
               destination TEXT NOT NULL,
+              fare TEXT NOT NULL DEFAULT '',
+              waiting_time TEXT NOT NULL DEFAULT '',
+              lock_status TEXT NOT NULL DEFAULT 'unknown',
+              captured_at TEXT NOT NULL DEFAULT '',
+              offer_fingerprint TEXT NOT NULL DEFAULT '',
               raw_text TEXT NOT NULL DEFAULT '',
               source TEXT NOT NULL DEFAULT 'phone',
               consumed_at TEXT,
@@ -132,6 +138,20 @@ def initialize_db():
 
             CREATE INDEX IF NOT EXISTS idx_incoming_orders_pending
               ON incoming_orders(consumed_at, created_at);
+
+            CREATE TABLE IF NOT EXISTS accepted_trips (
+              id TEXT PRIMARY KEY,
+              source TEXT NOT NULL DEFAULT '',
+              source_order_id TEXT NOT NULL DEFAULT '',
+              pickup TEXT NOT NULL,
+              destination TEXT NOT NULL,
+              accepted_at TEXT NOT NULL DEFAULT '',
+              consumed_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_accepted_trips_pending
+              ON accepted_trips(consumed_at, created_at);
 
             CREATE TABLE IF NOT EXISTS route_recordings (
               id TEXT PRIMARY KEY,
@@ -173,6 +193,7 @@ def initialize_db():
             """
         )
         ensure_route_columns(db)
+        ensure_incoming_order_columns(db)
 
 
 def ensure_route_columns(db):
@@ -202,6 +223,31 @@ def ensure_route_columns(db):
     for name, definition in columns.items():
         if name not in existing:
             db.execute(f"ALTER TABLE routes ADD COLUMN {name} {definition}")
+
+
+def ensure_incoming_order_columns(db):
+    if db.postgres:
+        rows = db.execute(
+            """
+            SELECT column_name AS name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'incoming_orders'
+            """
+        ).fetchall()
+    else:
+        rows = db.execute("PRAGMA table_info(incoming_orders)").fetchall()
+
+    existing = {row["name"] for row in rows}
+    columns = {
+        "pickup": "TEXT NOT NULL DEFAULT ''",
+        "fare": "TEXT NOT NULL DEFAULT ''",
+        "waiting_time": "TEXT NOT NULL DEFAULT ''",
+        "lock_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        "captured_at": "TEXT NOT NULL DEFAULT ''",
+        "offer_fingerprint": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE incoming_orders ADD COLUMN {name} {definition}")
 
 
 def fetch_routes():
@@ -332,12 +378,20 @@ def create_incoming_order(payload):
     with connect_db() as db:
         db.execute(
             """
-            INSERT INTO incoming_orders (id, destination, raw_text, source)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO incoming_orders (
+              id, pickup, destination, fare, waiting_time, lock_status,
+              captured_at, offer_fingerprint, raw_text, source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_id,
+                str(payload.get("pickup", "")).strip(),
                 destination,
+                str(payload.get("fare", "")).strip(),
+                str(payload.get("waitingTime", "")).strip(),
+                str(payload.get("lockStatus", "unknown")).strip() or "unknown",
+                str(payload.get("capturedAt", "")).strip(),
+                str(payload.get("fingerprint", "")).strip(),
                 str(payload.get("rawText", "")).strip(),
                 str(payload.get("source", "phone")).strip() or "phone",
             ),
@@ -346,31 +400,51 @@ def create_incoming_order(payload):
     return {
         "id": order_id,
         "destination": destination,
+        "pickup": str(payload.get("pickup", "")).strip(),
     }
 
 
-def fetch_pending_order():
+def fetch_pending_orders():
     with connect_db() as db:
-        row = db.execute(
+        rows = db.execute(
             """
-            SELECT id, destination, raw_text, source, created_at
+            SELECT id, pickup, destination, fare, waiting_time, lock_status,
+                   captured_at, offer_fingerprint, raw_text, source, created_at
             FROM incoming_orders
             WHERE consumed_at IS NULL
             ORDER BY created_at DESC
-            LIMIT 1
+            LIMIT 20
             """
-        ).fetchone()
+        ).fetchall()
 
-    if not row:
-        return None
+    return [serialize_incoming_order(row) for row in rows]
 
+
+def serialize_incoming_order(row):
     return {
-        "id": row["id"],
-        "destination": row["destination"],
-        "rawText": row["raw_text"],
-        "source": row["source"],
-        "createdAt": row["created_at"],
+        "id": row["id"], "pickup": row["pickup"], "destination": row["destination"],
+        "fare": row["fare"], "waitingTime": row["waiting_time"],
+        "lockStatus": row["lock_status"], "capturedAt": row["captured_at"],
+        "fingerprint": row["offer_fingerprint"], "rawText": row["raw_text"],
+        "source": row["source"], "createdAt": row["created_at"],
     }
+
+
+def verify_incoming_order(payload):
+    order_id = str(payload.get("id", "")).strip()
+    fingerprint = str(payload.get("fingerprint", "")).strip()
+    with connect_db() as db:
+        row = db.execute(
+            """SELECT id, pickup, destination, fare, waiting_time, lock_status,
+                      captured_at, offer_fingerprint, raw_text, source, created_at
+               FROM incoming_orders WHERE id = ? AND consumed_at IS NULL""",
+            (order_id,),
+        ).fetchone()
+    if not row:
+        return {"valid": False, "reason": "Offer is no longer in the inbox."}
+    if not fingerprint or fingerprint != row["offer_fingerprint"]:
+        return {"valid": False, "reason": "Offer details changed. Scan FlyTaxi again."}
+    return {"valid": True, "order": serialize_incoming_order(row)}
 
 
 def acknowledge_incoming_order(payload):
@@ -390,6 +464,68 @@ def acknowledge_incoming_order(payload):
         )
 
     return {"id": order_id}
+
+
+def create_accepted_trip(payload):
+    pickup = str(payload.get("pickup", "")).strip()
+    destination = str(payload.get("destination", "")).strip()
+    if not pickup or not destination:
+        raise ValueError("Accepted trip pickup and destination are required.")
+
+    trip = {
+        "id": str(uuid4()),
+        "source": str(payload.get("source", "Fleet app")).strip() or "Fleet app",
+        "sourceOrderId": str(payload.get("sourceOrderId", "")).strip(),
+        "pickup": pickup,
+        "destination": destination,
+        "acceptedAt": str(payload.get("acceptedAt", "")).strip(),
+    }
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO accepted_trips (
+              id, source, source_order_id, pickup, destination, accepted_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trip["id"], trip["source"], trip["sourceOrderId"],
+                trip["pickup"], trip["destination"], trip["acceptedAt"],
+            ),
+        )
+    return trip
+
+
+def fetch_pending_accepted_trip():
+    with connect_db() as db:
+        row = db.execute(
+            """
+            SELECT id, source, source_order_id, pickup, destination, accepted_at, created_at
+            FROM accepted_trips
+            WHERE consumed_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"], "source": row["source"],
+        "sourceOrderId": row["source_order_id"], "pickup": row["pickup"],
+        "destination": row["destination"], "acceptedAt": row["accepted_at"],
+        "createdAt": row["created_at"],
+    }
+
+
+def acknowledge_accepted_trip(payload):
+    trip_id = str(payload.get("id", "")).strip()
+    if not trip_id:
+        raise ValueError("Accepted trip id is required.")
+    with connect_db() as db:
+        db.execute(
+            "UPDATE accepted_trips SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (trip_id,),
+        )
+    return {"id": trip_id}
 
 
 def create_route_recording(payload):
@@ -1292,7 +1428,12 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/incoming-order":
-            self.send_json({"ok": True, "order": fetch_pending_order()})
+            orders = fetch_pending_orders()
+            self.send_json({"ok": True, "orders": orders, "order": orders[0] if orders else None})
+            return
+
+        if path == "/api/accepted-trip":
+            self.send_json({"ok": True, "trip": fetch_pending_accepted_trip()})
             return
 
         if path == "/api/route-recording/active":
@@ -1325,7 +1466,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
             self.send_error(404, "Not found")
             return
 
@@ -1339,6 +1480,18 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/incoming-order/ack":
                 self.send_json({"ok": True, "order": acknowledge_incoming_order(payload)})
+                return
+
+            if path == "/api/incoming-order/verify":
+                self.send_json({"ok": True, **verify_incoming_order(payload)})
+                return
+
+            if path == "/api/accepted-trip":
+                self.send_json({"ok": True, "trip": create_accepted_trip(payload)})
+                return
+
+            if path == "/api/accepted-trip/ack":
+                self.send_json({"ok": True, "trip": acknowledge_accepted_trip(payload)})
                 return
 
             if path == "/api/ocr-order":

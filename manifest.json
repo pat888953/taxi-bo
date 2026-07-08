@@ -1,6 +1,6 @@
 {
-  "name": "Taxi Bo Route Recall",
-  "short_name": "Taxi Bo",
+  "name": "TaxiBo Cue",
+  "short_name": "TaxiBo Cue",
   "description": "Save driving routes, attach junction photos, and review them visually before the next trip.",
   "start_url": "./index.html",
   "scope": "./",

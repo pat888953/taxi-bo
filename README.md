@@ -1,6 +1,11 @@
-# Taxi Bo
+# TaxiBo
 
-Taxi Bo is a lightweight route-recall app for drivers. You save a route, attach your own junction photos in sequence, and then pick a destination to review the route visually before the drive.
+TaxiBo is split into two focused modules:
+
+- **TaxiBo Cue** (`index.html`) receives an accepted pickup and destination, then provides route photos, voice cues, speed awareness, and route recording.
+- **TaxiBo 4-in-One** (`four-in-one.html`) collects OCR offers from separate fleet adapters, lets the driver compare them, and passes only a confirmed accepted trip to TaxiBo Cue.
+
+The Android FlyTaxi adapter lives in `android-companion` and posts scanned offers to TaxiBo 4-in-One.
 
 ## What this first version does
 
@@ -51,7 +56,11 @@ Taxi Bo is a lightweight route-recall app for drivers. You save a route, attach 
    & "C:\Users\as400\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" server.py
    ```
 
-2. Open `http://127.0.0.1:8000/index.html` in a browser.
+2. Open the required module:
+
+   - TaxiBo Cue: `http://127.0.0.1:8000/index.html`
+   - TaxiBo 4-in-One: `http://127.0.0.1:8000/four-in-one.html`
+
 3. Create your own route, or enter a destination and use `Generate and save route` to start from your current location.
 4. Add photos for key junctions and landmarks.
 5. Add latitude and longitude if you want that stop to appear on the map.

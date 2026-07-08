@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Taxi Bo Route Recall</title>
+  <title>TaxiBo Cue</title>
   <meta name="theme-color" content="#20352c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Taxi Bo">
+  <meta name="apple-mobile-web-app-title" content="TaxiBo Cue">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.svg">
@@ -17,10 +17,15 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=59">
+  <link rel="stylesheet" href="styles.css?v=60">
 </head>
 <body>
   <div class="page-shell">
+    <header class="module-switcher">
+      <div><span>Driver guidance</span><strong>TaxiBo Cue</strong></div>
+      <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
+    </header>
+    <div id="acceptedTripState" class="accepted-trip-state" hidden aria-live="polite"></div>
     <main class="layout">
       <section class="cue-preview-strip top-driver-bar" aria-label="Three photo cues">
         <div class="cue-preview-header">
@@ -428,7 +433,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=59"></script>
+  <script src="app.js?v=60"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

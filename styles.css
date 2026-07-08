@@ -313,6 +313,63 @@ h3 {
   box-shadow: var(--shadow);
 }
 
+.module-switcher {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.module-switcher div {
+  display: grid;
+  gap: 2px;
+}
+
+.module-switcher span {
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.module-switcher strong {
+  font-size: 1.2rem;
+}
+
+.module-switcher a {
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-soft);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.accepted-trip-state {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-tint);
+}
+
+.accepted-trip-state[hidden] {
+  display: none;
+}
+
+.accepted-trip-state span {
+  color: var(--muted);
+}
+
 .cue-preview-strip.in-panel {
   margin-top: 16px;
   margin-bottom: 0;
@@ -1652,6 +1709,16 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 720px) {
+  .module-switcher,
+  .accepted-trip-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .module-switcher a {
+    text-align: center;
+  }
+
   .speed-awareness,
   .speed-warning-form {
     grid-template-columns: 1fr;

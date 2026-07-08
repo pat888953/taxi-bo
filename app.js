@@ -2,12 +2,13 @@ const ROUTES_API = "/api/routes";
 const GENERATE_ROUTE_API = "/api/generate-route";
 const GENERATE_CUES_API = "/api/generate-cues";
 const PREPARE_ROUTE_API = "/api/prepare-route";
-const INCOMING_ORDER_API = "/api/incoming-order";
+const ACCEPTED_TRIP_API = "/api/accepted-trip";
 const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
+const acceptedTripState = document.querySelector("#acceptedTripState");
 const destinationSearch = document.querySelector("#destinationSearch");
 const destinationVoiceButton = document.querySelector("#destinationVoiceButton");
 const photoRouteSelect = document.querySelector("#photoRouteSelect");
@@ -127,8 +128,9 @@ let liveDrivePosition = null;
 let liveDriveTimeoutId = null;
 let liveDriveSimulationId = null;
 let liveDriveSimulationIndex = 0;
-let lastIncomingOrderId = sessionStorage.getItem("taxiBoLastIncomingOrderId") || "";
-let incomingOrderPollInFlight = false;
+let lastAcceptedTripId = sessionStorage.getItem("taxiBoLastAcceptedTripId") || "";
+let acceptedTripPollInFlight = false;
+let acceptedTripContext = null;
 let activeRouteRecording = null;
 let completedRouteRecording = null;
 let recordingFlushTimeoutId = null;
@@ -149,7 +151,7 @@ setupInstallPrompt();
 setupDestinationVoiceInput();
 loadRoutes();
 loadSpeedWarnings();
-startIncomingOrderPolling();
+startAcceptedTripPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
 
@@ -166,7 +168,11 @@ destinationVoiceButton.addEventListener("click", () => {
   toggleDestinationVoiceInput();
 });
 
-destinationSearch.addEventListener("input", () => {
+destinationSearch.addEventListener("input", (event) => {
+  if (event.isTrusted && acceptedTripContext) {
+    acceptedTripContext = null;
+    acceptedTripState.hidden = true;
+  }
   preparedRoute = null;
   if (destinationSearch.value.trim()) {
     routeSummary.className = "route-summary empty-state";
@@ -1827,7 +1833,8 @@ async function prepareRouteFromDestination() {
   const selectedRoute = routes.find((item) => item.id === destinationSelect.value);
   const typedDestination = destinationSearch.value.trim();
   const destination = typedDestination || selectedRoute?.destination || "";
-  const start = typedDestination ? "" : selectedRoute?.start || "";
+  const acceptedPickup = String(acceptedTripContext?.pickup || "").trim();
+  const start = acceptedPickup || (typedDestination ? "" : selectedRoute?.start || "");
   let currentPosition = null;
   let locationContext = "";
 
@@ -1920,47 +1927,120 @@ async function prepareRouteOnServer(payload) {
   return result.route;
 }
 
-function startIncomingOrderPolling() {
-  pollIncomingOrder();
-  window.setInterval(pollIncomingOrder, 2500);
+function startAcceptedTripPolling() {
+  pollAcceptedTrip();
+  window.setInterval(pollAcceptedTrip, 2500);
 }
 
-async function pollIncomingOrder() {
-  if (incomingOrderPollInFlight) {
-    return;
-  }
-
-  incomingOrderPollInFlight = true;
-
+async function pollAcceptedTrip() {
+  if (acceptedTripPollInFlight) return;
+  acceptedTripPollInFlight = true;
   try {
-    const response = await fetch(INCOMING_ORDER_API, {
-      headers: {
-        Accept: "application/json",
-        "Cache-Control": "no-store"
-      },
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      return;
-    }
-
+    const response = await fetch(ACCEPTED_TRIP_API, { cache: "no-store" });
+    if (!response.ok) return;
     const result = await response.json();
-    const order = result.order;
+    const trip = result.trip;
+    if (!trip?.id || trip.id === lastAcceptedTripId || !trip.pickup || !trip.destination) return;
+    lastAcceptedTripId = trip.id;
+    sessionStorage.setItem("taxiBoLastAcceptedTripId", trip.id);
+    acceptedTripContext = trip;
+    acceptedTripState.hidden = false;
+    acceptedTripState.innerHTML = `<strong>${escapeHtml(trip.source)} accepted trip</strong><span>${escapeHtml(trip.pickup)} to ${escapeHtml(trip.destination)}</span>`;
+    preparedRoute = null;
+    destinationSearch.value = trip.destination;
+    destinationSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    routeSummary.className = "route-summary";
+    routeSummary.innerHTML = `<strong>Accepted trip received from TaxiBo 4-in-One.</strong><br>Pickup: ${escapeHtml(trip.pickup)}<br>Destination: ${escapeHtml(trip.destination)}<br>Preparing driving cues...`;
+    await acknowledgeAcceptedTrip(trip.id);
+    prepareRouteFromDestination();
+  } catch {
+    // Cue remains usable when the handoff service is temporarily unavailable.
+  } finally {
+    acceptedTripPollInFlight = false;
+  }
+}
 
-    if (!order?.id || order.id === lastIncomingOrderId || !order.destination) {
-      return;
-    }
+async function acknowledgeAcceptedTrip(id) {
+  await fetch(`${ACCEPTED_TRIP_API}/ack`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id })
+  }).catch(() => {});
+}
 
+/* Legacy combined-page offer handlers. The live 4-in-One implementation is in four-in-one.js.
+function renderIncomingOrders() {
+  if (!orderInboxCards) return;
+  orderInboxCards.innerHTML = "";
+  orderInboxCount.textContent = incomingOrders.length ? `${incomingOrders.length} FlyTaxi offer${incomingOrders.length === 1 ? "" : "s"}` : "Waiting for FlyTaxi";
+  orderInboxStatus.hidden = incomingOrders.length > 0;
+
+  incomingOrders.forEach((order) => {
+    const ageMs = Date.now() - parseServerTime(order.capturedAt || order.createdAt);
+    const stale = !Number.isFinite(ageMs) || ageMs > 120000;
+    const card = document.createElement("article");
+    card.className = `order-card${stale ? " is-stale" : ""}`;
+    card.innerHTML = `
+      <div class="order-card-head"><span class="fleet-badge">${escapeHtml(order.source || "FlyTaxi")}</span><span class="order-age">${formatOfferAge(ageMs)}</span></div>
+      <div class="order-route">
+        <div class="order-place"><span>Pickup</span><strong>${escapeHtml(order.pickup || "Not recognized")}</strong></div>
+        <div class="order-place"><span>To</span><strong>${escapeHtml(order.destination)}</strong></div>
+      </div>
+      <div class="order-card-meta">
+        <div><span>Fare</span><strong>${escapeHtml(order.fare || "—")}</strong></div>
+        <div><span>Wait</span><strong>${escapeHtml(order.waitingTime || "—")}</strong></div>
+        <div><span>Status</span><strong>${escapeHtml(order.lockStatus || "unknown")}</strong></div>
+      </div>
+      <p class="order-safety">${stale ? "This capture is over 2 minutes old. Scan again before opening FlyTaxi." : "TaxiBo will verify this exact captured offer before opening FlyTaxi."}</p>
+      <div class="order-card-actions">
+        <button class="primary-button open-fleet-order" type="button" ${stale ? "disabled" : ""}>Verify & open FlyTaxi</button>
+        <button class="secondary-button dismiss-fleet-order" type="button">Dismiss</button>
+      </div>`;
+    card.querySelector(".open-fleet-order")?.addEventListener("click", () => verifyAndOpenFleetOrder(order, card));
+    card.querySelector(".dismiss-fleet-order")?.addEventListener("click", () => dismissIncomingOrder(order.id));
+    orderInboxCards.appendChild(card);
+  });
+}
+
+function parseServerTime(value) {
+  if (!value) return NaN;
+  const normalized = /Z$|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(" ", "T")}Z`;
+  return new Date(normalized).getTime();
+}
+
+function formatOfferAge(ageMs) {
+  if (!Number.isFinite(ageMs)) return "Time unknown";
+  const seconds = Math.max(0, Math.round(ageMs / 1000));
+  return seconds < 60 ? `Captured ${seconds}s ago` : `Captured ${Math.floor(seconds / 60)}m ago`;
+}
+
+async function verifyAndOpenFleetOrder(order, card) {
+  const button = card.querySelector(".open-fleet-order");
+  button.disabled = true;
+  button.textContent = "Verifying exact offer…";
+  try {
+    const response = await fetch(`${INCOMING_ORDER_API}/verify`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: order.id, fingerprint: order.fingerprint })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.valid) throw new Error(result.reason || "Offer could not be verified.");
     lastIncomingOrderId = order.id;
     sessionStorage.setItem("taxiBoLastIncomingOrderId", order.id);
     await acknowledgeIncomingOrder(order.id);
     useIncomingDestination(order.destination);
-  } catch {
-    // Keep polling quietly; the status panel is reserved for driver-facing route state.
-  } finally {
-    incomingOrderPollInFlight = false;
+    window.location.href = "intent://open#Intent;package=com.flytaxi;end";
+  } catch (error) {
+    card.classList.add("is-stale");
+    card.querySelector(".order-safety").textContent = error.message || "Offer changed. Scan FlyTaxi again.";
+    button.textContent = "Scan again in FlyTaxi";
   }
+}
+
+async function dismissIncomingOrder(orderId) {
+  await acknowledgeIncomingOrder(orderId);
+  incomingOrders = incomingOrders.filter((order) => order.id !== orderId);
+  renderIncomingOrders();
 }
 
 async function acknowledgeIncomingOrder(orderId) {
@@ -1986,6 +2066,7 @@ function useIncomingDestination(destination) {
   prepareRouteFromDestination();
 }
 
+*/
 function createPreparedCues(cues) {
   return createGeneratedCues(cues).map((cue, index) => {
     const source = cues[index] || {};

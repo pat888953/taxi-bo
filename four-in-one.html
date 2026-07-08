@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaxiBo 4-in-One</title>
+  <meta name="theme-color" content="#153d78">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="four-in-one.css?v=1">
+</head>
+<body>
+  <div class="module-shell">
+    <header class="module-header">
+      <div>
+        <p>Fleet order inbox</p>
+        <h1>TaxiBo 4-in-One</h1>
+      </div>
+      <a href="index.html">Open TaxiBo Cue</a>
+    </header>
+
+    <main>
+      <section class="inbox-toolbar" aria-labelledby="offersTitle">
+        <div>
+          <h2 id="offersTitle">Current orders</h2>
+          <p>Compare fleet offers here. Acceptance remains in the original company app.</p>
+        </div>
+        <div class="toolbar-actions">
+          <span id="offerCount">Waiting for fleet scans</span>
+          <button id="refreshOffers" type="button">Refresh</button>
+        </div>
+      </section>
+
+      <div id="inboxStatus" class="inbox-status" aria-live="polite">No current offers. Scan an unlocked order with a fleet adapter.</div>
+      <section id="offerGrid" class="offer-grid" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <script src="four-in-one.js?v=1"></script>
+</body>
+</html>
