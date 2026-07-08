@@ -85,6 +85,9 @@ const photoInputStatus = document.querySelector("#photoInputStatus");
 const routePhotos = document.querySelector("#routePhotos");
 const routeForm = document.querySelector("#routeForm");
 const photoForm = document.querySelector("#photoForm");
+const photoTitleInput = document.querySelector("#photoTitle");
+const photoEditorSection = photoForm.closest("section");
+const maintenanceDrawer = document.querySelector(".maintenance-drawer");
 const routeList = document.querySelector("#routeList");
 const routeLibrarySearch = document.querySelector("#routeLibrarySearch");
 const routeLibraryFilter = document.querySelector("#routeLibraryFilter");
@@ -2415,10 +2418,11 @@ function startPhotoEdit(routeId, photoId) {
     return;
   }
 
+  maintenanceDrawer.open = true;
   editingPhoto = { routeId, photoId };
   photoRouteSelect.value = routeId;
   renderPhotoStepOptions(routeId, photo.step);
-  document.querySelector("#photoTitle").value = photo.title;
+  photoTitleInput.value = photo.title;
   document.querySelector("#photoInstruction").value = photo.instruction;
   document.querySelector("#photoNotes").value = photo.notes;
   photoLatitudeInput.value = Number.isFinite(photo.latitude) ? photo.latitude : "";
@@ -2430,6 +2434,11 @@ function startPhotoEdit(routeId, photoId) {
 
   updatePhotoFormState();
   updateCueCoordinateStatus(photo);
+
+  window.requestAnimationFrame(() => {
+    photoEditorSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    photoTitleInput.focus({ preventScroll: true });
+  });
 }
 
 function resetPhotoForm(routeId = photoRouteSelect.value, suggestedStep = 1) {

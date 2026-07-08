@@ -878,6 +878,10 @@ h3 {
   box-shadow: var(--shadow);
 }
 
+.maintenance-drawer .panel {
+  scroll-margin-top: 16px;
+}
+
 .maintenance-drawer > summary {
   display: flex;
   justify-content: space-between;
