@@ -115,6 +115,7 @@ let deferredInstallPrompt = null;
 let lookupAbortController = null;
 let routeAbortController = null;
 let routeGeocodeAbortController = null;
+let mapRenderVersion = 0;
 let simulationIndex = 0;
 let dataFileHandle = null;
 let isSavingToDisk = false;
@@ -1244,19 +1245,22 @@ async function drawRouteMap(route) {
     return;
   }
 
-  clearMap();
+  const renderVersion = ++mapRenderVersion;
+  clearMap(false);
 
-  const locatedPhotos = route.photos
+  const allLocatedPhotos = route.photos
     .slice()
     .sort((a, b) => a.step - b.step)
     .filter((photo) => Number.isFinite(photo.latitude) && Number.isFinite(photo.longitude));
+  const locatedPhotos = selectCoherentMapPhotos(allLocatedPhotos);
 
   if (!locatedPhotos.length) {
-    await drawRouteEndpoints(route);
+    await drawRouteEndpoints(route, renderVersion);
     return;
   }
 
-  routeMapState.textContent = `${locatedPhotos.length} mapped stop${locatedPhotos.length === 1 ? "" : "s"} on this route.`;
+  const ignoredCount = allLocatedPhotos.length - locatedPhotos.length;
+  routeMapState.textContent = `${locatedPhotos.length} mapped stop${locatedPhotos.length === 1 ? "" : "s"} on this route.${ignoredCount ? ` Ignored ${ignoredCount} distant GPS outlier${ignoredCount === 1 ? "" : "s"}.` : ""}`;
   routeMapState.className = "route-map-state";
 
   const latLngs = locatedPhotos.map((photo) => [photo.latitude, photo.longitude]);
@@ -1272,6 +1276,10 @@ async function drawRouteMap(route) {
   });
 
   const routedLatLngs = await getRouteGeometry(latLngs);
+
+  if (renderVersion !== mapRenderVersion) {
+    return;
+  }
 
   routeLine = L.polyline(routedLatLngs, {
     color: "#c35f2d",
@@ -1289,7 +1297,10 @@ async function drawRouteMap(route) {
   });
 }
 
-function clearMap() {
+function clearMap(invalidatePendingRender = true) {
+  if (invalidatePendingRender) {
+    mapRenderVersion += 1;
+  }
   cancelRouteRequest();
   cancelRouteGeocodeRequest();
 
@@ -1311,6 +1322,48 @@ function clearMap() {
   }
 
   clearLiveDriveMap();
+}
+
+function selectCoherentMapPhotos(photos) {
+  if (photos.length < 2) {
+    return photos;
+  }
+
+  const points = photos.map((photo) => [photo.latitude, photo.longitude]);
+  let widestDistance = 0;
+
+  for (let first = 0; first < points.length; first += 1) {
+    for (let second = first + 1; second < points.length; second += 1) {
+      widestDistance = Math.max(widestDistance, haversineDistance(points[first], points[second]));
+    }
+  }
+
+  // Taxi routes are local. If GPS errors create a continent-spanning set,
+  // retain the strongest 120 km cluster rather than fitting the whole world.
+  if (widestDistance <= 500000) {
+    return photos;
+  }
+
+  const clusterRadius = 120000;
+  let bestCluster = [];
+
+  points.forEach((center, centerIndex) => {
+    const cluster = photos.filter((photo) =>
+      haversineDistance(center, [photo.latitude, photo.longitude]) <= clusterRadius
+    );
+
+    if (cluster.length > bestCluster.length) {
+      bestCluster = cluster;
+    } else if (cluster.length === bestCluster.length && cluster.includes(photos[centerIndex])) {
+      const currentLatestStep = Math.max(...cluster.map((photo) => photo.step));
+      const bestLatestStep = Math.max(...bestCluster.map((photo) => photo.step));
+      if (currentLatestStep > bestLatestStep) {
+        bestCluster = cluster;
+      }
+    }
+  });
+
+  return bestCluster.length ? bestCluster : photos;
 }
 
 function getCaptureCue() {
@@ -3905,7 +3958,7 @@ function setLookupStatus(message, isError = false) {
   lookupStatus.textContent = message;
 }
 
-async function drawRouteEndpoints(route) {
+async function drawRouteEndpoints(route, renderVersion = mapRenderVersion) {
   const start = route.start?.trim();
   const destination = route.destination?.trim();
   const savedGeometry = normalizeRouteGeometry(route.routeGeometry);
@@ -3964,6 +4017,10 @@ async function drawRouteEndpoints(route) {
       longitude: route.destinationLongitude
     } : (destination ? await geocodeQuery(destination, "route") : null);
 
+    if (renderVersion !== mapRenderVersion) {
+      return;
+    }
+
     const points = [];
 
     if (startResult) {
@@ -3988,6 +4045,9 @@ async function drawRouteEndpoints(route) {
 
     if (points.length > 1) {
       const routedLatLngs = await getRouteGeometry(points);
+      if (renderVersion !== mapRenderVersion) {
+        return;
+      }
       routeLine = L.polyline(routedLatLngs, {
         color: "#8d6c57",
         weight: 4,
