@@ -18,6 +18,11 @@ const photoRouteStatus = document.querySelector("#photoRouteStatus");
 const reviewRouteButton = document.querySelector("#reviewRouteButton");
 const enterRouteButton = document.querySelector("#enterRouteButton");
 const goDestinationButton = document.querySelector("#goDestinationButton");
+const destinationModeRadio = document.querySelector("#destinationModeRadio");
+const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
+const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
+const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
+const savedRouteActions = document.querySelector("#savedRouteActions");
 const exportRoutesButton = document.querySelector("#exportRoutesButton");
 const importRoutesInput = document.querySelector("#importRoutesInput");
 const mapPickerButton = document.querySelector("#mapPickerButton");
@@ -148,6 +153,7 @@ let lastSpokenCueId = "";
 let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
+let routeEntryMode = "saved";
 
 render();
 initializeMap();
@@ -158,8 +164,18 @@ loadSpeedWarnings();
 startAcceptedTripPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
+setRouteEntryMode("saved");
+
+destinationModeRadio.addEventListener("change", () => {
+  if (destinationModeRadio.checked) setRouteEntryMode("destination");
+});
+
+savedRouteModeRadio.addEventListener("change", () => {
+  if (savedRouteModeRadio.checked) setRouteEntryMode("saved");
+});
 
 reviewRouteButton.addEventListener("click", () => {
+  setRouteEntryMode("saved");
   preparedRoute = null;
   displaySelectedRoute();
 });
@@ -186,18 +202,42 @@ destinationSearch.addEventListener("input", (event) => {
   renderDestinationSelect();
   if (destinationSearch.value.trim()) {
     routeSummary.className = "route-summary empty-state";
-    routeSummary.textContent = destinationSelect.value
-      ? "Press Enter to display this saved route, or GO to prepare driving cues."
-      : "Press GO to prepare driving cues for this destination.";
+    routeSummary.textContent = "Press GO to prepare driving cues for this destination.";
   } else {
     displaySelectedRoute();
   }
 });
 
 destinationSelect.addEventListener("change", () => {
+  setRouteEntryMode("saved");
   preparedRoute = null;
   displaySelectedRoute();
 });
+
+function setRouteEntryMode(mode) {
+  const previousMode = routeEntryMode;
+  routeEntryMode = mode === "destination" ? "destination" : "saved";
+  const destinationActive = routeEntryMode === "destination";
+
+  if (!destinationActive && previousMode === "destination" && destinationSearch.value) {
+    destinationSearch.value = "";
+    renderDestinationSelect();
+  }
+
+  destinationModeRadio.checked = destinationActive;
+  savedRouteModeRadio.checked = !destinationActive;
+  destinationSearch.disabled = !destinationActive;
+  destinationVoiceButton.disabled = !destinationActive;
+  goDestinationButton.disabled = !destinationActive;
+  destinationSelect.disabled = destinationActive;
+  enterRouteButton.disabled = destinationActive;
+
+  destinationEntryGroup.classList.toggle("is-disabled", !destinationActive);
+  savedRouteEntryGroup.classList.toggle("is-disabled", destinationActive);
+  savedRouteActions.classList.toggle("is-disabled", destinationActive);
+  destinationEntryGroup.setAttribute("aria-disabled", String(!destinationActive));
+  savedRouteEntryGroup.setAttribute("aria-disabled", String(destinationActive));
+}
 
 exportRoutesButton.addEventListener("click", () => {
   exportRoutes();
@@ -591,6 +631,9 @@ async function loadRoutes() {
     const savedRoutes = await response.json();
     routes = Array.isArray(savedRoutes) ? savedRoutes.map(normalizeImportedRoute) : [];
     render();
+    if (!acceptedTripContext) {
+      setRouteEntryMode(routes.length ? "saved" : "destination");
+    }
     displaySelectedRoute();
     updatePhotoRouteStatus();
     updateRouteLibraryStatus();
@@ -977,6 +1020,7 @@ function renderRouteList() {
     `;
 
     article.querySelector(".route-review-button").addEventListener("click", () => {
+      setRouteEntryMode("saved");
       preparedRoute = null;
       destinationSearch.value = "";
       destinationSelect.value = route.id;
@@ -1903,7 +1947,9 @@ async function generateRouteOnServer(payload) {
 }
 
 async function prepareRouteFromDestination(offerAlternatives = false) {
-  const selectedRoute = routes.find((item) => item.id === destinationSelect.value);
+  const selectedRoute = routeEntryMode === "saved"
+    ? routes.find((item) => item.id === destinationSelect.value)
+    : null;
   const typedDestination = destinationSearch.value.trim();
   // A route-name search may remain in the text box after the driver picks a
   // saved route. In that case the database endpoints must win over the search
@@ -1970,7 +2016,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     routeSummary.className = "route-summary";
     routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
   } finally {
-    goDestinationButton.disabled = false;
+    goDestinationButton.disabled = routeEntryMode !== "destination";
   }
 }
 
@@ -2097,6 +2143,7 @@ async function pollAcceptedTrip() {
     lastAcceptedTripId = trip.id;
     sessionStorage.setItem("taxiBoLastAcceptedTripId", trip.id);
     acceptedTripContext = trip;
+    setRouteEntryMode("destination");
     acceptedTripState.hidden = false;
     acceptedTripState.innerHTML = `<strong>${escapeHtml(trip.source)} accepted trip</strong><span>${escapeHtml(trip.pickup)} to ${escapeHtml(trip.destination)}</span>`;
     preparedRoute = null;

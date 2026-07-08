@@ -1074,6 +1074,55 @@ h3 {
   color: #fff;
 }
 
+.route-entry-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.route-entry-toggle label {
+  position: relative;
+  cursor: pointer;
+}
+
+.route-entry-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.route-entry-toggle span {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.route-entry-toggle input:checked + span {
+  background: var(--accent);
+  color: #fff;
+}
+
+.route-entry-toggle input:focus-visible + span {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.route-entry-group {
+  transition: opacity 140ms ease;
+}
+
+.route-entry-group.is-disabled {
+  opacity: 0.48;
+}
+
 input,
 textarea,
 select,

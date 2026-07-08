@@ -1,4 +1,4 @@
-const CACHE_NAME = "taxi-bo-v68";
+const CACHE_NAME = "taxi-bo-v69";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,8 +6,8 @@ const APP_SHELL = [
   "./four-in-one.css",
   "./four-in-one.js",
   "./phone.html",
-  "./styles.css?v=68",
-  "./app.js?v=68",
+  "./styles.css?v=69",
+  "./app.js?v=69",
   "./phone.js",
   "./manifest.json",
   "./icons/icon.svg",
