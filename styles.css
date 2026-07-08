@@ -1171,6 +1171,39 @@ button:hover,
   line-height: 1.55;
 }
 
+.route-choice-summary {
+  background: var(--surface-soft);
+  border-left-color: var(--accent);
+}
+
+.route-choice-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.route-choice-button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+}
+
+.route-choice-button:hover {
+  border-color: var(--accent);
+  background: #f2f8f4;
+}
+
+.route-choice-button span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .form-state {
   margin-bottom: 16px;
   line-height: 1.5;

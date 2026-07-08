@@ -23,6 +23,12 @@ HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
 }
+
+HONG_KONG_TUNNEL_OPTIONS = (
+    ("hung-hom", "Hung Hom Tunnel", {"latitude": 22.3029, "longitude": 114.1815}),
+    ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
+    ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
+)
 MAX_OCR_IMAGE_BYTES = 12 * 1024 * 1024
 OCR_ENGINE = None
 
@@ -880,6 +886,13 @@ def normalize_ocr_line(line):
 
 
 def generate_route(payload):
+    start, destination, start_label = resolve_route_endpoints(payload)
+    road_route = fetch_road_route(start, destination)
+
+    return format_generated_route(start, destination, start_label, road_route)
+
+
+def resolve_route_endpoints(payload):
     start_text = str(payload.get("start") or "").strip()
     destination_text = str(payload.get("destination") or "").strip()
     current_position = payload.get("currentPosition") or {}
@@ -905,7 +918,10 @@ def generate_route(payload):
         start_label = "Current location"
 
     destination = geocode_place(destination_text)
-    road_route = fetch_road_route(start, destination)
+    return start, destination, start_label
+
+
+def format_generated_route(start, destination, start_label, road_route):
 
     return {
         "start": {
@@ -958,6 +974,50 @@ def prepare_route(payload):
     generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
     generated["cueCount"] = len(matched_cues)
     return generated
+
+
+def prepare_route_options(payload):
+    start, destination, start_label = resolve_route_endpoints(payload)
+
+    if not requires_harbour_crossing(start, destination):
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        return {"options": [match_prepared_route(generated, "fastest", "Fastest route")]}
+
+    options = []
+    for option_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
+        try:
+            road_route = fetch_road_route(start, destination, [waypoint])
+            generated = format_generated_route(start, destination, start_label, road_route)
+            options.append(match_prepared_route(generated, option_id, label))
+        except Exception:
+            continue
+
+    if not options:
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        options.append(match_prepared_route(generated, "fastest", "Fastest route"))
+
+    return {"options": options}
+
+
+def match_prepared_route(generated, option_id, label):
+    matched_cues = match_saved_photo_cues(generated["cues"])
+    generated["cues"] = matched_cues
+    generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
+    generated["cueCount"] = len(matched_cues)
+    generated["optionId"] = option_id
+    generated["optionLabel"] = label
+    return generated
+
+
+def requires_harbour_crossing(start, destination):
+    points = (start, destination)
+    if not all(21.9 <= point["latitude"] <= 22.6 and 113.8 <= point["longitude"] <= 114.5 for point in points):
+        return False
+
+    harbour_divide = 22.295
+    return (start["latitude"] - harbour_divide) * (destination["latitude"] - harbour_divide) < 0
 
 
 def match_saved_photo_cues(cues, radius_meters=80):
@@ -1206,8 +1266,11 @@ def try_photon(query):
     }
 
 
-def fetch_road_route(start, destination):
-    coordinates = f'{start["longitude"]},{start["latitude"]};{destination["longitude"]},{destination["latitude"]}'
+def fetch_road_route(start, destination, waypoints=None):
+    route_points = [start, *(waypoints or []), destination]
+    coordinates = ";".join(
+        f'{point["longitude"]},{point["latitude"]}' for point in route_points
+    )
     url = f"https://router.project-osrm.org/route/v1/driving/{coordinates}?" + urlencode(
         {
             "overview": "full",
@@ -1476,7 +1539,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
             self.send_error(404, "Not found")
             return
 
@@ -1536,6 +1599,9 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
                 generated = generate_route(payload)
             elif path == "/api/prepare-route":
                 generated = prepare_route(payload)
+            elif path == "/api/prepare-route-options":
+                self.send_json({"ok": True, **prepare_route_options(payload)})
+                return
             else:
                 generated = generate_cues(payload)
 

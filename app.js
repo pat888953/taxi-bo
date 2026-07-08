@@ -2,6 +2,7 @@ const ROUTES_API = "/api/routes";
 const GENERATE_ROUTE_API = "/api/generate-route";
 const GENERATE_CUES_API = "/api/generate-cues";
 const PREPARE_ROUTE_API = "/api/prepare-route";
+const PREPARE_ROUTE_OPTIONS_API = "/api/prepare-route-options";
 const ACCEPTED_TRIP_API = "/api/accepted-trip";
 const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
@@ -146,6 +147,7 @@ let lastSpeedAlert = { id: "", at: 0, overspeed: false };
 let lastSpokenCueId = "";
 let captureCueId = "";
 let captureImageData = null;
+let pendingRouteChoices = [];
 
 render();
 initializeMap();
@@ -168,7 +170,7 @@ enterRouteButton.addEventListener("click", () => {
 });
 
 goDestinationButton.addEventListener("click", () => {
-  prepareRouteFromDestination();
+  prepareRouteFromDestination(true);
 });
 
 destinationVoiceButton.addEventListener("click", () => {
@@ -1900,7 +1902,7 @@ async function generateRouteOnServer(payload) {
   return result.route;
 }
 
-async function prepareRouteFromDestination() {
+async function prepareRouteFromDestination(offerAlternatives = false) {
   const selectedRoute = routes.find((item) => item.id === destinationSelect.value);
   const typedDestination = destinationSearch.value.trim();
   // A route-name search may remain in the text box after the driver picks a
@@ -1948,44 +1950,89 @@ async function prepareRouteFromDestination() {
       locationContext = ` Start supplied by this device: ${current.coords.latitude.toFixed(5)}, ${current.coords.longitude.toFixed(5)}${Number.isFinite(accuracy) ? ` (accuracy about ${Math.round(accuracy)} m)` : ""}.`;
     }
 
-    const generatedRoute = await prepareRouteOnServer({
+    const payload = {
       start,
       destination,
       currentPosition
-    });
-    const matchedCueCount = Number(generatedRoute.matchedCueCount || 0);
-    const cueCount = Number(generatedRoute.cueCount || generatedRoute.cues?.length || 0);
+    };
 
-    preparedRoute = normalizeImportedRoute({
-      id: `prepared-${Date.now()}`,
-      name: `Prepared: ${shortPlaceName(generatedRoute.destinationLabel || destination)}`,
-      variant: "Prepared",
-      start: generatedRoute.startLabel || start || "Current location",
-      destination: generatedRoute.destinationLabel || destination,
-      notes: `Prepared route. ${matchedCueCount} of ${cueCount} cues matched saved photos.`,
-      startLatitude: generatedRoute.start?.latitude,
-      startLongitude: generatedRoute.start?.longitude,
-      destinationLatitude: generatedRoute.destination?.latitude,
-      destinationLongitude: generatedRoute.destination?.longitude,
-      routeGeometry: generatedRoute.geometry,
-      routeDistanceMeters: generatedRoute.distance,
-      routeDurationSeconds: generatedRoute.duration,
-      photos: createPreparedCues(generatedRoute.cues || [])
-    });
-
-    displayRoute(preparedRoute);
-    routeSummary.className = "route-summary";
-    routeSummary.innerHTML = `
-      <strong>${escapeHtml(preparedRoute.name)}</strong><br>
-      Destination: ${escapeHtml(preparedRoute.destination)}<br>
-      Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
-    `;
+    if (offerAlternatives) {
+      const options = await prepareRouteOptionsOnServer(payload);
+      if (options.length > 1) {
+        showPreparedRouteChoices(options, destination, locationContext);
+        return;
+      }
+      applyPreparedRoute(options[0], destination, locationContext);
+    } else {
+      applyPreparedRoute(await prepareRouteOnServer(payload), destination, locationContext);
+    }
   } catch (error) {
     routeSummary.className = "route-summary";
     routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
   } finally {
     goDestinationButton.disabled = false;
   }
+}
+
+function showPreparedRouteChoices(options, destination, locationContext) {
+  pendingRouteChoices = options;
+  routeSummary.className = "route-summary route-choice-summary";
+  routeSummary.innerHTML = `
+    <strong>Choose a harbour crossing</strong>
+    <div class="route-choice-list">
+      ${options.map((option, index) => `
+        <button class="route-choice-button" type="button" data-route-choice="${index}">
+          <strong>${escapeHtml(option.optionLabel || `Route ${index + 1}`)}</strong>
+          <span>${escapeHtml(formatDistance(option.distance))} · ${escapeHtml(formatRouteDuration(option.duration))} · ${Number(option.cueCount || option.cues?.length || 0)} cues</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+
+  routeSummary.querySelectorAll(".route-choice-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const selected = pendingRouteChoices[Number(button.dataset.routeChoice)];
+      if (selected) {
+        applyPreparedRoute(selected, destination, locationContext);
+        pendingRouteChoices = [];
+      }
+    });
+  });
+}
+
+function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
+  if (!generatedRoute) {
+    throw new Error("No route option was returned.");
+  }
+
+  const matchedCueCount = Number(generatedRoute.matchedCueCount || 0);
+  const cueCount = Number(generatedRoute.cueCount || generatedRoute.cues?.length || 0);
+  const optionLabel = generatedRoute.optionLabel || "Prepared";
+
+  preparedRoute = normalizeImportedRoute({
+    id: `prepared-${Date.now()}`,
+    name: `Prepared: ${shortPlaceName(generatedRoute.destinationLabel || destination)}`,
+    variant: optionLabel,
+    start: generatedRoute.startLabel || "Current location",
+    destination: generatedRoute.destinationLabel || destination,
+    notes: `${optionLabel}. ${matchedCueCount} of ${cueCount} cues matched saved photos.`,
+    startLatitude: generatedRoute.start?.latitude,
+    startLongitude: generatedRoute.start?.longitude,
+    destinationLatitude: generatedRoute.destination?.latitude,
+    destinationLongitude: generatedRoute.destination?.longitude,
+    routeGeometry: generatedRoute.geometry,
+    routeDistanceMeters: generatedRoute.distance,
+    routeDurationSeconds: generatedRoute.duration,
+    photos: createPreparedCues(generatedRoute.cues || [])
+  });
+
+  displayRoute(preparedRoute);
+  routeSummary.className = "route-summary";
+  routeSummary.innerHTML = `
+    <strong>${escapeHtml(optionLabel)}</strong><br>
+    Destination: ${escapeHtml(preparedRoute.destination)}<br>
+    Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
+  `;
 }
 
 async function prepareRouteOnServer(payload) {
@@ -2009,6 +2056,28 @@ async function prepareRouteOnServer(payload) {
   }
 
   return result.route;
+}
+
+async function prepareRouteOptionsOnServer(payload) {
+  const response = await fetch(PREPARE_ROUTE_OPTIONS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const responseText = await response.text();
+  let result = {};
+
+  try {
+    result = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    result = {};
+  }
+
+  if (!response.ok || !result.ok || !Array.isArray(result.options) || !result.options.length) {
+    throw new Error(result.error || responseText || "Could not find route choices.");
+  }
+
+  return result.options;
 }
 
 function startAcceptedTripPolling() {
@@ -3924,6 +3993,17 @@ function formatDistance(meters) {
 
   const miles = meters / 1609.344;
   return `${miles.toFixed(miles >= 10 ? 0 : 1)} mi`;
+}
+
+function formatRouteDuration(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "time unavailable";
+  }
+
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes >= 60
+    ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min`
+    : `${minutes} min`;
 }
 
 async function geocodePlace(query) {
