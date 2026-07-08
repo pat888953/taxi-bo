@@ -1275,10 +1275,19 @@ async function drawRouteMap(route) {
     mapMarkers.push(marker);
   });
 
-  const routedLatLngs = await getRouteGeometry(latLngs);
+  const savedGeometry = normalizeRouteGeometry(route.routeGeometry);
+  const isRecordedRoute = getRouteLibraryType(route) === "recorded";
+  const usesRecordedTrack = isRecordedRoute && savedGeometry.length >= 2;
+  const routedLatLngs = usesRecordedTrack
+    ? savedGeometry
+    : await getRouteGeometry(latLngs);
 
   if (renderVersion !== mapRenderVersion) {
     return;
+  }
+
+  if (usesRecordedTrack) {
+    routeMapState.textContent = `Showing the actual recorded GPS track with ${locatedPhotos.length} cue${locatedPhotos.length === 1 ? "" : "s"}.${ignoredCount ? ` Ignored ${ignoredCount} distant GPS outlier${ignoredCount === 1 ? "" : "s"}.` : ""}`;
   }
 
   routeLine = L.polyline(routedLatLngs, {
