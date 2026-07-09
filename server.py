@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "taxi_bo.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USING_POSTGRES = bool(DATABASE_URL)
+STARTUP_DATABASE_ERROR = ""
 HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
@@ -1716,6 +1717,8 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "database": "postgresql" if USING_POSTGRES else "sqlite",
+                    "databaseReady": not STARTUP_DATABASE_ERROR,
+                    "databaseError": STARTUP_DATABASE_ERROR,
                 }
             )
             return
@@ -1877,7 +1880,11 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
-    initialize_db()
+    try:
+        initialize_db()
+    except Exception as error:
+        STARTUP_DATABASE_ERROR = str(error)
+        print(f"Database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
     server = ThreadingHTTPServer(("0.0.0.0", port), TaxiBoHandler)
     print(f"Taxi Bo is running locally at http://127.0.0.1:{port}/index.html")
     print(f"On another device, open http://YOUR-WIFI-IP:{port}/index.html")
