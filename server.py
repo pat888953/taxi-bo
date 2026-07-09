@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 import math
 import os
+import random
 import re
 import sys
 import sqlite3
@@ -196,6 +197,19 @@ def initialize_db():
 
             CREATE INDEX IF NOT EXISTS idx_speed_warnings_location
               ON speed_warnings(latitude, longitude);
+
+            CREATE TABLE IF NOT EXISTS academy_attempts (
+              id TEXT PRIMARY KEY,
+              photo_stop_id TEXT NOT NULL,
+              route_id TEXT NOT NULL DEFAULT '',
+              selected_answer TEXT NOT NULL,
+              correct_answer TEXT NOT NULL,
+              is_correct INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_academy_attempts_photo_stop
+              ON academy_attempts(photo_stop_id, created_at DESC);
             """
         )
         ensure_route_columns(db)
@@ -378,6 +392,207 @@ def delete_route(route_id):
         db.execute("DELETE FROM photo_stops WHERE route_id = ?", (route_id,))
         result = db.execute("DELETE FROM routes WHERE id = ?", (route_id,))
         return result.rowcount > 0
+
+
+def academy_answer_for_photo(photo):
+    instruction = str(photo["instruction"] or "").strip()
+    title = str(photo["title"] or "").strip()
+    notes = str(photo["notes"] or "").strip()
+
+    if instruction:
+        return instruction
+    if notes:
+        return notes
+    return title or "Review this cue photo carefully."
+
+
+def fetch_academy_question():
+    with connect_db() as db:
+        question_row = db.execute(
+            """
+            SELECT
+              photo_stops.id, photo_stops.route_id, photo_stops.step,
+              photo_stops.title, photo_stops.instruction, photo_stops.notes,
+              photo_stops.image, routes.name AS route_name,
+              routes.start, routes.destination
+            FROM photo_stops
+            JOIN routes ON routes.id = photo_stops.route_id
+            WHERE photo_stops.image IS NOT NULL
+              AND photo_stops.image != ''
+            ORDER BY RANDOM()
+            LIMIT 1
+            """
+        ).fetchone()
+
+        if not question_row:
+            return {
+                "available": False,
+                "message": "Add route cue photos first, then TaxiBo Academy can build practice questions from them.",
+            }
+
+        distractor_rows = db.execute(
+            """
+            SELECT id, title, instruction, notes
+            FROM photo_stops
+            WHERE id != ?
+              AND image IS NOT NULL
+              AND image != ''
+            ORDER BY RANDOM()
+            LIMIT 8
+            """,
+            (question_row["id"],),
+        ).fetchall()
+
+    correct_answer = academy_answer_for_photo(question_row)
+    choices = [correct_answer]
+
+    for row in distractor_rows:
+        answer = academy_answer_for_photo(row)
+        if answer and answer not in choices:
+            choices.append(answer)
+        if len(choices) == 4:
+            break
+
+    fallback_choices = [
+        "Slow down and identify the next landmark.",
+        "Continue straight and keep checking the route cues.",
+        "Prepare for the next junction before changing lanes.",
+    ]
+    for choice in fallback_choices:
+        if len(choices) == 4:
+            break
+        if choice not in choices:
+            choices.append(choice)
+
+    random.shuffle(choices)
+
+    return {
+        "available": True,
+        "question": {
+            "id": question_row["id"],
+            "routeId": question_row["route_id"],
+            "routeName": question_row["route_name"],
+            "start": question_row["start"],
+            "destination": question_row["destination"],
+            "step": question_row["step"],
+            "title": question_row["title"],
+            "image": question_row["image"],
+            "prompt": "Look at this street photo. What should the taxi driver do here?",
+            "choices": choices,
+        },
+    }
+
+
+def record_academy_attempt(payload):
+    photo_stop_id = str(payload.get("questionId", "")).strip()
+    selected_answer = str(payload.get("selectedAnswer", "")).strip()
+
+    if not photo_stop_id:
+        raise ValueError("Question ID is required.")
+    if not selected_answer:
+        raise ValueError("Select an answer before submitting.")
+
+    with connect_db() as db:
+        photo = db.execute(
+            """
+            SELECT id, route_id, title, instruction, notes
+            FROM photo_stops
+            WHERE id = ?
+            """,
+            (photo_stop_id,),
+        ).fetchone()
+
+        if not photo:
+            raise ValueError("Academy question was not found.")
+
+        correct_answer = academy_answer_for_photo(photo)
+        is_correct = 1 if selected_answer == correct_answer else 0
+        attempt_id = str(uuid4())
+
+        db.execute(
+            """
+            INSERT INTO academy_attempts (
+              id, photo_stop_id, route_id, selected_answer, correct_answer, is_correct
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                photo_stop_id,
+                photo["route_id"],
+                selected_answer,
+                correct_answer,
+                is_correct,
+            ),
+        )
+
+    return {
+        "id": attempt_id,
+        "questionId": photo_stop_id,
+        "correct": bool(is_correct),
+        "correctAnswer": correct_answer,
+    }
+
+
+def fetch_academy_stats():
+    with connect_db() as db:
+        totals = db.execute(
+            """
+            SELECT
+              COUNT(*) AS total_attempts,
+              COALESCE(SUM(is_correct), 0) AS correct_attempts
+            FROM academy_attempts
+            """
+        ).fetchone()
+        question_total = db.execute(
+            """
+            SELECT COUNT(*) AS total_questions
+            FROM photo_stops
+            WHERE image IS NOT NULL
+              AND image != ''
+            """
+        ).fetchone()
+        recent_rows = db.execute(
+            """
+            SELECT
+              academy_attempts.photo_stop_id,
+              academy_attempts.selected_answer,
+              academy_attempts.correct_answer,
+              academy_attempts.is_correct,
+              academy_attempts.created_at,
+              photo_stops.title,
+              routes.name AS route_name,
+              routes.destination
+            FROM academy_attempts
+            LEFT JOIN photo_stops ON photo_stops.id = academy_attempts.photo_stop_id
+            LEFT JOIN routes ON routes.id = academy_attempts.route_id
+            ORDER BY academy_attempts.created_at DESC
+            LIMIT 6
+            """
+        ).fetchall()
+
+    total_attempts = int(totals["total_attempts"] or 0)
+    correct_attempts = int(totals["correct_attempts"] or 0)
+
+    return {
+        "totalQuestions": int(question_total["total_questions"] or 0),
+        "totalAttempts": total_attempts,
+        "correctAttempts": correct_attempts,
+        "accuracy": round((correct_attempts / total_attempts) * 100) if total_attempts else 0,
+        "recent": [
+            {
+                "questionId": row["photo_stop_id"],
+                "title": row["title"] or "Deleted cue photo",
+                "routeName": row["route_name"] or "Unknown route",
+                "destination": row["destination"] or "",
+                "selectedAnswer": row["selected_answer"],
+                "correctAnswer": row["correct_answer"],
+                "correct": bool(row["is_correct"]),
+                "createdAt": row["created_at"],
+            }
+            for row in recent_rows
+        ],
+    }
 
 
 def create_incoming_order(payload):
@@ -1524,6 +1739,14 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "warnings": fetch_speed_warnings()})
             return
 
+        if path == "/api/academy/question":
+            self.send_json({"ok": True, **fetch_academy_question()})
+            return
+
+        if path == "/api/academy/stats":
+            self.send_json({"ok": True, "stats": fetch_academy_stats()})
+            return
+
         super().do_GET()
 
     def do_PUT(self):
@@ -1566,7 +1789,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/academy/attempt"}:
             self.send_error(404, "Not found")
             return
 
@@ -1620,6 +1843,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/speed-warnings/delete":
                 self.send_json({"ok": True, "warning": delete_speed_warning(payload)})
+                return
+
+            if path == "/api/academy/attempt":
+                self.send_json({"ok": True, "attempt": record_academy_attempt(payload)})
                 return
 
             if path == "/api/generate-route":

@@ -1,13 +1,15 @@
-const CACHE_NAME = "taxi-bo-v75";
+const CACHE_NAME = "taxi-bo-v76";
 const APP_SHELL = [
   "./",
   "./index.html",
+  "./academy.html",
   "./four-in-one.html",
-  "./four-in-one.css",
-  "./four-in-one.js",
+  "./four-in-one.css?v=2",
+  "./four-in-one.js?v=2",
   "./phone.html",
-  "./styles.css?v=75",
-  "./app.js?v=75",
+  "./styles.css?v=76",
+  "./app.js?v=76",
+  "./academy.js?v=76",
   "./phone.js",
   "./manifest.json",
   "./icons/icon.svg",
@@ -17,7 +19,15 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        APP_SHELL.map((asset) =>
+          cache.add(asset).catch((error) => {
+            console.warn("TaxiBo cache skipped", asset, error);
+          })
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -55,9 +65,11 @@ self.addEventListener("fetch", (event) => {
     url.origin === self.location.origin &&
     (url.pathname.endsWith("/") ||
       url.pathname.endsWith("/index.html") ||
+      url.pathname.endsWith("/academy.html") ||
       url.pathname.endsWith("/phone.html") ||
       url.pathname.endsWith("/styles.css") ||
       url.pathname.endsWith("/app.js") ||
+      url.pathname.endsWith("/academy.js") ||
       url.pathname.endsWith("/phone.js"));
 
   if (isAppFile) {

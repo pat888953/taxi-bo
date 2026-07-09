@@ -1,9 +1,10 @@
 # TaxiBo
 
-TaxiBo is split into two focused modules:
+TaxiBo is split into three focused modules:
 
 - **TaxiBo Cue** (`index.html`) receives an accepted pickup and destination, then provides route photos, voice cues, speed awareness, and route recording.
 - **TaxiBo 4-in-One** (`four-in-one.html`) collects OCR offers from separate fleet adapters, lets the driver compare them, and passes only a confirmed accepted trip to TaxiBo Cue.
+- **TaxiBo Academy** (`academy.html`) turns saved route cue photos into multiple-choice practice questions so drivers can train themselves before a trip.
 
 The Android FlyTaxi adapter lives in `android-companion` and posts scanned offers to TaxiBo 4-in-One.
 
@@ -35,6 +36,8 @@ The Android FlyTaxi adapter lives in `android-companion` and posts scanned offer
 - Record the actual GPS path whenever live drive is running
 - Checkpoint active recordings to the database and recover interrupted trips
 - Save a completed drive as a reusable route variant such as `Passenger shortcut`
+- Practice route memory in TaxiBo Academy with photo-based multiple-choice questions
+- Track Academy attempts, accuracy, and recent review history in the database
 
 ## How to use it
 
@@ -60,6 +63,7 @@ The Android FlyTaxi adapter lives in `android-companion` and posts scanned offer
 
    - TaxiBo Cue: `http://127.0.0.1:8000/index.html`
    - TaxiBo 4-in-One: `http://127.0.0.1:8000/four-in-one.html`
+   - TaxiBo Academy: `http://127.0.0.1:8000/academy.html`
 
 3. Create your own route, or enter a destination and use `Generate and save route` to start from your current location.
 4. Add photos for key junctions and landmarks.
@@ -75,6 +79,7 @@ The Android FlyTaxi adapter lives in `android-companion` and posts scanned offer
 14. Use Simulation mode to test the next 3 upcoming photos on a non-moving PC.
 15. Start Live Drive to record the actual GPS path, then stop the drive and save or discard the recording.
 16. Save a passenger-recommended route with a descriptive variant name so it can be selected on a future trip.
+17. Open TaxiBo Academy to practice saved street photos as multiple-choice questions.
 
 ## Notes
 
@@ -90,6 +95,7 @@ The Android FlyTaxi adapter lives in `android-companion` and posts scanned offer
 - Exported JSON files include your route details and stored image data URLs.
 - The service worker caches the app shell, but live map tiles still depend on network availability.
 - Active route recordings are checkpointed approximately every 12 seconds. If the page closes unexpectedly, the latest active trip is offered for recovery on the next load.
+- Academy questions are generated from saved photo stops. Add cue photos and useful instructions first for the best quiz answers.
 
 ## Deploy to Render
 

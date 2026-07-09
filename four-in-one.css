@@ -68,6 +68,13 @@ button {
   cursor: pointer;
 }
 
+.module-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .inbox-toolbar {
   padding: 18px;
   border-top: 5px solid var(--fleet);
@@ -132,5 +139,6 @@ button {
 @media (max-width: 680px) {
   .module-header, .inbox-toolbar { align-items: stretch; flex-direction: column; }
   .module-header a { text-align: center; }
+  .module-links { flex-direction: column; }
   .offer-grid { grid-template-columns: 1fr; }
 }

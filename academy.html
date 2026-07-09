@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaxiBo Academy</title>
+  <meta name="theme-color" content="#20352c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="TaxiBo Academy">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link rel="stylesheet" href="styles.css?v=76">
+</head>
+<body>
+  <div class="page-shell academy-shell">
+    <header class="module-switcher">
+      <div><span>Self training</span><strong>TaxiBo Academy</strong></div>
+      <nav class="module-links" aria-label="TaxiBo modules">
+        <a href="index.html">Open TaxiBo Cue</a>
+        <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
+      </nav>
+    </header>
+
+    <main class="academy-layout">
+      <section class="panel academy-hero">
+        <div>
+          <p class="section-label">Photo memory quiz</p>
+          <h1>Train with real street photos from your route database.</h1>
+          <p>
+            TaxiBo Academy picks one saved cue photo, hides the route instruction, and asks the driver to choose the correct action.
+          </p>
+        </div>
+        <div class="academy-score-card" aria-live="polite">
+          <span>Accuracy</span>
+          <strong id="academyAccuracy">--%</strong>
+          <small id="academyProgress">Loading progress...</small>
+        </div>
+      </section>
+
+      <section class="panel academy-question-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Question</p>
+            <h2 id="academyQuestionTitle">Loading Academy question...</h2>
+          </div>
+          <span id="academyRouteBadge" class="status-chip">Route cue</span>
+        </div>
+
+        <div id="academyState" class="form-state empty-state">Preparing a street-photo question from the database.</div>
+
+        <div id="academyQuestion" class="academy-question" hidden>
+          <div class="academy-photo-wrap">
+            <img id="academyPhoto" class="academy-photo" alt="Street photo question">
+          </div>
+          <div class="academy-question-copy">
+            <p id="academyPrompt" class="academy-prompt"></p>
+            <p id="academyContext" class="academy-context"></p>
+            <div id="academyChoices" class="academy-choices" role="radiogroup" aria-label="Answer choices"></div>
+            <div id="academyFeedback" class="academy-feedback" aria-live="polite"></div>
+            <div class="academy-actions">
+              <button id="academySubmitButton" class="primary-button" type="button" disabled>Submit answer</button>
+              <button id="academyNextButton" class="secondary-button" type="button">Next question</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel academy-history-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Progress</p>
+            <h2>Recent practice</h2>
+          </div>
+          <span id="academyQuestionCount" class="status-chip">0 photos</span>
+        </div>
+        <div id="academyHistory" class="academy-history empty-state">Answer questions to build your practice history.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="academy.js?v=76"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js");
+      });
+    }
+  </script>
+</body>
+</html>
