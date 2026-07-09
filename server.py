@@ -60,6 +60,8 @@ class DatabaseConnection:
         if not self.postgres:
             return self.connection.executescript(script)
 
+        script = script.replace("DEFAULT CURRENT_TIMESTAMP", "DEFAULT (CURRENT_TIMESTAMP::text)")
+
         for statement in script.split(";"):
             statement = statement.strip()
             if statement:
