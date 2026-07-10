@@ -58,7 +58,10 @@ const speedWarningStatus = document.querySelector("#speedWarningStatus");
 const speedWarningLabel = document.querySelector("#speedWarningLabel");
 const speedWarningLimit = document.querySelector("#speedWarningLimit");
 const speedWarningRadius = document.querySelector("#speedWarningRadius");
+const speedWarningLatitude = document.querySelector("#speedWarningLatitude");
+const speedWarningLongitude = document.querySelector("#speedWarningLongitude");
 const addSpeedWarningButton = document.querySelector("#addSpeedWarningButton");
+const saveSpeedWarningCoordinateButton = document.querySelector("#saveSpeedWarningCoordinateButton");
 const speedWarningManagerStatus = document.querySelector("#speedWarningManagerStatus");
 const speedWarningList = document.querySelector("#speedWarningList");
 const routeFormState = document.querySelector("#routeFormState");
@@ -413,6 +416,10 @@ liveDriveSimulateButton.addEventListener("click", () => {
 
 addSpeedWarningButton.addEventListener("click", () => {
   addSpeedWarningAtCurrentLocation();
+});
+
+saveSpeedWarningCoordinateButton.addEventListener("click", () => {
+  addSpeedWarningFromCoordinates();
 });
 
 topCuePreview.addEventListener("click", (event) => {
@@ -3333,15 +3340,45 @@ async function addSpeedWarningAtCurrentLocation() {
     return;
   }
 
+  await saveSpeedWarningPoint(
+    liveDrivePosition.coords.latitude,
+    liveDrivePosition.coords.longitude,
+    "current GPS position"
+  );
+}
+
+async function addSpeedWarningFromCoordinates() {
+  const latitude = Number(speedWarningLatitude.value);
+  const longitude = Number(speedWarningLongitude.value);
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = "Enter a valid latitude between -90 and 90.";
+    speedWarningLatitude.focus();
+    return;
+  }
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    speedWarningManagerStatus.className = "form-state";
+    speedWarningManagerStatus.textContent = "Enter a valid longitude between -180 and 180.";
+    speedWarningLongitude.focus();
+    return;
+  }
+
+  await saveSpeedWarningPoint(latitude, longitude, "entered coordinates");
+}
+
+async function saveSpeedWarningPoint(latitude, longitude, sourceLabel) {
   const payload = {
     label: speedWarningLabel.value.trim() || "Speed camera",
-    latitude: liveDrivePosition.coords.latitude,
-    longitude: liveDrivePosition.coords.longitude,
+    latitude,
+    longitude,
     speedLimitMph: Number(speedWarningLimit.value),
     radiusMeters: Number(speedWarningRadius.value)
   };
 
   addSpeedWarningButton.disabled = true;
+  saveSpeedWarningCoordinateButton.disabled = true;
   speedWarningManagerStatus.className = "form-state empty-state";
   speedWarningManagerStatus.textContent = "Saving warning point to the database...";
 
@@ -3358,13 +3395,14 @@ async function addSpeedWarningAtCurrentLocation() {
     speedWarnings.unshift(result.warning);
     renderSpeedWarningList();
     speedWarningManagerStatus.className = "form-state";
-    speedWarningManagerStatus.textContent = `${result.warning.label} saved at the current GPS position.`;
+    speedWarningManagerStatus.textContent = `${result.warning.label} saved from ${sourceLabel}.`;
     updateSpeedAwareness(liveDrivePosition);
   } catch (error) {
     speedWarningManagerStatus.className = "form-state";
     speedWarningManagerStatus.textContent = error.message || "Could not save this warning point.";
   } finally {
     addSpeedWarningButton.disabled = !liveDrivePosition;
+    saveSpeedWarningCoordinateButton.disabled = false;
   }
 }
 

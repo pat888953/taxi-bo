@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=82">
+  <link rel="stylesheet" href="styles.css?v=83">
 </head>
 <body>
   <div class="page-shell">
@@ -66,9 +66,18 @@
                 <span>Warn within (m)</span>
                 <input id="speedWarningRadius" type="number" min="100" max="3000" step="100" value="600">
               </label>
+              <label class="field compact-coordinate-field">
+                <span>Latitude</span>
+                <input id="speedWarningLatitude" type="number" min="-90" max="90" step="0.000001" placeholder="22.302711">
+              </label>
+              <label class="field compact-coordinate-field">
+                <span>Longitude</span>
+                <input id="speedWarningLongitude" type="number" min="-180" max="180" step="0.000001" placeholder="114.177216">
+              </label>
               <button id="addSpeedWarningButton" class="secondary-button" type="button" disabled>Mark current location</button>
+              <button id="saveSpeedWarningCoordinateButton" class="secondary-button" type="button">Save coordinate</button>
             </div>
-            <div id="speedWarningManagerStatus" class="form-state empty-state">Start GPS or simulation before marking a location.</div>
+            <div id="speedWarningManagerStatus" class="form-state empty-state">Start GPS/simulation to mark the taxi position, or enter coordinates from Google Maps.</div>
             <div id="speedWarningList" class="speed-warning-list"></div>
           </details>
         </section>
@@ -461,7 +470,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=82"></script>
+  <script src="app.js?v=83"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
