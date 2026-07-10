@@ -458,6 +458,56 @@ h3 {
   min-width: 0;
 }
 
+.speed-monitor-toggle {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.speed-monitor-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.speed-monitor-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background 0.18s ease;
+}
+
+.speed-monitor-switch::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(18, 39, 31, 0.2);
+  transition: transform 0.18s ease;
+}
+
+.speed-monitor-toggle input:checked + .speed-monitor-switch {
+  background: var(--accent);
+}
+
+.speed-monitor-toggle input:checked + .speed-monitor-switch::after {
+  transform: translateX(18px);
+}
+
+.speed-monitor-toggle input:disabled + .speed-monitor-switch {
+  background: #d9a23b;
+}
+
 .speed-warning-copy strong,
 .speed-warning-copy p {
   display: block;

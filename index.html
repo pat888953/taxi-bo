@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=83">
+  <link rel="stylesheet" href="styles.css?v=84">
 </head>
 <body>
   <div class="page-shell">
@@ -47,9 +47,13 @@
             <strong><span id="currentSpeed">--</span> <small>mph</small></strong>
           </div>
           <div class="speed-warning-copy">
-            <span id="speedWarningBadge" class="speed-warning-badge">Monitoring</span>
+            <label class="speed-monitor-toggle">
+              <input id="speedMonitoringToggle" type="checkbox">
+              <span class="speed-monitor-switch" aria-hidden="true"></span>
+              <span id="speedWarningBadge" class="speed-warning-badge">Monitoring off</span>
+            </label>
             <strong id="speedWarningTitle">No nearby speed warning</strong>
-            <p id="speedWarningStatus">Start live drive to monitor database warning points.</p>
+            <p id="speedWarningStatus">Switch monitoring on to read speed and check warning points.</p>
           </div>
           <details class="speed-warning-manager">
             <summary>Manage warning points</summary>
@@ -470,7 +474,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=83"></script>
+  <script src="app.js?v=84"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

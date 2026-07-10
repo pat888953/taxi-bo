@@ -52,6 +52,7 @@ const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton
 const discardRecordingButton = document.querySelector("#discardRecordingButton");
 const speedAwareness = document.querySelector("#speedAwareness");
 const currentSpeed = document.querySelector("#currentSpeed");
+const speedMonitoringToggle = document.querySelector("#speedMonitoringToggle");
 const speedWarningBadge = document.querySelector("#speedWarningBadge");
 const speedWarningTitle = document.querySelector("#speedWarningTitle");
 const speedWarningStatus = document.querySelector("#speedWarningStatus");
@@ -145,9 +146,12 @@ let destinationRecognition = null;
 let isListeningForDestination = false;
 let liveDriveWatchId = null;
 let liveDrivePosition = null;
+let speedMonitoringWatchId = null;
+let speedMonitoringPosition = null;
 let liveDriveTimeoutId = null;
 let liveDriveSimulationId = null;
 let liveDriveSimulationIndex = 0;
+let isLiveDriveSimulationRunning = false;
 let lastAcceptedTripId = sessionStorage.getItem("taxiBoLastAcceptedTripId") || "";
 let acceptedTripPollInFlight = false;
 let acceptedTripContext = null;
@@ -416,6 +420,15 @@ liveDriveSimulateButton.addEventListener("click", () => {
 
 addSpeedWarningButton.addEventListener("click", () => {
   addSpeedWarningAtCurrentLocation();
+});
+
+speedMonitoringToggle.addEventListener("change", () => {
+  if (speedMonitoringToggle.checked) {
+    armSpeedAudio();
+    startSpeedMonitoring();
+  } else {
+    stopSpeedMonitoring();
+  }
 });
 
 saveSpeedWarningCoordinateButton.addEventListener("click", () => {
@@ -3334,15 +3347,17 @@ async function loadSpeedWarnings() {
 }
 
 async function addSpeedWarningAtCurrentLocation() {
-  if (!liveDrivePosition) {
+  const currentWarningPosition = getCurrentWarningPosition();
+
+  if (!currentWarningPosition) {
     speedWarningManagerStatus.className = "form-state";
-    speedWarningManagerStatus.textContent = "Start live GPS or simulation before marking a warning point.";
+    speedWarningManagerStatus.textContent = "Switch monitoring on, start live GPS, or start simulation before marking a warning point.";
     return;
   }
 
   await saveSpeedWarningPoint(
-    liveDrivePosition.coords.latitude,
-    liveDrivePosition.coords.longitude,
+    currentWarningPosition.coords.latitude,
+    currentWarningPosition.coords.longitude,
     "current GPS position"
   );
 }
@@ -3401,7 +3416,7 @@ async function saveSpeedWarningPoint(latitude, longitude, sourceLabel) {
     speedWarningManagerStatus.className = "form-state";
     speedWarningManagerStatus.textContent = error.message || "Could not save this warning point.";
   } finally {
-    addSpeedWarningButton.disabled = !liveDrivePosition;
+    addSpeedWarningButton.disabled = !getCurrentWarningPosition();
     saveSpeedWarningCoordinateButton.disabled = false;
   }
 }
@@ -3450,14 +3465,15 @@ function renderSpeedWarningList() {
 }
 
 function updateSpeedAwareness(position) {
-  addSpeedWarningButton.disabled = !position;
+  addSpeedWarningButton.disabled = !getCurrentWarningPosition();
+  updateSpeedMonitoringToggle();
 
   if (!position) {
     currentSpeed.textContent = "--";
     speedAwareness.dataset.state = "idle";
-    speedWarningBadge.textContent = "Monitoring";
+    speedWarningBadge.textContent = "Monitoring off";
     speedWarningTitle.textContent = "No nearby speed warning";
-    speedWarningStatus.textContent = "Start live drive to monitor database warning points.";
+    speedWarningStatus.textContent = "Switch monitoring on to read speed and check warning points.";
     lastSpeedSample = null;
     return;
   }
@@ -3493,6 +3509,102 @@ function updateSpeedAwareness(position) {
   speedWarningTitle.textContent = `${nearest.warning.label} · ${Math.round(nearest.warning.speedLimitMph)} mph`;
   speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${Math.round(speedMph)} mph` : ""}.`;
   maybeSoundSpeedAlert(nearest.warning.id, isOverspeed);
+}
+
+function getCurrentWarningPosition() {
+  return liveDrivePosition || speedMonitoringPosition;
+}
+
+function isRouteGpsActive() {
+  return liveDriveWatchId !== null || isLiveDriveSimulationRunning;
+}
+
+function updateSpeedMonitoringToggle() {
+  if (!speedMonitoringToggle) {
+    return;
+  }
+
+  const routeGpsActive = isRouteGpsActive();
+  speedMonitoringToggle.checked = routeGpsActive || speedMonitoringWatchId !== null;
+  speedMonitoringToggle.disabled = routeGpsActive;
+}
+
+async function startSpeedMonitoring() {
+  if (speedMonitoringWatchId !== null || isRouteGpsActive()) {
+    updateSpeedMonitoringToggle();
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    speedWarningBadge.textContent = "Needs secure page";
+    speedWarningTitle.textContent = "Speed monitoring cannot start";
+    speedWarningStatus.textContent = "Open TaxiBo with HTTPS or localhost so the browser allows GPS.";
+    speedMonitoringToggle.checked = false;
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    speedWarningBadge.textContent = "Unavailable";
+    speedWarningTitle.textContent = "This browser has no GPS support";
+    speedWarningStatus.textContent = "Use a phone or tablet browser with location services.";
+    speedMonitoringToggle.checked = false;
+    return;
+  }
+
+  speedWarningBadge.textContent = "Starting";
+  speedWarningTitle.textContent = "Requesting GPS permission";
+  speedWarningStatus.textContent = "Allow location access to monitor speed and warning points.";
+
+  try {
+    const firstPosition = await getCurrentPosition();
+    handleSpeedMonitoringPosition(firstPosition);
+    speedMonitoringWatchId = navigator.geolocation.watchPosition(
+      (position) => handleSpeedMonitoringPosition(position),
+      (error) => handleSpeedMonitoringError(error),
+      {
+        enableHighAccuracy: true,
+        maximumAge: 3000,
+        timeout: 12000
+      }
+    );
+    updateSpeedMonitoringToggle();
+  } catch (error) {
+    handleSpeedMonitoringError(error);
+  }
+}
+
+function stopSpeedMonitoring(updateStatus = true) {
+  if (speedMonitoringWatchId !== null) {
+    navigator.geolocation.clearWatch(speedMonitoringWatchId);
+    speedMonitoringWatchId = null;
+  }
+
+  speedMonitoringPosition = null;
+  updateSpeedMonitoringToggle();
+
+  if (updateStatus && !isRouteGpsActive()) {
+    updateSpeedAwareness(null);
+  }
+}
+
+function handleSpeedMonitoringPosition(position) {
+  speedMonitoringPosition = position;
+  updateSpeedAwareness(position);
+}
+
+function handleSpeedMonitoringError(error) {
+  stopSpeedMonitoring(false);
+  const message = error?.code === 1
+    ? "Location permission was denied. Allow location access to use speed monitoring."
+    : error?.code === 2
+      ? "The browser could not determine the taxi position."
+      : error?.code === 3
+        ? "GPS timed out. Try again outdoors or on a phone/tablet with location enabled."
+        : error.message || "Could not read the taxi position.";
+  speedWarningBadge.textContent = "Off";
+  speedWarningTitle.textContent = "Speed monitoring stopped";
+  speedWarningStatus.textContent = message;
+  updateSpeedMonitoringToggle();
 }
 
 function calculateSpeedMph(position) {
@@ -3594,6 +3706,7 @@ async function startLiveDrive() {
 
   try {
     const firstPosition = await getCurrentPosition();
+    stopSpeedMonitoring(false);
     await beginRouteRecording(route, firstPosition);
     handleLivePosition(firstPosition, route);
     liveDriveWatchId = navigator.geolocation.watchPosition(
@@ -3605,6 +3718,7 @@ async function startLiveDrive() {
         timeout: 12000
       }
     );
+    updateSpeedMonitoringToggle();
   } catch (error) {
     handleLiveError(error);
   }
@@ -3624,6 +3738,7 @@ function stopLiveDrive(updateStatus = true) {
   liveDriveStartButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = true;
+  updateSpeedMonitoringToggle();
 
   if (updateStatus) {
     liveDrivePosition = null;
@@ -3662,10 +3777,13 @@ function startLiveDriveSimulation() {
   }
 
   stopLiveDrive(false);
+  stopSpeedMonitoring(false);
   liveDriveSimulationIndex = 0;
+  isLiveDriveSimulationRunning = true;
   liveDriveStartButton.disabled = true;
   liveDriveSimulateButton.disabled = true;
   liveDriveStopButton.disabled = false;
+  updateSpeedMonitoringToggle();
   setLiveDriveStatus("Tablet simulation running. Moving along the saved route line and following it on the map...");
 
   const simulationPoints = sampleSimulationPath(routeGeometry, 90);
@@ -3683,6 +3801,7 @@ function startLiveDriveSimulation() {
       liveDriveStartButton.disabled = false;
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
+      updateSpeedMonitoringToggle();
       return;
     }
 
@@ -3699,10 +3818,13 @@ function stopLiveDriveSimulation(clearPosition = true) {
   }
 
   liveDriveSimulationIndex = 0;
+  isLiveDriveSimulationRunning = false;
 
   if (clearPosition) {
     liveDrivePosition = null;
   }
+
+  updateSpeedMonitoringToggle();
 }
 
 function createSimulatedPosition(point) {
@@ -3753,6 +3875,9 @@ function handleLiveError(error) {
         : error.message || "Could not read the taxi position.";
   setLiveDriveStatus(message, true);
   stopLiveDrive(false);
+  if (speedMonitoringWatchId === null) {
+    updateSpeedAwareness(null);
+  }
 }
 
 function scheduleLiveDriveWaitingMessage() {
