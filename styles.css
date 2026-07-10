@@ -528,8 +528,10 @@ h3 {
 
 .route-recorder {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-soft);
@@ -581,39 +583,43 @@ h3 {
 }
 
 .recording-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--line);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .recording-metrics > div {
-  min-width: 0;
-  padding: 10px 12px;
+  display: flex;
+  min-width: 92px;
+  padding: 7px 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
   background: var(--surface);
 }
 
 .recording-metrics span,
 .recording-metrics strong {
-  display: block;
+  display: inline;
 }
 
 .recording-metrics span {
-  margin-bottom: 3px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .recording-metrics strong {
-  font-size: 1.12rem;
+  font-size: 0.98rem;
+  white-space: nowrap;
 }
 
 .recording-completion {
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
   gap: 12px;
@@ -1938,6 +1944,19 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 720px) {
+  .route-recorder {
+    grid-template-columns: 1fr;
+  }
+
+  .recording-metrics {
+    justify-content: stretch;
+  }
+
+  .recording-metrics > div {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .cue-preview-dialog-layout {
     grid-template-columns: 1fr;
   }
