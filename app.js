@@ -6,6 +6,7 @@ const PREPARE_ROUTE_OPTIONS_API = "/api/prepare-route-options";
 const ACCEPTED_TRIP_API = "/api/accepted-trip";
 const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
+const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
@@ -104,6 +105,13 @@ const cueCapturePasteZone = document.querySelector("#cueCapturePasteZone");
 const cueCapturePreview = document.querySelector("#cueCapturePreview");
 const cueCaptureStatus = document.querySelector("#cueCaptureStatus");
 const uploadCueCaptureButton = document.querySelector("#uploadCueCaptureButton");
+const cuePreviewDialog = document.querySelector("#cuePreviewDialog");
+const cuePreviewDialogImage = document.querySelector("#cuePreviewDialogImage");
+const cuePreviewDialogStep = document.querySelector("#cuePreviewDialogStep");
+const cuePreviewDialogTitle = document.querySelector("#cuePreviewDialogTitle");
+const cuePreviewDialogInstruction = document.querySelector("#cuePreviewDialogInstruction");
+const cuePreviewDialogCoordinates = document.querySelector("#cuePreviewDialogCoordinates");
+const cuePreviewDialogSpeakButton = document.querySelector("#cuePreviewDialogSpeakButton");
 
 let routes = [];
 let map;
@@ -156,6 +164,21 @@ let captureImageData = null;
 let pendingRouteChoices = [];
 let routeEntryMode = "saved";
 let pendingCueEditLink = parseCueEditLink();
+
+function getTaxiBoStorageMode() {
+  return localStorage.getItem(TAXIBO_STORAGE_MODE_KEY) === "local" ? "local" : "cloud";
+}
+
+function getTaxiBoStorageLabel() {
+  return getTaxiBoStorageMode() === "local" ? "In-house maintenance" : "Drive mode";
+}
+
+function storageHeaders(extra = {}) {
+  return {
+    ...extra,
+    "X-TaxiBo-Storage-Mode": getTaxiBoStorageMode(),
+  };
+}
 
 render();
 initializeMap();
@@ -402,8 +425,16 @@ topCuePreview.addEventListener("click", (event) => {
   const image = event.target.closest(".top-cue-image, .top-cue-image-wrap");
   const cueCard = image?.closest("[data-cue-id]");
   if (cueCard) {
-    openCueCapture(cueCard.dataset.cueId);
+    if (shouldMagnifyCuePreview()) {
+      openCuePreview(cueCard.dataset.cueId);
+    } else {
+      openCueCapture(cueCard.dataset.cueId);
+    }
   }
+});
+
+cuePreviewDialogSpeakButton?.addEventListener("click", () => {
+  speakCueTitle(cuePreviewDialogSpeakButton.dataset.cueTitle, true);
 });
 
 openCueStreetViewButton.addEventListener("click", () => openCueStreetView());
@@ -612,10 +643,10 @@ photoCancelEditButton.addEventListener("click", () => {
 async function loadRoutes() {
   try {
     const response = await fetch(ROUTES_API, {
-      headers: {
+      headers: storageHeaders({
         Accept: "application/json",
         "Cache-Control": "no-store"
-      },
+      }),
       cache: "no-store"
     });
 
@@ -654,10 +685,10 @@ async function loadRoutes() {
 async function saveRoutes() {
   const response = await fetch(ROUTES_API, {
     method: "PUT",
-    headers: {
+    headers: storageHeaders({
       "Content-Type": "application/json",
       "Cache-Control": "no-store"
-    },
+    }),
     cache: "no-store",
     body: JSON.stringify(routes)
   });
@@ -670,7 +701,11 @@ async function saveRoutes() {
   }
 
   updateDataFileStatus();
-  updateRouteLibraryStatus("Saved route library to SQLite.");
+  updateRouteLibraryStatus(
+    getTaxiBoStorageMode() === "local"
+      ? "Saved to local SQLite. Cloud sync is pending."
+      : "Saved route library to PostgreSQL."
+  );
   await saveRoutesToDisk(false);
 }
 
@@ -1067,7 +1102,7 @@ function updateRouteLibraryStatus(message, isError = false) {
   const recordedCount = routes.filter((route) => getRouteLibraryType(route) === "recorded").length;
   const preparedCount = routes.filter((route) => getRouteLibraryType(route) === "prepared").length;
   routeLibraryStatus.className = "form-state empty-state";
-  routeLibraryStatus.textContent = `${routeCount} routes: ${recordedCount} recorded, ${preparedCount} prepared, ${cueCount} total cues. Use the filter to maintain recorded drives.`;
+  routeLibraryStatus.textContent = `${getTaxiBoStorageLabel()}: ${routeCount} routes, ${recordedCount} recorded, ${preparedCount} prepared, ${cueCount} total cues. ${getTaxiBoStorageMode() === "local" ? "Changes are pending cloud sync." : "Changes save directly to PostgreSQL."}`;
 }
 
 function displaySelectedRoute() {
@@ -1171,6 +1206,8 @@ function renderCuePreviewCards(cues) {
     return;
   }
 
+  topCuePreview.classList.toggle("is-magnify-mode", shouldMagnifyCuePreview());
+
   if (!cues.length) {
     topCuePreview.innerHTML = [1, 2, 3]
       .map((number) => `
@@ -1249,6 +1286,8 @@ function renderCuePreviewCards(cues) {
   if (!topCuePreview) {
     return;
   }
+
+  topCuePreview.classList.toggle("is-magnify-mode", shouldMagnifyCuePreview());
 
   if (!cues.length) {
     topCuePreview.innerHTML = [1, 2, 3]
@@ -1467,6 +1506,53 @@ function openCueCapture(cueId) {
   if (hasCoordinates) {
     openCueStreetView(cue);
   }
+}
+
+function shouldMagnifyCuePreview() {
+  return getTaxiBoStorageMode() !== "local"
+    || liveDriveWatchId !== null
+    || liveDriveSimulationId !== null
+    || Boolean(liveDrivePosition);
+}
+
+function getCueForPreview(cueId) {
+  const activeCue = getActiveRoute()?.photos?.find((photo) => photo.id === cueId);
+  if (activeCue) {
+    return activeCue;
+  }
+
+  for (const route of routes) {
+    const cue = route.photos.find((photo) => photo.id === cueId);
+    if (cue) {
+      return cue;
+    }
+  }
+
+  return null;
+}
+
+function openCuePreview(cueId) {
+  if (!cuePreviewDialog || !cuePreviewDialogImage) {
+    return;
+  }
+
+  const cue = getCueForPreview(cueId);
+  if (!cue) {
+    return;
+  }
+
+  cuePreviewDialogImage.src = cue.image;
+  cuePreviewDialogImage.alt = cue.title || `Photo cue ${cue.step}`;
+  cuePreviewDialogStep.textContent = Number.isFinite(Number(cue.step))
+    ? `Step ${cue.step}`
+    : "Photo cue";
+  cuePreviewDialogTitle.textContent = cue.title || "Untitled cue";
+  cuePreviewDialogInstruction.textContent = cue.instruction || cue.notes || "Review this visual cue before driving.";
+  cuePreviewDialogCoordinates.textContent = formatPhotoCoordinates(cue);
+  if (cuePreviewDialogSpeakButton) {
+    cuePreviewDialogSpeakButton.dataset.cueTitle = cue.title || "";
+  }
+  cuePreviewDialog.showModal();
 }
 
 function openCueStreetView(cue = getCaptureCue()) {
@@ -1918,7 +2004,7 @@ function getCueColor(text) {
 async function generateRouteOnServer(payload) {
   const response = await fetch(GENERATE_ROUTE_API, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: storageHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload)
   });
 
@@ -2080,7 +2166,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
 async function prepareRouteOnServer(payload) {
   const response = await fetch(PREPARE_ROUTE_API, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: storageHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload)
   });
 
@@ -2103,7 +2189,7 @@ async function prepareRouteOnServer(payload) {
 async function prepareRouteOptionsOnServer(payload) {
   const response = await fetch(PREPARE_ROUTE_OPTIONS_API, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: storageHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload)
   });
   const responseText = await response.text();
@@ -2301,10 +2387,10 @@ async function deleteRoute(routeId) {
   try {
     const response = await fetch(`${ROUTES_API}/${encodeURIComponent(routeId)}`, {
       method: "DELETE",
-      headers: {
+      headers: storageHeaders({
         Accept: "application/json",
         "Cache-Control": "no-store"
-      },
+      }),
       cache: "no-store"
     });
     const result = await response.json().catch(() => ({}));
@@ -2399,10 +2485,10 @@ function hasRouteCueSource(route) {
 async function generateCuesOnServer(route) {
   const response = await fetch(GENERATE_CUES_API, {
     method: "POST",
-    headers: {
+    headers: storageHeaders({
       "Content-Type": "application/json",
       "Cache-Control": "no-store"
-    },
+    }),
     cache: "no-store",
     body: JSON.stringify({
       start: {
@@ -3224,7 +3310,10 @@ async function discardCompletedRecording() {
 
 async function loadSpeedWarnings() {
   try {
-    const response = await fetch(SPEED_WARNINGS_API, { cache: "no-store" });
+    const response = await fetch(SPEED_WARNINGS_API, {
+      cache: "no-store",
+      headers: storageHeaders(),
+    });
     const result = await response.json();
     if (!response.ok || !result.ok) {
       throw new Error(result.error || "Could not load speed warnings.");
@@ -3259,7 +3348,7 @@ async function addSpeedWarningAtCurrentLocation() {
   try {
     const response = await fetch(SPEED_WARNINGS_API, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storageHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload)
     });
     const result = await response.json();
@@ -3283,7 +3372,7 @@ async function deleteSpeedWarning(id) {
   try {
     const response = await fetch(`${SPEED_WARNINGS_API}/delete`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storageHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ id })
     });
     const result = await response.json();

@@ -1,5 +1,6 @@
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import base64
+from contextvars import ContextVar
 from io import BytesIO
 import json
 import math
@@ -21,6 +22,7 @@ DB_PATH = ROOT / "taxi_bo.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USING_POSTGRES = bool(DATABASE_URL)
 STARTUP_DATABASE_ERROR = ""
+ACTIVE_STORAGE_MODE = ContextVar("ACTIVE_STORAGE_MODE", default="cloud" if USING_POSTGRES else "local")
 HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
@@ -69,8 +71,10 @@ class DatabaseConnection:
                 self.connection.execute(statement)
 
 
-def connect_db():
-    if USING_POSTGRES:
+def connect_db(mode=None):
+    storage_mode = mode or ACTIVE_STORAGE_MODE.get()
+
+    if USING_POSTGRES and storage_mode != "local":
         try:
             import psycopg
             from psycopg.rows import dict_row
@@ -88,8 +92,8 @@ def connect_db():
     return DatabaseConnection(connection)
 
 
-def initialize_db():
-    with connect_db() as db:
+def initialize_db(mode=None):
+    with connect_db(mode) as db:
         db.executescript(
             """
             CREATE TABLE IF NOT EXISTS routes (
@@ -1710,6 +1714,15 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def get_storage_mode(self):
+        requested = self.headers.get("X-TaxiBo-Storage-Mode", "").strip().lower()
+
+        if requested in {"local", "sqlite", "in-house", "inhouse"}:
+            return "local"
+        if requested in {"cloud", "postgres", "postgresql", "drive"}:
+            return "cloud" if USING_POSTGRES else "local"
+        return "cloud" if USING_POSTGRES else "local"
+
     def end_headers(self):
         path = urlparse(self.path).path
         if not path.startswith("/api/") and (
@@ -1721,15 +1734,25 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_get()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_get(self):
         path = urlparse(self.path).path
 
         if path == "/api/health":
+            storage_mode = ACTIVE_STORAGE_MODE.get()
             self.send_json(
                 {
                     "ok": True,
-                    "database": "postgresql" if USING_POSTGRES else "sqlite",
-                    "databaseReady": not STARTUP_DATABASE_ERROR,
-                    "databaseError": STARTUP_DATABASE_ERROR,
+                    "database": "sqlite" if storage_mode == "local" else "postgresql",
+                    "storageMode": storage_mode,
+                    "cloudConfigured": USING_POSTGRES,
+                    "databaseReady": storage_mode == "local" or not STARTUP_DATABASE_ERROR,
+                    "databaseError": "" if storage_mode == "local" else STARTUP_DATABASE_ERROR,
                 }
             )
             return
@@ -1766,6 +1789,13 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_PUT(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_put()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_put(self):
         if urlparse(self.path).path != "/api/routes":
             self.send_error(404, "Not found")
             return
@@ -1783,6 +1813,13 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(error)}, status=400)
 
     def do_DELETE(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_delete()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_delete(self):
         path = urlparse(self.path).path
         route_prefix = "/api/routes/"
 
@@ -1803,6 +1840,13 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(error)}, status=400)
 
     def do_POST(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_post()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_post(self):
         path = urlparse(self.path).path
 
         if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/academy/attempt"}:
@@ -1892,7 +1936,22 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
     try:
-        initialize_db()
+        initialize_db("local")
+    except Exception as error:
+        STARTUP_DATABASE_ERROR = str(error)
+        print(f"Local database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
+
+    if USING_POSTGRES:
+        try:
+            initialize_db("cloud")
+        except Exception as error:
+            STARTUP_DATABASE_ERROR = str(error)
+            print(f"Cloud database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
+    else:
+        STARTUP_DATABASE_ERROR = ""
+
+    try:
+        ACTIVE_STORAGE_MODE.set("cloud" if USING_POSTGRES and not STARTUP_DATABASE_ERROR else "local")
     except Exception as error:
         STARTUP_DATABASE_ERROR = str(error)
         print(f"Database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)

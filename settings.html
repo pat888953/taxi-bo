@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaxiBo Settings</title>
+  <meta name="theme-color" content="#20352c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link rel="stylesheet" href="styles.css?v=80">
+</head>
+<body>
+  <div class="page-shell settings-shell">
+    <header class="module-switcher">
+      <div><span>System mode</span><strong>TaxiBo Settings</strong></div>
+      <nav class="module-links" aria-label="TaxiBo modules">
+        <a href="index.html">Open TaxiBo Cue</a>
+        <a href="academy.html">Open TaxiBo Academy</a>
+        <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
+      </nav>
+    </header>
+
+    <main class="settings-layout">
+      <section class="panel settings-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Maintenance mode</p>
+            <h1>Choose where TaxiBo saves route changes.</h1>
+          </div>
+          <span id="settingsModeBadge" class="status-chip">Checking</span>
+        </div>
+
+        <label class="settings-switch-card">
+          <input id="inHouseMaintenanceSwitch" type="checkbox">
+          <span class="settings-switch-ui" aria-hidden="true"></span>
+          <span>
+            <strong>In-house maintenance</strong>
+            <small>Save edits to local SQLite first. Mark changes as pending cloud sync.</small>
+          </span>
+        </label>
+
+        <div id="settingsStatus" class="form-state empty-state" aria-live="polite"></div>
+
+        <div class="settings-mode-grid">
+          <article>
+            <span>In-house maintenance ON</span>
+            <strong>Local SQLite</strong>
+            <p>Best when adding/replacing many cue photos. Fast, less Neon transfer, and changes are pending sync.</p>
+          </article>
+          <article>
+            <span>In-house maintenance OFF</span>
+            <strong>Drive mode</strong>
+            <p>TaxiBo reads and writes directly to PostgreSQL/Neon, suitable for live shared driving use.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="settings.js?v=80"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js");
+      });
+    }
+  </script>
+</body>
+</html>

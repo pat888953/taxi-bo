@@ -1,6 +1,7 @@
 const ACADEMY_QUESTION_API = "/api/academy/question";
 const ACADEMY_ATTEMPT_API = "/api/academy/attempt";
 const ACADEMY_STATS_API = "/api/academy/stats";
+const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 
 const academyAccuracy = document.querySelector("#academyAccuracy");
 const academyProgress = document.querySelector("#academyProgress");
@@ -24,6 +25,13 @@ const academyHistory = document.querySelector("#academyHistory");
 let currentQuestion = null;
 let selectedAnswer = "";
 let answered = false;
+
+function storageHeaders(extra = {}) {
+  return {
+    ...extra,
+    "X-TaxiBo-Storage-Mode": localStorage.getItem(TAXIBO_STORAGE_MODE_KEY) === "local" ? "local" : "cloud",
+  };
+}
 
 loadAcademy();
 
@@ -54,7 +62,10 @@ async function loadQuestion() {
   academyState.className = "form-state empty-state";
 
   try {
-    const response = await fetch(ACADEMY_QUESTION_API, { cache: "no-store" });
+    const response = await fetch(ACADEMY_QUESTION_API, {
+      cache: "no-store",
+      headers: storageHeaders(),
+    });
     const result = await response.json();
 
     if (!response.ok || !result.ok) {
@@ -146,7 +157,7 @@ async function submitAnswer() {
   try {
     const response = await fetch(ACADEMY_ATTEMPT_API, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: storageHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         questionId: currentQuestion.id,
         selectedAnswer,
@@ -183,7 +194,10 @@ function markChoices(attempt) {
 
 async function loadStats() {
   try {
-    const response = await fetch(ACADEMY_STATS_API, { cache: "no-store" });
+    const response = await fetch(ACADEMY_STATS_API, {
+      cache: "no-store",
+      headers: storageHeaders(),
+    });
     const result = await response.json();
 
     if (!response.ok || !result.ok) {

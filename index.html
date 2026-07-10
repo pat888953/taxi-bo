@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=79">
+  <link rel="stylesheet" href="styles.css?v=81">
 </head>
 <body>
   <div class="page-shell">
@@ -26,6 +26,7 @@
       <nav class="module-links" aria-label="TaxiBo modules">
         <a href="academy.html">Open TaxiBo Academy</a>
         <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
+        <a href="settings.html">Settings</a>
       </nav>
     </header>
     <div id="acceptedTripState" class="accepted-trip-state" hidden aria-live="polite"></div>
@@ -420,6 +421,22 @@
     </div>
   </dialog>
 
+  <dialog id="cuePreviewDialog" class="cue-preview-dialog">
+    <form method="dialog" class="cue-preview-close-form">
+      <button class="dialog-close-button" type="submit" aria-label="Close" title="Close">&times;</button>
+    </form>
+    <div class="cue-preview-dialog-layout">
+      <img id="cuePreviewDialogImage" class="cue-preview-dialog-image" alt="">
+      <div class="cue-preview-dialog-copy">
+        <p id="cuePreviewDialogStep" class="section-label">Photo cue</p>
+        <h2 id="cuePreviewDialogTitle">Cue photo</h2>
+        <p id="cuePreviewDialogInstruction"></p>
+        <p id="cuePreviewDialogCoordinates" class="cue-capture-coordinates"></p>
+        <button id="cuePreviewDialogSpeakButton" class="secondary-button" type="button">Play cue audio</button>
+      </div>
+    </div>
+  </dialog>
+
   <template id="photoCardTemplate">
     <article class="photo-card">
       <div class="photo-card-image-wrap">
@@ -444,7 +461,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=79"></script>
+  <script src="app.js?v=81"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

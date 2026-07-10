@@ -1,15 +1,17 @@
-const CACHE_NAME = "taxi-bo-v79";
+const CACHE_NAME = "taxi-bo-v81";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./academy.html",
+  "./settings.html",
   "./four-in-one.html",
   "./four-in-one.css?v=2",
   "./four-in-one.js?v=2",
   "./phone.html",
-  "./styles.css?v=79",
-  "./app.js?v=79",
-  "./academy.js?v=79",
+  "./styles.css?v=81",
+  "./app.js?v=81",
+  "./academy.js?v=80",
+  "./settings.js?v=80",
   "./phone.js",
   "./manifest.json",
   "./icons/icon.svg",
@@ -66,10 +68,12 @@ self.addEventListener("fetch", (event) => {
     (url.pathname.endsWith("/") ||
       url.pathname.endsWith("/index.html") ||
       url.pathname.endsWith("/academy.html") ||
+      url.pathname.endsWith("/settings.html") ||
       url.pathname.endsWith("/phone.html") ||
       url.pathname.endsWith("/styles.css") ||
       url.pathname.endsWith("/app.js") ||
       url.pathname.endsWith("/academy.js") ||
+      url.pathname.endsWith("/settings.js") ||
       url.pathname.endsWith("/phone.js"));
 
   if (isAppFile) {
