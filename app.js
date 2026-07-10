@@ -6,6 +6,7 @@ const PREPARE_ROUTE_OPTIONS_API = "/api/prepare-route-options";
 const ACCEPTED_TRIP_API = "/api/accepted-trip";
 const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
+const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -640,15 +641,33 @@ photoForm.addEventListener("submit", async (event) => {
     image = image ?? photo.image;
     photoPayload.image = image;
     Object.assign(photo, photoPayload);
+    updatePhotoInputStatus("Updating this photo cue in the database...");
+    try {
+      const savedPhoto = await savePhotoStop(photo);
+      Object.assign(photo, {
+        step: savedPhoto.step,
+        title: savedPhoto.title,
+        instruction: savedPhoto.instruction,
+        notes: savedPhoto.notes,
+        image: savedPhoto.image,
+        latitude: savedPhoto.latitude,
+        longitude: savedPhoto.longitude
+      });
+      updatePhotoInputStatus("Photo cue updated in the cloud database.");
+    } catch (error) {
+      updatePhotoInputStatus(error.message || "Could not update this photo cue.", true);
+      return;
+    }
   } else {
     route.photos.push({
       id: crypto.randomUUID(),
       ...photoPayload
     });
+    route.photos.sort((a, b) => a.step - b.step);
+    await saveRoutes();
   }
 
   route.photos.sort((a, b) => a.step - b.step);
-  await saveRoutes();
   simulationIndex = Math.min(simulationIndex, route.photos.length);
   resetPhotoForm(routeId, route.photos.length + 1);
   renderPhotoStepOptions(routeId);
@@ -727,6 +746,25 @@ async function saveRoutes() {
       : "Saved route library to PostgreSQL."
   );
   await saveRoutesToDisk(false);
+}
+
+async function savePhotoStop(photo) {
+  const response = await fetch(`${PHOTO_STOPS_API}/${encodeURIComponent(photo.id)}`, {
+    method: "PUT",
+    headers: storageHeaders({
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    }),
+    cache: "no-store",
+    body: JSON.stringify(photo)
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Could not update this photo cue in the database.");
+  }
+
+  return result.photo;
 }
 
 function render() {

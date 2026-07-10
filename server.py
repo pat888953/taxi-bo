@@ -401,6 +401,62 @@ def delete_route(route_id):
         return result.rowcount > 0
 
 
+def update_photo_stop(photo_id, payload):
+    photo_id = str(photo_id or "").strip()
+    if not photo_id:
+        raise ValueError("Photo cue id is required.")
+
+    step = int(payload.get("step") or 1)
+    title = str(payload.get("title", "Untitled stop")).strip() or "Untitled stop"
+    instruction = str(payload.get("instruction", "")).strip()
+    notes = str(payload.get("notes", "")).strip()
+    image = str(payload.get("image", "")).strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+
+    if not image:
+        raise ValueError("Photo cue image is required.")
+    if latitude is not None and not -90 <= latitude <= 90:
+        raise ValueError("Invalid photo latitude.")
+    if longitude is not None and not -180 <= longitude <= 180:
+        raise ValueError("Invalid photo longitude.")
+
+    with connect_db() as db:
+        result = db.execute(
+            """
+            UPDATE photo_stops
+            SET step = ?, title = ?, instruction = ?, notes = ?,
+                image = ?, latitude = ?, longitude = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (step, title, instruction, notes, image, latitude, longitude, photo_id),
+        )
+
+        if result.rowcount == 0:
+            raise ValueError("Photo cue was not found in the database.")
+
+        row = db.execute(
+            """
+            SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
+            FROM photo_stops
+            WHERE id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+
+    return {
+        "id": row["id"],
+        "routeId": row["route_id"],
+        "step": row["step"],
+        "title": row["title"],
+        "instruction": row["instruction"],
+        "notes": row["notes"],
+        "image": row["image"],
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+    }
+
+
 def academy_answer_for_photo(photo):
     instruction = str(photo["instruction"] or "").strip()
     title = str(photo["title"] or "").strip()
@@ -1796,13 +1852,24 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             ACTIVE_STORAGE_MODE.reset(token)
 
     def handle_put(self):
-        if urlparse(self.path).path != "/api/routes":
+        path = urlparse(self.path).path
+
+        if path.startswith("/api/photo-stops/"):
+            try:
+                photo_id = unquote(path[len("/api/photo-stops/"):]).strip()
+                payload = self.read_json_body()
+                photo = update_photo_stop(photo_id, payload)
+                self.send_json({"ok": True, "photo": photo})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if path != "/api/routes":
             self.send_error(404, "Not found")
             return
 
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = self.read_json_body()
 
             if not isinstance(payload, list):
                 raise ValueError("Expected a route list.")
@@ -1811,6 +1878,12 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "routes": len(payload)})
         except Exception as error:
             self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def do_DELETE(self):
         token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
