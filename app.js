@@ -155,6 +155,7 @@ let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
 let routeEntryMode = "saved";
+let pendingCueEditLink = parseCueEditLink();
 
 render();
 initializeMap();
@@ -631,6 +632,7 @@ async function loadRoutes() {
     displaySelectedRoute();
     updatePhotoRouteStatus();
     updateRouteLibraryStatus();
+    openPendingCueEditLink();
     await recoverInterruptedRouteRecording();
   } catch (error) {
     routes = [];
@@ -2458,8 +2460,54 @@ function startPhotoEdit(routeId, photoId) {
 
   window.requestAnimationFrame(() => {
     photoEditorSection.scrollIntoView({ behavior: "smooth", block: "start" });
-    photoTitleInput.focus({ preventScroll: true });
+    photoPasteZone.focus({ preventScroll: true });
   });
+}
+
+function parseCueEditLink() {
+  const parameters = new URLSearchParams(window.location.search);
+  const photoId = parameters.get("editCue") || parameters.get("photoId");
+
+  if (!photoId) {
+    return null;
+  }
+
+  return {
+    routeId: parameters.get("routeId") || "",
+    photoId,
+    from: parameters.get("from") || "",
+  };
+}
+
+function openPendingCueEditLink() {
+  if (!pendingCueEditLink) {
+    return;
+  }
+
+  const requested = pendingCueEditLink;
+  const route = routes.find((item) => item.id === requested.routeId)
+    || routes.find((item) => item.photos.some((photo) => photo.id === requested.photoId));
+  const photo = route?.photos.find((item) => item.id === requested.photoId);
+
+  pendingCueEditLink = null;
+
+  if (!route || !photo) {
+    updateRouteLibraryStatus("Could not find the Academy cue in Route Maintenance. Refresh the database and try again.", true);
+    return;
+  }
+
+  setRouteEntryMode("saved");
+  destinationSelect.value = route.id;
+  photoRouteSelect.value = route.id;
+  displayRoute(route);
+  startPhotoEdit(route.id, photo.id);
+  photoInputStatus.className = "form-state";
+  photoInputStatus.textContent = requested.from === "academy"
+    ? "Opened from TaxiBo Academy. Paste or choose the real street photo, then update this cue."
+    : "Paste or choose a replacement photo, then update this cue.";
+
+  const cleanUrl = `${window.location.pathname}${window.location.hash || ""}`;
+  window.history.replaceState({}, "", cleanUrl);
 }
 
 function resetPhotoForm(routeId = photoRouteSelect.value, suggestedStep = 1) {
