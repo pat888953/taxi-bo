@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.svg">
-  <link rel="stylesheet" href="styles.css?v=76">
+  <link rel="stylesheet" href="styles.css?v=77">
 </head>
 <body>
   <div class="page-shell academy-shell">
@@ -51,8 +51,19 @@
         <div id="academyState" class="form-state empty-state">Preparing a street-photo question from the database.</div>
 
         <div id="academyQuestion" class="academy-question" hidden>
-          <div class="academy-photo-wrap">
+          <div id="academyPhotoWrap" class="academy-photo-wrap" role="button" tabindex="0" aria-label="Click to add or replace this Academy picture">
             <img id="academyPhoto" class="academy-photo" alt="Street photo question">
+            <div id="academyPhotoNotice" class="academy-photo-notice">Click photo to add or replace picture</div>
+          </div>
+          <div class="academy-photo-tools">
+            <input id="academyPhotoFile" type="file" accept="image/*" capture="environment" hidden>
+            <button id="academyPhotoChooseButton" class="secondary-button small-button" type="button">Add / replace picture</button>
+            <div id="academyPhotoPasteZone" class="academy-photo-paste-zone" contenteditable="true" spellcheck="false" aria-label="Paste Academy cue picture">
+              Paste a screenshot here, or click the picture to choose a file.
+            </div>
+            <img id="academyPhotoPreview" class="academy-photo-preview" alt="New picture preview" hidden>
+            <button id="academyPhotoUploadButton" class="primary-button small-button" type="button" disabled>Upload picture</button>
+            <div id="academyPhotoStatus" class="form-state empty-state">Use this if the question shows a Taxi Bo Sample image instead of a real street photo.</div>
           </div>
           <div class="academy-question-copy">
             <p id="academyPrompt" class="academy-prompt"></p>
@@ -80,7 +91,7 @@
     </main>
   </div>
 
-  <script src="academy.js?v=76"></script>
+  <script src="academy.js?v=77"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

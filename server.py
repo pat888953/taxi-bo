@@ -409,6 +409,16 @@ def academy_answer_for_photo(photo):
     return title or "Review this cue photo carefully."
 
 
+def is_placeholder_photo(image):
+    image = str(image or "")
+    return (
+        not image
+        or "Taxi%20Bo%20Sample" in image
+        or "Taxi Bo Sample" in image
+        or "Imported%20stop" in image
+    )
+
+
 def fetch_academy_question():
     with connect_db() as db:
         question_row = db.execute(
@@ -480,9 +490,43 @@ def fetch_academy_question():
             "step": question_row["step"],
             "title": question_row["title"],
             "image": question_row["image"],
+            "imageNeedsReplacement": is_placeholder_photo(question_row["image"]),
             "prompt": "Look at this street photo. What should the taxi driver do here?",
             "choices": choices,
         },
+    }
+
+
+def update_academy_photo(payload):
+    photo_stop_id = str(payload.get("questionId", "")).strip()
+    image = str(payload.get("image", "")).strip()
+
+    if not photo_stop_id:
+        raise ValueError("Question ID is required.")
+    if not image:
+        raise ValueError("Photo image is required.")
+    if not image.startswith("data:image/"):
+        raise ValueError("Choose or paste an image file.")
+    if len(image) > MAX_OCR_IMAGE_BYTES * 2:
+        raise ValueError("Image is too large. Choose a smaller screenshot or photo.")
+
+    with connect_db() as db:
+        result = db.execute(
+            """
+            UPDATE photo_stops
+            SET image = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (image, photo_stop_id),
+        )
+
+        if result.rowcount < 1:
+            raise ValueError("Academy question was not found.")
+
+    return {
+        "questionId": photo_stop_id,
+        "image": image,
+        "imageNeedsReplacement": False,
     }
 
 
@@ -1794,7 +1838,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/academy/attempt"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/academy/attempt", "/api/academy/photo"}:
             self.send_error(404, "Not found")
             return
 
@@ -1852,6 +1896,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/academy/attempt":
                 self.send_json({"ok": True, "attempt": record_academy_attempt(payload)})
+                return
+
+            if path == "/api/academy/photo":
+                self.send_json({"ok": True, "photo": update_academy_photo(payload)})
                 return
 
             if path == "/api/generate-route":
