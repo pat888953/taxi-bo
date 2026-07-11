@@ -33,6 +33,13 @@ HONG_KONG_TUNNEL_OPTIONS = (
     ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
     ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
 )
+HONG_KONG_HARBOUR_DIVIDE = 22.295
+HONG_KONG_ROUTE_BOUNDS = {
+    "min_latitude": 21.9,
+    "max_latitude": 22.6,
+    "min_longitude": 113.8,
+    "max_longitude": 114.5,
+}
 MAX_OCR_IMAGE_BYTES = 12 * 1024 * 1024
 OCR_ENGINE = None
 
@@ -1234,6 +1241,7 @@ def format_generated_route(start, destination, start_label, road_route):
         "distance": road_route["distance"],
         "duration": road_route["duration"],
         "cues": road_route["cues"],
+        "routeWarnings": analyze_route_sanity(road_route["geometry"], road_route.get("distance")),
     }
 
 
@@ -1309,11 +1317,108 @@ def match_prepared_route(generated, option_id, label):
 
 def requires_harbour_crossing(start, destination):
     points = (start, destination)
-    if not all(21.9 <= point["latitude"] <= 22.6 and 113.8 <= point["longitude"] <= 114.5 for point in points):
+    if not all(is_hong_kong_point(point["latitude"], point["longitude"]) for point in points):
         return False
 
-    harbour_divide = 22.295
-    return (start["latitude"] - harbour_divide) * (destination["latitude"] - harbour_divide) < 0
+    return (start["latitude"] - HONG_KONG_HARBOUR_DIVIDE) * (destination["latitude"] - HONG_KONG_HARBOUR_DIVIDE) < 0
+
+
+def is_hong_kong_point(latitude, longitude):
+    return (
+        HONG_KONG_ROUTE_BOUNDS["min_latitude"] <= latitude <= HONG_KONG_ROUTE_BOUNDS["max_latitude"]
+        and HONG_KONG_ROUTE_BOUNDS["min_longitude"] <= longitude <= HONG_KONG_ROUTE_BOUNDS["max_longitude"]
+    )
+
+
+def analyze_route_sanity(geometry, distance_meters=None):
+    geometry = normalize_geometry(geometry)
+    warnings = []
+
+    if len(geometry) < 2 or not all(is_hong_kong_point(point[0], point[1]) for point in geometry[::max(1, len(geometry) // 20)]):
+        return warnings
+
+    harbour_crossings = count_harbour_crossings(geometry)
+    if harbour_crossings > 1:
+        warnings.append(
+            {
+                "code": "repeated-harbour-crossing",
+                "severity": "high",
+                "title": "Route crosses the harbour more than once",
+                "message": "This generated route looks unrealistic for taxi use. Pick one tunnel route or record the real route.",
+                "count": harbour_crossings,
+            }
+        )
+
+    direct_distance = haversine_distance(geometry[0][0], geometry[0][1], geometry[-1][0], geometry[-1][1])
+    route_distance = float(distance_meters) if isinstance(distance_meters, (int, float)) else sum_geometry_distance(geometry)
+
+    if direct_distance > 1500 and route_distance / direct_distance > 4.0:
+        warnings.append(
+            {
+                "code": "inefficient-route",
+                "severity": "medium",
+                "title": "Route is much longer than the direct trip",
+                "message": "The map route may be looping or using a poor road choice. Compare with a recorded route before saving cues.",
+                "ratio": round(route_distance / direct_distance, 1),
+            }
+        )
+
+    if count_route_revisits(geometry) >= 2:
+        warnings.append(
+            {
+                "code": "route-loop",
+                "severity": "medium",
+                "title": "Route appears to loop back",
+                "message": "The generated path revisits the same area. Review the tunnel choice or record the actual route.",
+            }
+        )
+
+    return warnings
+
+
+def count_harbour_crossings(geometry):
+    crossings = 0
+    previous_side = None
+
+    for latitude, _longitude in geometry:
+        if abs(latitude - HONG_KONG_HARBOUR_DIVIDE) < 0.004:
+            continue
+
+        side = 1 if latitude > HONG_KONG_HARBOUR_DIVIDE else -1
+        if previous_side is not None and side != previous_side:
+            crossings += 1
+        previous_side = side
+
+    return crossings
+
+
+def sum_geometry_distance(geometry):
+    total = 0.0
+    for index in range(1, len(geometry)):
+        total += haversine_distance(
+            geometry[index - 1][0],
+            geometry[index - 1][1],
+            geometry[index][0],
+            geometry[index][1],
+        )
+    return total
+
+
+def count_route_revisits(geometry):
+    seen_cells = set()
+    revisits = 0
+    last_cell = None
+
+    for latitude, longitude in geometry[::max(1, len(geometry) // 120)]:
+        cell = (round(latitude, 3), round(longitude, 3))
+        if cell == last_cell:
+            continue
+        if cell in seen_cells:
+            revisits += 1
+        seen_cells.add(cell)
+        last_cell = cell
+
+    return revisits
 
 
 def match_saved_photo_cues(cues, radius_meters=80):

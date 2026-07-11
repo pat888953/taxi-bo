@@ -2251,6 +2251,7 @@ function showPreparedRouteChoices(options, destination, locationContext) {
       ${options.map((option, index) => `
         <button class="route-choice-button" type="button" data-route-choice="${index}">
           <strong>${escapeHtml(option.optionLabel || `Route ${index + 1}`)}</strong>
+          ${formatRouteWarningBadge(option.routeWarnings)}
           <span>${escapeHtml(formatDistance(option.distance))} · ${escapeHtml(formatRouteDuration(option.duration))} · ${Number(option.cueCount || option.cues?.length || 0)} cues</span>
         </button>
       `).join("")}
@@ -2276,6 +2277,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
   const matchedCueCount = Number(generatedRoute.matchedCueCount || 0);
   const cueCount = Number(generatedRoute.cueCount || generatedRoute.cues?.length || 0);
   const optionLabel = generatedRoute.optionLabel || "Prepared";
+  const warningHtml = formatRouteWarnings(generatedRoute.routeWarnings);
 
   preparedRoute = normalizeImportedRoute({
     id: `prepared-${Date.now()}`,
@@ -2300,6 +2302,36 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     <strong>${escapeHtml(optionLabel)}</strong><br>
     Destination: ${escapeHtml(preparedRoute.destination)}<br>
     Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
+    ${warningHtml}
+  `;
+}
+
+function formatRouteWarningBadge(warnings = []) {
+  if (!Array.isArray(warnings) || !warnings.length) {
+    return "";
+  }
+
+  const highCount = warnings.filter((warning) => warning.severity === "high").length;
+  const label = highCount
+    ? `${highCount} route warning${highCount === 1 ? "" : "s"}`
+    : `${warnings.length} route note${warnings.length === 1 ? "" : "s"}`;
+  return `<span class="route-warning-badge">${escapeHtml(label)}</span>`;
+}
+
+function formatRouteWarnings(warnings = []) {
+  if (!Array.isArray(warnings) || !warnings.length) {
+    return "";
+  }
+
+  return `
+    <div class="route-warning-list">
+      ${warnings.map((warning) => `
+        <div class="route-warning-item ${warning.severity === "high" ? "is-high" : ""}">
+          <strong>${escapeHtml(warning.title || "Route warning")}</strong>
+          <span>${escapeHtml(warning.message || "Review this route before using it.")}</span>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
