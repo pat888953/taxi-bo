@@ -1480,9 +1480,44 @@ button:hover,
   background: #f2f8f4;
 }
 
+.route-choice-button.needs-review {
+  border-color: #d97841;
+  background: #fff8e8;
+}
+
 .route-choice-button span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.route-untrusted-label {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fff0d4;
+  color: #8a5200 !important;
+  font-size: 0.74rem !important;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.route-generation-warning {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d97841;
+  border-radius: 6px;
+  background: #fff1e8;
+}
+
+.route-generation-warning strong,
+.route-generation-warning span {
+  display: block;
+}
+
+.route-generation-warning span {
+  color: var(--muted);
 }
 
 .route-warning-badge {

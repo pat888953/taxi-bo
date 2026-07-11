@@ -2244,13 +2244,22 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
 
 function showPreparedRouteChoices(options, destination, locationContext) {
   pendingRouteChoices = options;
+  const trustedCount = options.filter((option) => option.routeTrusted !== false).length;
+  const allOptionsNeedReview = options.length > 0 && trustedCount === 0;
   routeSummary.className = "route-summary route-choice-summary";
   routeSummary.innerHTML = `
     <strong>Choose a harbour crossing</strong>
+    ${allOptionsNeedReview ? `
+      <div class="route-generation-warning">
+        <strong>Generated routes need review</strong>
+        <span>All map-generated options look suspicious. Use a saved route if available, or record the real taxi route before saving photo cues.</span>
+      </div>
+    ` : ""}
     <div class="route-choice-list">
       ${options.map((option, index) => `
-        <button class="route-choice-button" type="button" data-route-choice="${index}">
+        <button class="route-choice-button ${option.routeTrusted === false ? "needs-review" : ""}" type="button" data-route-choice="${index}">
           <strong>${escapeHtml(option.optionLabel || `Route ${index + 1}`)}</strong>
+          ${option.routeTrusted === false ? `<span class="route-untrusted-label">Review before use</span>` : ""}
           ${formatRouteWarningBadge(option.routeWarnings)}
           <span>${escapeHtml(formatDistance(option.distance))} · ${escapeHtml(formatRouteDuration(option.duration))} · ${Number(option.cueCount || option.cues?.length || 0)} cues</span>
         </button>
@@ -2278,6 +2287,9 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
   const cueCount = Number(generatedRoute.cueCount || generatedRoute.cues?.length || 0);
   const optionLabel = generatedRoute.optionLabel || "Prepared";
   const warningHtml = formatRouteWarnings(generatedRoute.routeWarnings);
+  const trustWarningHtml = generatedRoute.routeTrusted === false
+    ? `<div class="route-generation-warning"><strong>Do not save cue photos from this route yet</strong><span>This map route needs driver review. Prefer a recorded route or record the actual taxi path first.</span></div>`
+    : "";
 
   preparedRoute = normalizeImportedRoute({
     id: `prepared-${Date.now()}`,
@@ -2302,6 +2314,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     <strong>${escapeHtml(optionLabel)}</strong><br>
     Destination: ${escapeHtml(preparedRoute.destination)}<br>
     Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
+    ${trustWarningHtml}
     ${warningHtml}
   `;
 }

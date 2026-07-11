@@ -1312,6 +1312,9 @@ def match_prepared_route(generated, option_id, label):
     generated["cueCount"] = len(matched_cues)
     generated["optionId"] = option_id
     generated["optionLabel"] = label
+    generated["routeTrusted"] = not any(
+        warning.get("severity") in {"high", "medium"} for warning in generated.get("routeWarnings", [])
+    )
     return generated
 
 
@@ -1367,9 +1370,9 @@ def analyze_route_sanity(geometry, distance_meters=None):
         warnings.append(
             {
                 "code": "route-loop",
-                "severity": "medium",
+                "severity": "high",
                 "title": "Route appears to loop back",
-                "message": "The generated path revisits the same area. Review the tunnel choice or record the actual route.",
+                "message": "The generated path revisits the same area. Do not build photo cues from this route until a driver reviews it.",
             }
         )
 
