@@ -166,6 +166,8 @@ let speedWarnings = [];
 let lastSpeedSample = null;
 let speedAudioContext = null;
 let lastSpeedAlert = { id: "", at: 0, overspeed: false };
+let speedTickTimeoutId = null;
+let activeSpeedTick = null;
 let lastSpokenCueId = "";
 let captureCueId = "";
 let captureImageData = null;
@@ -3513,6 +3515,7 @@ function updateSpeedAwareness(position) {
     speedWarningTitle.textContent = "No nearby speed warning";
     speedWarningStatus.textContent = "Switch monitoring on to read speed and check warning points.";
     lastSpeedSample = null;
+    stopSpeedWarningTick();
     return;
   }
 
@@ -3524,6 +3527,7 @@ function updateSpeedAwareness(position) {
     speedWarningBadge.textContent = "No points";
     speedWarningTitle.textContent = "No speed warnings in the database";
     speedWarningStatus.textContent = "Open Manage warning points to mark a known camera or enforcement area.";
+    stopSpeedWarningTick();
     return;
   }
 
@@ -3535,6 +3539,7 @@ function updateSpeedAwareness(position) {
   const isOverspeed = isApproaching && Number.isFinite(speedMph) && speedMph > Number(nearest.warning.speedLimitMph);
 
   if (!isApproaching) {
+    stopSpeedWarningTick();
     speedAwareness.dataset.state = "idle";
     speedWarningBadge.textContent = "Monitoring";
     speedWarningTitle.textContent = `Nearest: ${nearest.warning.label}`;
@@ -3546,7 +3551,7 @@ function updateSpeedAwareness(position) {
   speedWarningBadge.textContent = isOverspeed ? "Slow down" : "Warning ahead";
   speedWarningTitle.textContent = `${nearest.warning.label} · ${Math.round(nearest.warning.speedLimitMph)} mph`;
   speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${Math.round(speedMph)} mph` : ""}.`;
-  maybeSoundSpeedAlert(nearest.warning.id, isOverspeed);
+  updateSpeedWarningTick(nearest.warning.id, nearest.distance, Number(nearest.warning.radiusMeters), isOverspeed);
 }
 
 function getCurrentWarningPosition() {
@@ -3618,6 +3623,7 @@ function stopSpeedMonitoring(updateStatus = true) {
   }
 
   speedMonitoringPosition = null;
+  stopSpeedWarningTick();
   updateSpeedMonitoringToggle();
 
   if (updateStatus && !isRouteGpsActive()) {
@@ -3681,6 +3687,81 @@ function armSpeedAudio() {
   } catch (_error) {
     speedAudioContext = null;
   }
+}
+
+function updateSpeedWarningTick(warningId, distanceMeters, radiusMeters, overspeed) {
+  if (!warningId || !Number.isFinite(distanceMeters) || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    stopSpeedWarningTick();
+    return;
+  }
+
+  const tickState = {
+    warningId,
+    distanceMeters: Math.max(0, distanceMeters),
+    radiusMeters,
+    overspeed
+  };
+
+  const isNewWarning = !activeSpeedTick || activeSpeedTick.warningId !== warningId;
+  activeSpeedTick = tickState;
+
+  if (isNewWarning || speedTickTimeoutId === null) {
+    scheduleSpeedWarningTick(0);
+  }
+}
+
+function scheduleSpeedWarningTick(delayMs = getSpeedTickInterval()) {
+  if (speedTickTimeoutId !== null) {
+    window.clearTimeout(speedTickTimeoutId);
+  }
+
+  speedTickTimeoutId = window.setTimeout(() => {
+    speedTickTimeoutId = null;
+
+    if (!activeSpeedTick) {
+      return;
+    }
+
+    playSpeedWarningTick(activeSpeedTick.overspeed);
+    scheduleSpeedWarningTick();
+  }, delayMs);
+}
+
+function getSpeedTickInterval() {
+  if (!activeSpeedTick) {
+    return 1000;
+  }
+
+  const radius = Math.max(1, activeSpeedTick.radiusMeters);
+  const closeness = 1 - Math.min(1, activeSpeedTick.distanceMeters / radius);
+  const minimum = activeSpeedTick.overspeed ? 140 : 240;
+  const maximum = activeSpeedTick.overspeed ? 620 : 1250;
+  return Math.round(maximum - (maximum - minimum) * closeness);
+}
+
+function playSpeedWarningTick(overspeed) {
+  if (!speedAudioContext) {
+    return;
+  }
+
+  const oscillator = speedAudioContext.createOscillator();
+  const gain = speedAudioContext.createGain();
+  oscillator.frequency.value = overspeed ? 980 : 660;
+  gain.gain.setValueAtTime(0.0001, speedAudioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(overspeed ? 0.22 : 0.12, speedAudioContext.currentTime + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, speedAudioContext.currentTime + (overspeed ? 0.09 : 0.07));
+  oscillator.connect(gain).connect(speedAudioContext.destination);
+  oscillator.start();
+  oscillator.stop(speedAudioContext.currentTime + (overspeed ? 0.1 : 0.08));
+}
+
+function stopSpeedWarningTick() {
+  if (speedTickTimeoutId !== null) {
+    window.clearTimeout(speedTickTimeoutId);
+    speedTickTimeoutId = null;
+  }
+
+  activeSpeedTick = null;
 }
 
 function maybeSoundSpeedAlert(warningId, overspeed) {
