@@ -1463,6 +1463,53 @@ button:hover,
   margin-top: 10px;
 }
 
+.recorded-route-match-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid #86b99f;
+  border-radius: 6px;
+  background: #f1fbf5;
+}
+
+.recorded-route-match-panel > span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.recorded-route-match-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recorded-route-match-button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #86b99f;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+}
+
+.recorded-route-match-button:hover {
+  border-color: var(--accent);
+  background: #eef8f2;
+}
+
+.recorded-route-match-button span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.recorded-route-summary {
+  border-left-color: var(--accent);
+  background: #f1fbf5;
+}
+
 .route-choice-button {
   display: grid;
   gap: 2px;

@@ -1884,6 +1884,107 @@ function getFilteredRoutes() {
   });
 }
 
+function normalizeRouteSearchText(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function buildRouteSearchText(route) {
+  return normalizeRouteSearchText([
+    route.name,
+    route.variant,
+    route.start,
+    route.destination,
+    route.timeWindow,
+    route.trafficPattern,
+    route.notes
+  ].join(" "));
+}
+
+function scoreRecordedRouteMatch(route, destinationText, currentPosition = null) {
+  const query = normalizeRouteSearchText(destinationText);
+  const destination = normalizeRouteSearchText(route.destination);
+  const routeText = buildRouteSearchText(route);
+
+  if (!query || !routeText) {
+    return { score: 0, reasons: [] };
+  }
+
+  let score = 0;
+  const reasons = [];
+
+  if (destination.includes(query)) {
+    score += 80;
+    reasons.push("same destination text");
+  } else if (routeText.includes(query)) {
+    score += 50;
+    reasons.push("route text match");
+  }
+
+  const tokens = query
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+  const tokenHits = tokens.filter((token) => routeText.includes(token)).length;
+
+  if (tokenHits) {
+    score += Math.min(45, tokenHits * 9);
+    reasons.push(`${tokenHits} matching word${tokenHits === 1 ? "" : "s"}`);
+  }
+
+  if (
+    currentPosition &&
+    Number.isFinite(currentPosition.latitude) &&
+    Number.isFinite(currentPosition.longitude) &&
+    Number.isFinite(route.startLatitude) &&
+    Number.isFinite(route.startLongitude)
+  ) {
+    const startDistance = haversineDistance(
+      [currentPosition.latitude, currentPosition.longitude],
+      [route.startLatitude, route.startLongitude]
+    );
+
+    if (startDistance <= 1000) {
+      score += 35;
+      reasons.push("starts nearby");
+    } else if (startDistance <= 3000) {
+      score += 22;
+      reasons.push("start is close");
+    } else if (startDistance <= 8000) {
+      score += 10;
+      reasons.push("start is in range");
+    }
+  }
+
+  if (route.photos?.length) {
+    score += Math.min(12, route.photos.length);
+  }
+
+  if (route.routeGeometry?.length >= 2) {
+    score += 8;
+  }
+
+  return { score, reasons };
+}
+
+function findRecordedRouteMatches(destinationText, currentPosition = null, limit = 3) {
+  return routes
+    .filter((route) => getRouteLibraryType(route) === "recorded")
+    .map((route) => {
+      const match = scoreRecordedRouteMatch(route, destinationText, currentPosition);
+      return {
+        route,
+        score: match.score,
+        reasons: match.reasons
+      };
+    })
+    .filter((match) => match.score >= 35)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 function exportRoutes() {
   const blob = new Blob([JSON.stringify(routes, null, 2)], {
     type: "application/json"
@@ -2187,6 +2288,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     longitude: selectedRoute.startLongitude
   } : null;
   let locationContext = "";
+  let recordedMatches = [];
 
   if (hasSavedStartCoordinates) {
     locationContext = ` Start supplied by the saved route coordinates: ${selectedRoute.startLatitude.toFixed(5)}, ${selectedRoute.startLongitude.toFixed(5)}.`;
@@ -2223,11 +2325,17 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
       destination,
       currentPosition
     };
+    recordedMatches = findRecordedRouteMatches(destination, currentPosition);
+
+    if (!offerAlternatives && recordedMatches.length) {
+      selectRecordedRouteMatch(recordedMatches[0].route.id, true);
+      return;
+    }
 
     if (offerAlternatives) {
       const options = await prepareRouteOptionsOnServer(payload);
-      if (options.length > 1) {
-        showPreparedRouteChoices(options, destination, locationContext);
+      if (options.length > 1 || recordedMatches.length) {
+        showPreparedRouteChoices(options, destination, locationContext, recordedMatches);
         return;
       }
       applyPreparedRoute(options[0], destination, locationContext);
@@ -2235,20 +2343,46 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
       applyPreparedRoute(await prepareRouteOnServer(payload), destination, locationContext);
     }
   } catch (error) {
-    routeSummary.className = "route-summary";
-    routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
+    if (recordedMatches.length) {
+      showPreparedRouteChoices([], destination, locationContext, recordedMatches, error.message);
+    } else {
+      routeSummary.className = "route-summary";
+      routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
+    }
   } finally {
     goDestinationButton.disabled = routeEntryMode !== "destination";
   }
 }
 
-function showPreparedRouteChoices(options, destination, locationContext) {
+function showPreparedRouteChoices(options, destination, locationContext, recordedMatches = [], generationError = "") {
   pendingRouteChoices = options;
   const trustedCount = options.filter((option) => option.routeTrusted !== false).length;
   const allOptionsNeedReview = options.length > 0 && trustedCount === 0;
   routeSummary.className = "route-summary route-choice-summary";
   routeSummary.innerHTML = `
-    <strong>Choose a harbour crossing</strong>
+    <strong>${recordedMatches.length ? "Choose the best known route" : "Choose a harbour crossing"}</strong>
+    ${recordedMatches.length ? `
+      <div class="recorded-route-match-panel">
+        <strong>Recorded taxi routes found</strong>
+        <span>These use actual GPS tracks from previous drives. Prefer these when they match the passenger destination.</span>
+        <div class="recorded-route-match-list">
+          ${recordedMatches.map((match) => `
+            <button class="recorded-route-match-button" type="button" data-recorded-route-match="${escapeHtml(match.route.id)}">
+              <span class="route-type-recorded">Actual GPS track</span>
+              <strong>${escapeHtml(match.route.name || "Recorded route")}</strong>
+              <span>${escapeHtml(shortPlaceName(match.route.start))} to ${escapeHtml(shortPlaceName(match.route.destination))}</span>
+              <span>${escapeHtml(formatDistance(match.route.routeDistanceMeters)) || "distance not saved"} | ${match.route.photos.length} cue${match.route.photos.length === 1 ? "" : "s"}${match.reasons.length ? ` | ${escapeHtml(match.reasons.join(", "))}` : ""}</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    ` : ""}
+    ${generationError ? `
+      <div class="route-generation-warning">
+        <strong>Generated route unavailable</strong>
+        <span>${escapeHtml(generationError)} Use a recorded taxi route above if it matches.</span>
+      </div>
+    ` : ""}
     ${allOptionsNeedReview ? `
       <div class="route-generation-warning">
         <strong>Generated routes need review</strong>
@@ -2267,6 +2401,12 @@ function showPreparedRouteChoices(options, destination, locationContext) {
     </div>
   `;
 
+  routeSummary.querySelectorAll(".recorded-route-match-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectRecordedRouteMatch(button.dataset.recordedRouteMatch);
+    });
+  });
+
   routeSummary.querySelectorAll(".route-choice-button").forEach((button) => {
     button.addEventListener("click", () => {
       const selected = pendingRouteChoices[Number(button.dataset.routeChoice)];
@@ -2276,6 +2416,35 @@ function showPreparedRouteChoices(options, destination, locationContext) {
       }
     });
   });
+}
+
+function selectRecordedRouteMatch(routeId, automatic = false) {
+  const route = routes.find((item) => item.id === routeId);
+
+  if (!route) {
+    routeSummary.className = "route-summary";
+    routeSummary.innerHTML = `<strong>Recorded route not found.</strong><br>Refresh the database and try again.`;
+    return;
+  }
+
+  pendingRouteChoices = [];
+  preparedRoute = null;
+  setRouteEntryMode("saved");
+  destinationSelect.value = route.id;
+
+  if (photoRouteSelect) {
+    photoRouteSelect.value = route.id;
+    updatePhotoRouteStatus();
+    renderPhotoStepOptions(route.id);
+  }
+
+  displayRoute(route);
+  routeSummary.className = "route-summary recorded-route-summary";
+  routeSummary.innerHTML = `
+    <strong>${escapeHtml(route.name || "Recorded taxi route")}</strong><br>
+    Destination: ${escapeHtml(route.destination)}<br>
+    ${automatic ? "Matched from the destination text. " : ""}Using the actual recorded GPS track and saved photo cues. ${escapeHtml(formatRouteContext(route))}
+  `;
 }
 
 function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
