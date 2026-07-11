@@ -49,6 +49,7 @@ const recordingDistance = document.querySelector("#recordingDistance");
 const recordingPointCount = document.querySelector("#recordingPointCount");
 const recordingCompletion = document.querySelector("#recordingCompletion");
 const recordedRouteVariant = document.querySelector("#recordedRouteVariant");
+const recordedRouteVoiceButton = document.querySelector("#recordedRouteVoiceButton");
 const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton");
 const discardRecordingButton = document.querySelector("#discardRecordingButton");
 const speedAwareness = document.querySelector("#speedAwareness");
@@ -145,6 +146,8 @@ let pendingGeneratedCues = [];
 let preparedRoute = null;
 let destinationRecognition = null;
 let isListeningForDestination = false;
+let recordedRouteRecognition = null;
+let isListeningForRecordedRoute = false;
 let liveDriveWatchId = null;
 let liveDrivePosition = null;
 let speedMonitoringWatchId = null;
@@ -194,6 +197,7 @@ render();
 initializeMap();
 setupInstallPrompt();
 setupDestinationVoiceInput();
+setupRecordedRouteVoiceInput();
 loadRoutes();
 loadSpeedWarnings();
 startAcceptedTripPolling();
@@ -222,6 +226,10 @@ goDestinationButton.addEventListener("click", () => {
 
 destinationVoiceButton.addEventListener("click", () => {
   toggleDestinationVoiceInput();
+});
+
+recordedRouteVoiceButton.addEventListener("click", () => {
+  toggleRecordedRouteVoiceInput();
 });
 
 destinationSearch.addEventListener("input", (event) => {
@@ -897,6 +905,77 @@ function toggleDestinationVoiceInput() {
     destinationRecognition.start();
   } catch {
     destinationRecognition.stop();
+  }
+}
+
+function setupRecordedRouteVoiceInput() {
+  if (!recordedRouteVoiceButton) {
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    recordedRouteVoiceButton.disabled = true;
+    recordedRouteVoiceButton.title = "Voice input is not supported in this browser.";
+    recordedRouteVoiceButton.textContent = "Mic off";
+    return;
+  }
+
+  recordedRouteRecognition = new SpeechRecognition();
+  recordedRouteRecognition.lang = "zh-HK";
+  recordedRouteRecognition.interimResults = true;
+  recordedRouteRecognition.continuous = false;
+  recordedRouteRecognition.maxAlternatives = 3;
+  recordedRouteVoiceButton.title = "Speak route name in Cantonese";
+  recordedRouteVoiceButton.setAttribute("aria-label", "Speak route name in Cantonese");
+
+  recordedRouteRecognition.addEventListener("start", () => {
+    isListeningForRecordedRoute = true;
+    recordedRouteVoiceButton.classList.add("listening");
+    recordedRouteVoiceButton.textContent = "\u8046\u807d\u4e2d";
+    routeRecorderState.textContent = "Listening for the recorded route name...";
+  });
+
+  recordedRouteRecognition.addEventListener("result", (event) => {
+    const transcript = Array.from(event.results)
+      .map((result) => result[0]?.transcript || "")
+      .join(" ")
+      .trim();
+
+    if (transcript) {
+      recordedRouteVariant.value = transcript;
+    }
+  });
+
+  recordedRouteRecognition.addEventListener("error", (event) => {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = `Voice input stopped. ${formatSpeechError(event.error)}`;
+  });
+
+  recordedRouteRecognition.addEventListener("end", () => {
+    isListeningForRecordedRoute = false;
+    recordedRouteVoiceButton.classList.remove("listening");
+    recordedRouteVoiceButton.textContent = "Mic";
+  });
+}
+
+function toggleRecordedRouteVoiceInput() {
+  if (!recordedRouteRecognition) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = "Voice input is not available. Type the route name instead.";
+    return;
+  }
+
+  if (isListeningForRecordedRoute) {
+    recordedRouteRecognition.stop();
+    return;
+  }
+
+  try {
+    recordedRouteRecognition.start();
+  } catch {
+    recordedRouteRecognition.stop();
   }
 }
 
@@ -3249,6 +3328,7 @@ function renderRouteRecorder() {
     recordingDistance.textContent = "0.0 mi";
     recordingPointCount.textContent = "0";
     recordingCompletion.hidden = true;
+    recordedRouteVoiceButton.disabled = true;
     return;
   }
 
@@ -3263,6 +3343,7 @@ function renderRouteRecorder() {
       ? "Recording GPS - database sync will retry"
       : `Recording actual drive to ${shortPlaceName(recording.destination)}`;
     recordingCompletion.hidden = true;
+    recordedRouteVoiceButton.disabled = true;
     return;
   }
 
@@ -3274,6 +3355,7 @@ function renderRouteRecorder() {
       ? "Interrupted drive recovered. Save it as a reusable route variant or discard it."
       : "Actual drive recorded. Save it as a reusable route variant or discard it.";
   recordingCompletion.hidden = false;
+  recordedRouteVoiceButton.disabled = !recordedRouteRecognition;
 }
 
 function formatRecordingDuration(seconds) {
@@ -3320,6 +3402,7 @@ async function saveCompletedRecordingAsRoute() {
 
   saveRecordedRouteButton.disabled = true;
   discardRecordingButton.disabled = true;
+  recordedRouteVoiceButton.disabled = true;
   routeRecorderState.textContent = "Saving recorded route to the route library...";
 
   try {
@@ -3341,6 +3424,7 @@ async function saveCompletedRecordingAsRoute() {
   } finally {
     saveRecordedRouteButton.disabled = false;
     discardRecordingButton.disabled = false;
+    recordedRouteVoiceButton.disabled = !recordedRouteRecognition || !completedRouteRecording;
   }
 }
 
@@ -3352,6 +3436,7 @@ async function discardCompletedRecording() {
   }
 
   discardRecordingButton.disabled = true;
+  recordedRouteVoiceButton.disabled = true;
 
   try {
     if (recording.serverStarted) {

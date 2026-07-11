@@ -1291,6 +1291,10 @@ h3 {
   min-width: 0;
 }
 
+.recording-name-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .voice-button {
   min-width: 62px;
   white-space: nowrap;
