@@ -407,6 +407,31 @@ h3 {
   align-items: center;
 }
 
+.drive-controls-row button.is-drive-active {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.drive-controls-row button.is-drive-standby {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.drive-controls-row button:disabled.is-drive-active,
+.drive-controls-row button:disabled.is-drive-standby {
+  opacity: 1;
+}
+
+.drive-controls-row button:disabled.is-drive-active {
+  cursor: default;
+}
+
+.drive-controls-row button:disabled.is-drive-standby {
+  cursor: not-allowed;
+}
+
 .speed-awareness {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr) auto;

@@ -200,6 +200,7 @@ startAcceptedTripPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
 setRouteEntryMode("saved");
+setDriveControlMode("idle");
 
 destinationModeRadio.addEventListener("change", () => {
   if (destinationModeRadio.checked) setRouteEntryMode("destination");
@@ -3764,6 +3765,37 @@ function stopSpeedWarningTick() {
   activeSpeedTick = null;
 }
 
+function setDriveControlMode(mode = "idle") {
+  const normalizedMode = ["idle", "live", "simulate"].includes(mode) ? mode : "idle";
+  const buttons = [
+    liveDriveStartButton,
+    liveDriveSimulateButton,
+    liveDriveStopButton
+  ];
+
+  buttons.forEach((button) => {
+    button.classList.remove("is-drive-active", "is-drive-standby");
+    button.setAttribute("aria-pressed", "false");
+  });
+
+  if (normalizedMode === "live") {
+    liveDriveStartButton.classList.add("is-drive-active");
+    liveDriveStopButton.classList.add("is-drive-standby");
+    liveDriveSimulateButton.classList.add("is-drive-standby");
+    liveDriveStartButton.setAttribute("aria-pressed", "true");
+  } else if (normalizedMode === "simulate") {
+    liveDriveSimulateButton.classList.add("is-drive-active");
+    liveDriveStopButton.classList.add("is-drive-standby");
+    liveDriveStartButton.classList.add("is-drive-standby");
+    liveDriveSimulateButton.setAttribute("aria-pressed", "true");
+  } else {
+    liveDriveStopButton.classList.add("is-drive-active");
+    liveDriveStartButton.classList.add("is-drive-standby");
+    liveDriveSimulateButton.classList.add("is-drive-standby");
+    liveDriveStopButton.setAttribute("aria-pressed", "true");
+  }
+}
+
 function maybeSoundSpeedAlert(warningId, overspeed) {
   const now = Date.now();
   const repeatAfter = overspeed ? 12000 : 60000;
@@ -3821,6 +3853,7 @@ async function startLiveDrive() {
   setLiveDriveStatus("Requesting location permission. Allow location access to start live drive mode.");
   liveDriveStartButton.disabled = true;
   liveDriveStopButton.disabled = false;
+  setDriveControlMode("live");
   scheduleLiveDriveWaitingMessage();
 
   try {
@@ -3857,6 +3890,7 @@ function stopLiveDrive(updateStatus = true) {
   liveDriveStartButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = true;
+  setDriveControlMode("idle");
   updateSpeedMonitoringToggle();
 
   if (updateStatus) {
@@ -3902,6 +3936,7 @@ function startLiveDriveSimulation() {
   liveDriveStartButton.disabled = true;
   liveDriveSimulateButton.disabled = true;
   liveDriveStopButton.disabled = false;
+  setDriveControlMode("simulate");
   updateSpeedMonitoringToggle();
   setLiveDriveStatus("Tablet simulation running. Moving along the saved route line and following it on the map...");
 
@@ -3920,6 +3955,7 @@ function startLiveDriveSimulation() {
       liveDriveStartButton.disabled = false;
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
+      setDriveControlMode("idle");
       updateSpeedMonitoringToggle();
       return;
     }
