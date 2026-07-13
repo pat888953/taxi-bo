@@ -1,6 +1,7 @@
 const ACADEMY_QUESTION_API = "/api/academy/question";
 const ACADEMY_ATTEMPT_API = "/api/academy/attempt";
 const ACADEMY_STATS_API = "/api/academy/stats";
+const ACADEMY_REPAIRS_API = "/api/academy/repairs";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 
 const academyAccuracy = document.querySelector("#academyAccuracy");
@@ -21,6 +22,10 @@ const academyEditPictureButton = document.querySelector("#academyEditPictureButt
 const academySubmitButton = document.querySelector("#academySubmitButton");
 const academyNextButton = document.querySelector("#academyNextButton");
 const academyHistory = document.querySelector("#academyHistory");
+const academyRepairCount = document.querySelector("#academyRepairCount");
+const academyRepairRefreshButton = document.querySelector("#academyRepairRefreshButton");
+const academyRepairState = document.querySelector("#academyRepairState");
+const academyRepairList = document.querySelector("#academyRepairList");
 
 let currentQuestion = null;
 let selectedAnswer = "";
@@ -45,9 +50,10 @@ academyPhotoWrap.addEventListener("keydown", (event) => {
   }
 });
 academyEditPictureButton.addEventListener("click", openCurrentQuestionInCueMaintenance);
+academyRepairRefreshButton.addEventListener("click", loadRepairs);
 
 async function loadAcademy() {
-  await Promise.all([loadQuestion(), loadStats()]);
+  await Promise.all([loadQuestion(), loadStats(), loadRepairs()]);
 }
 
 async function loadQuestion() {
@@ -136,13 +142,108 @@ function openCurrentQuestionInCueMaintenance() {
     return;
   }
 
+  openCueInMaintenance(currentQuestion);
+}
+
+function openCueInMaintenance(cue) {
   const url = new URL("index.html", window.location.href);
-  url.searchParams.set("editCue", currentQuestion.id);
-  if (currentQuestion.routeId) {
-    url.searchParams.set("routeId", currentQuestion.routeId);
+  url.searchParams.set("editCue", cue.id);
+  if (cue.routeId) {
+    url.searchParams.set("routeId", cue.routeId);
   }
   url.searchParams.set("from", "academy");
   window.location.href = url.toString();
+}
+
+async function loadRepairs() {
+  academyRepairRefreshButton.disabled = true;
+  academyRepairState.className = "form-state empty-state";
+  academyRepairState.textContent = "Checking for sample or missing pictures...";
+
+  try {
+    const response = await fetch(ACADEMY_REPAIRS_API, {
+      cache: "no-store",
+      headers: storageHeaders(),
+    });
+    const result = await response.json();
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not load picture repair list.");
+    }
+
+    renderRepairs(result.repairs);
+  } catch (error) {
+    academyRepairCount.textContent = "Unavailable";
+    academyRepairState.className = "form-state";
+    academyRepairState.textContent = error.message || "Could not load picture repair list.";
+    academyRepairList.innerHTML = "";
+  } finally {
+    academyRepairRefreshButton.disabled = false;
+  }
+}
+
+function renderRepairs(repairs) {
+  const items = Array.isArray(repairs?.items) ? repairs.items : [];
+  const repairCount = Number(repairs?.repairCount || 0);
+  academyRepairCount.textContent = `${repairCount} need${repairCount === 1 ? "s" : ""} repair`;
+
+  if (!items.length) {
+    academyRepairState.className = "form-state empty-state";
+    academyRepairState.textContent = "Nice. Every Academy cue has a real picture.";
+    academyRepairList.innerHTML = "";
+    return;
+  }
+
+  academyRepairState.className = "form-state";
+  academyRepairState.textContent = repairs.truncated
+    ? `Showing the first ${items.length} of ${repairCount} cue pictures that need repair.`
+    : `Found ${repairCount} cue picture${repairCount === 1 ? "" : "s"} that need real street photos.`;
+  academyRepairList.innerHTML = "";
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "academy-repair-card";
+
+    const imageWrap = document.createElement("button");
+    imageWrap.className = "academy-repair-image-button";
+    imageWrap.type = "button";
+    imageWrap.setAttribute("aria-label", `Repair ${item.title || "cue picture"}`);
+
+    if (item.image) {
+      const image = document.createElement("img");
+      image.src = item.image;
+      image.alt = item.title || "Cue picture needing repair";
+      imageWrap.append(image);
+    } else {
+      const placeholder = document.createElement("span");
+      placeholder.textContent = "No picture";
+      imageWrap.append(placeholder);
+    }
+
+    imageWrap.addEventListener("click", () => openCueInMaintenance(item));
+
+    const copy = document.createElement("div");
+    copy.className = "academy-repair-copy";
+
+    const badge = document.createElement("span");
+    badge.textContent = `${item.reason || "Needs repair"} · Step ${item.step || "?"}`;
+
+    const title = document.createElement("strong");
+    title.textContent = item.title || "Untitled cue";
+
+    const context = document.createElement("p");
+    context.textContent = `${item.routeName || "Saved route"} · ${item.destination || "No destination"}`;
+
+    const action = document.createElement("button");
+    action.className = "secondary-button small-button";
+    action.type = "button";
+    action.textContent = "Repair in Route Maintenance";
+    action.addEventListener("click", () => openCueInMaintenance(item));
+
+    copy.append(badge, title, context, action);
+    card.append(imageWrap, copy);
+    academyRepairList.append(card);
+  });
 }
 
 async function submitAnswer() {

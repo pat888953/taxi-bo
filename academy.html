@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.svg">
-  <link rel="stylesheet" href="styles.css?v=80">
+  <link rel="stylesheet" href="styles.css?v=93">
 </head>
 <body>
   <div class="page-shell academy-shell">
@@ -70,6 +70,21 @@
         </div>
       </section>
 
+      <section class="panel academy-repair-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Picture repair</p>
+            <h2>Fix sample or missing Academy pictures</h2>
+          </div>
+          <div class="academy-repair-actions">
+            <span id="academyRepairCount" class="status-chip">Checking</span>
+            <button id="academyRepairRefreshButton" class="secondary-button small-button" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="academyRepairState" class="form-state empty-state">Looking for Taxi Bo Sample pictures that need real street photos.</div>
+        <div id="academyRepairList" class="academy-repair-list"></div>
+      </section>
+
       <section class="panel academy-history-panel">
         <div class="panel-header">
           <div>
@@ -83,7 +98,7 @@
     </main>
   </div>
 
-  <script src="academy.js?v=80"></script>
+  <script src="academy.js?v=93"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

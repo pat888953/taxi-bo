@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.svg">
-  <link rel="stylesheet" href="styles.css?v=80">
+  <link rel="stylesheet" href="styles.css?v=94">
 </head>
 <body>
   <div class="page-shell settings-shell">
@@ -55,10 +55,55 @@
           </article>
         </div>
       </section>
+
+      <section class="panel settings-sync-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Sync control</p>
+            <h2>Move data between laptop SQLite and cloud Neon</h2>
+          </div>
+          <span id="syncDirectionBadge" class="status-chip">Manual sync</span>
+        </div>
+
+        <label class="field">
+          <span>Cloud TaxiBo URL</span>
+          <input id="cloudTargetUrl" type="url" placeholder="https://taxi-bo.onrender.com" autocomplete="url">
+        </label>
+
+        <div class="settings-sync-actions">
+          <button id="testCloudConnectionButton" class="secondary-button" type="button">Test cloud connection</button>
+          <small>Use this first if sync says the browser cannot reach Render.</small>
+        </div>
+
+        <div class="settings-sync-grid">
+          <article class="settings-sync-card recommended">
+            <span>Recommended after in-house editing</span>
+            <strong>Sync laptop → cloud</strong>
+            <p>Copies your local SQLite route/photo database to Render/Neon. Use this after repairing pictures locally.</p>
+            <button id="syncLocalToCloudButton" class="primary-button" type="button">Sync local to cloud</button>
+          </article>
+
+          <article class="settings-sync-card">
+            <span>Restore this laptop</span>
+            <strong>Pull cloud → laptop</strong>
+            <p>Copies Render/Neon routes back into this laptop SQLite database. This replaces local routes.</p>
+            <button id="syncCloudToLocalButton" class="secondary-button" type="button">Pull cloud to local</button>
+          </article>
+
+          <article class="settings-sync-card">
+            <span>Safe backup</span>
+            <strong>Download local backup</strong>
+            <p>Saves the current local SQLite routes/photos as a JSON file before you sync.</p>
+            <button id="downloadLocalBackupButton" class="secondary-button" type="button">Download local backup</button>
+          </article>
+        </div>
+
+        <div id="syncStatus" class="form-state empty-state" aria-live="polite">Choose a sync action. Backup first if you are unsure.</div>
+      </section>
     </main>
   </div>
 
-  <script src="settings.js?v=80"></script>
+  <script src="settings.js?v=94"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

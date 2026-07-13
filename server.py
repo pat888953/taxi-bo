@@ -564,6 +564,50 @@ def fetch_academy_question():
     }
 
 
+def fetch_academy_repairs():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+              photo_stops.id, photo_stops.route_id, photo_stops.step,
+              photo_stops.title, photo_stops.instruction, photo_stops.notes,
+              photo_stops.image, routes.name AS route_name,
+              routes.start, routes.destination
+            FROM photo_stops
+            JOIN routes ON routes.id = photo_stops.route_id
+            ORDER BY routes.updated_at DESC, routes.position ASC, photo_stops.step ASC
+            """
+        ).fetchall()
+
+    repair_items = []
+    for row in rows:
+        image = row["image"]
+        if not is_placeholder_photo(image):
+            continue
+
+        repair_items.append(
+            {
+                "id": row["id"],
+                "routeId": row["route_id"],
+                "routeName": row["route_name"],
+                "start": row["start"],
+                "destination": row["destination"],
+                "step": row["step"],
+                "title": row["title"],
+                "instruction": row["instruction"],
+                "notes": row["notes"],
+                "image": image,
+                "reason": "Missing picture" if not image else "Sample picture",
+            }
+        )
+
+    return {
+        "repairCount": len(repair_items),
+        "items": repair_items[:80],
+        "truncated": len(repair_items) > 80,
+    }
+
+
 def record_academy_attempt(payload):
     photo_stop_id = str(payload.get("questionId", "")).strip()
     selected_answer = str(payload.get("selectedAnswer", "")).strip()
@@ -1889,6 +1933,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Accept, X-TaxiBo-Storage-Mode")
         if not path.startswith("/api/") and (
             path.endswith((".html", ".js", ".css")) or path in {"/", "/sw.js"}
         ):
@@ -1896,6 +1944,11 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
         super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
@@ -1948,6 +2001,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/academy/stats":
             self.send_json({"ok": True, "stats": fetch_academy_stats()})
+            return
+
+        if path == "/api/academy/repairs":
+            self.send_json({"ok": True, "repairs": fetch_academy_repairs()})
             return
 
         super().do_GET()
