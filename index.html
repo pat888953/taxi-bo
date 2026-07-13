@@ -17,12 +17,17 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=93">
+  <link rel="stylesheet" href="styles.css?v=95">
 </head>
 <body>
   <div class="page-shell">
     <header class="module-switcher">
       <div><span>Driver guidance</span><strong>TaxiBo Cue</strong></div>
+      <div class="cue-mode-switcher" role="group" aria-label="TaxiBo Cue workspace mode">
+        <button class="cue-mode-button" type="button" data-cue-mode="drive">Drive</button>
+        <button class="cue-mode-button" type="button" data-cue-mode="maintenance">Maintenance</button>
+        <button class="cue-mode-button" type="button" data-cue-mode="testing">Testing</button>
+      </div>
       <nav class="module-links" aria-label="TaxiBo modules">
         <a href="academy.html">Open TaxiBo Academy</a>
         <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
@@ -477,7 +482,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=93"></script>
+  <script src="app.js?v=95"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

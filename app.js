@@ -8,6 +8,7 @@ const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
 const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
+const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
@@ -101,6 +102,7 @@ const routeLibraryFilter = document.querySelector("#routeLibraryFilter");
 const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryButton");
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
+const cueModeButtons = document.querySelectorAll("[data-cue-mode]");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
 const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
 const cueCaptureTitle = document.querySelector("#cueCaptureTitle");
@@ -193,6 +195,51 @@ function storageHeaders(extra = {}) {
   };
 }
 
+function getDefaultCueUiMode() {
+  const storedMode = localStorage.getItem(TAXIBO_CUE_UI_MODE_KEY);
+  if (["drive", "maintenance", "testing"].includes(storedMode)) {
+    return storedMode;
+  }
+
+  const host = window.location.hostname;
+  const isLocal = !host || host === "localhost" || host === "127.0.0.1";
+  return isLocal ? "testing" : "drive";
+}
+
+function setCueUiMode(mode) {
+  const nextMode = ["drive", "maintenance", "testing"].includes(mode) ? mode : "drive";
+  document.body.dataset.cueUiMode = nextMode;
+  localStorage.setItem(TAXIBO_CUE_UI_MODE_KEY, nextMode);
+
+  cueModeButtons.forEach((button) => {
+    const isActive = button.dataset.cueMode === nextMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  if (maintenanceDrawer) {
+    maintenanceDrawer.open = nextMode !== "drive";
+  }
+
+  window.requestAnimationFrame(() => {
+    if (map) {
+      map.invalidateSize();
+    }
+  });
+}
+
+cueModeButtons.forEach((button) => {
+  button.addEventListener("click", () => setCueUiMode(button.dataset.cueMode));
+});
+
+maintenanceDrawer?.addEventListener("toggle", () => {
+  const mode = document.body.dataset.cueUiMode;
+  if (mode !== "drive" && !maintenanceDrawer.open) {
+    maintenanceDrawer.open = true;
+  }
+});
+
+setCueUiMode(getDefaultCueUiMode());
 render();
 initializeMap();
 setupInstallPrompt();

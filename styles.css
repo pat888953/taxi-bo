@@ -358,6 +358,74 @@ h3 {
   justify-content: flex-end;
 }
 
+.module-switcher .cue-mode-switcher {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.cue-mode-button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.cue-mode-button.is-active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 5px 14px rgba(23, 107, 77, 0.18);
+}
+
+body[data-cue-ui-mode="drive"] .maintenance-drawer {
+  display: none;
+}
+
+body[data-cue-ui-mode="maintenance"] .top-driver-bar,
+body[data-cue-ui-mode="maintenance"] .rehearse-panel {
+  display: none;
+}
+
+body[data-cue-ui-mode="maintenance"] .layout {
+  grid-template-columns: 1fr;
+}
+
+body[data-cue-ui-mode="maintenance"] .maintenance-drawer,
+body[data-cue-ui-mode="testing"] .maintenance-drawer {
+  grid-column: 1 / -1;
+}
+
+body[data-cue-ui-mode="maintenance"] .maintenance-drawer > summary,
+body[data-cue-ui-mode="testing"] .maintenance-drawer > summary {
+  cursor: default;
+}
+
+body[data-cue-ui-mode="maintenance"] .maintenance-drawer > summary::after,
+body[data-cue-ui-mode="testing"] .maintenance-drawer > summary::after {
+  content: "Visible";
+}
+
+body[data-cue-ui-mode="drive"] .page-shell {
+  width: min(1320px, calc(100% - 24px));
+  padding-top: 14px;
+}
+
+body[data-cue-ui-mode="drive"] .top-driver-bar,
+body[data-cue-ui-mode="drive"] .rehearse-panel {
+  grid-column: 1 / -1;
+}
+
+body[data-cue-ui-mode="drive"] .layout {
+  grid-template-columns: 1fr;
+}
+
 .accepted-trip-state {
   display: flex;
   justify-content: space-between;
