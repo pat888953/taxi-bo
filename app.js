@@ -497,7 +497,7 @@ saveSpeedWarningCoordinateButton.addEventListener("click", () => {
 topCuePreview.addEventListener("click", (event) => {
   const audioControl = event.target.closest(".cue-audio-button");
   if (audioControl) {
-    speakCueTitle(audioControl.dataset.cueTitle, true);
+    speakCueText(audioControl.dataset.cueSpeech || audioControl.dataset.cueTitle, true);
     return;
   }
 
@@ -513,7 +513,7 @@ topCuePreview.addEventListener("click", (event) => {
 });
 
 cuePreviewDialogSpeakButton?.addEventListener("click", () => {
-  speakCueTitle(cuePreviewDialogSpeakButton.dataset.cueTitle, true);
+  speakCueText(cuePreviewDialogSpeakButton.dataset.cueSpeech || cuePreviewDialogSpeakButton.dataset.cueTitle, true);
 });
 
 openCueStreetViewButton.addEventListener("click", () => openCueStreetView());
@@ -1456,7 +1456,7 @@ function renderTopCuePreview(route = getActiveRoute()) {
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
-        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" aria-label="Speak cue title" title="Speak cue title">&#9654;</button>
+        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" data-cue-speech="${escapeHtml(buildCueSpeechText(cue))}" aria-label="Speak cue details" title="Speak cue details">&#9654;</button>
         <div class="top-cue-copy photo-card-copy">
           <span class="photo-card-step">Upcoming ${index + 1} - Step ${cue.step}</span>
           <strong class="photo-card-title">${escapeHtml(cue.title || "Untitled cue")}</strong>
@@ -1498,7 +1498,7 @@ function renderCuePreviewCards(cues) {
         <div class="top-cue-image-wrap photo-card-image-wrap">
           <img class="top-cue-image photo-card-image" src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title || `Photo cue ${index + 1}`)}">
         </div>
-        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" aria-label="Speak cue title" title="Speak cue title">&#9654;</button>
+        <button class="cue-audio-button" type="button" data-cue-title="${escapeHtml(cue.title || "Untitled cue")}" data-cue-speech="${escapeHtml(buildCueSpeechText(cue))}" aria-label="Speak cue details" title="Speak cue details">&#9654;</button>
         <div class="top-cue-copy photo-card-copy">
           <span class="photo-card-step">Upcoming ${index + 1} - Step ${cue.step}</span>
           <strong class="photo-card-title">${escapeHtml(cue.title || "Untitled cue")}</strong>
@@ -1738,6 +1738,7 @@ function openCuePreview(cueId) {
   cuePreviewDialogCoordinates.textContent = formatPhotoCoordinates(cue);
   if (cuePreviewDialogSpeakButton) {
     cuePreviewDialogSpeakButton.dataset.cueTitle = cue.title || "";
+    cuePreviewDialogSpeakButton.dataset.cueSpeech = buildCueSpeechText(cue);
   }
   cuePreviewDialog.showModal();
 }
@@ -4436,15 +4437,27 @@ function renderLiveDrive(route = getActiveRoute()) {
   const distance = haversineDistance(currentLatLng, [nearest.latitude, nearest.longitude]);
   if (distance <= 500 && lastSpokenCueId !== nearest.id) {
     lastSpokenCueId = nearest.id;
-    speakCueTitle(nearest.title);
+    speakCueText(buildCueSpeechText(nearest));
   }
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
 }
 
-function speakCueTitle(title, force = false) {
-  const text = String(title || "").trim();
+function buildCueSpeechText(cue) {
+  const parts = [
+    cue?.title,
+    cue?.instruction,
+    cue?.notes
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  return [...new Set(parts)].join(". ");
+}
+
+function speakCueText(textValue, force = false) {
+  const text = String(textValue || "").trim();
   if (!text || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") {
     return;
   }
