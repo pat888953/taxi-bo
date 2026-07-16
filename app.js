@@ -1920,6 +1920,10 @@ function normalizeRouteGeometry(geometry) {
 }
 
 function getFilteredRoutes() {
+  if (routeEntryMode === "saved") {
+    return routes;
+  }
+
   const query = destinationSearch.value.trim().toLowerCase();
 
   if (!query) {
