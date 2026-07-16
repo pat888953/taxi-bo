@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=99">
+  <link rel="stylesheet" href="styles.css?v=100">
 </head>
 <body>
   <div class="page-shell">
@@ -365,12 +365,12 @@
       <section class="panel routes-panel">
         <div class="panel-header">
           <div>
-            <p class="section-label">Backup</p>
-            <h2>Route library backup</h2>
+            <p class="section-label">Local Backup</p>
+            <h2>SQLite and JSON backup</h2>
           </div>
         </div>
 
-        <p class="picker-copy">Export, import, or connect a local JSON file while testing route libraries.</p>
+        <p class="picker-copy">Keep a local JSON copy of the SQLite route/photo library, or restore routes from a JSON backup file.</p>
         <div class="finder-actions">
           <button id="exportRoutesButton" class="secondary-button" type="button">Export routes</button>
           <label class="secondary-button file-button" for="importRoutesInput">Import routes</label>
@@ -379,7 +379,7 @@
           <button id="openDataFileButton" class="secondary-button" type="button">Open data file</button>
           <button id="saveDataFileButton" class="secondary-button" type="button">Save to file now</button>
         </div>
-        <div id="dataFileStatus" class="form-state empty-state">SQLite database is active when Taxi Bo is started with the local server.</div>
+        <div id="dataFileStatus" class="form-state empty-state">Local SQLite is the working database. JSON export/import is a backup copy.</div>
       </section>
 
       <section class="panel routes-panel">
@@ -482,7 +482,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=99"></script>
+  <script src="app.js?v=100"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

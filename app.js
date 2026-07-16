@@ -3230,12 +3230,12 @@ function updateDataFileStatus(message, isError = false) {
 
   if (dataFileHandle) {
     dataFileStatus.className = "form-state empty-state";
-    dataFileStatus.textContent = `SQLite database is active. JSON backup file connected: ${dataFileHandle.name}.`;
+    dataFileStatus.textContent = `Local SQLite is active. JSON backup file connected: ${dataFileHandle.name}.`;
     return;
   }
 
   dataFileStatus.className = "form-state empty-state";
-  dataFileStatus.textContent = "SQLite database is active. JSON export/import is available for backups.";
+  dataFileStatus.textContent = "Local SQLite is active. JSON export/import is available as a backup copy.";
 }
 
 function renderSimulation(route = routes.find((item) => item.id === destinationSelect.value)) {
