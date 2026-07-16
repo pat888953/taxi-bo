@@ -9,6 +9,7 @@ const SPEED_WARNINGS_API = "/api/speed-warnings";
 const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
+const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
 const destinationSelect = document.querySelector("#destinationSelect");
@@ -2268,7 +2269,7 @@ function createGeneratedCues(cues) {
       step: Number.isFinite(Number(cue.step)) ? Number(cue.step) : index + 1,
       title,
       instruction,
-      notes: String(cue.notes || "Generated from the driving route. Replace with your own photo when ready.").trim(),
+      notes: String(cue.notes || GENERATED_CUE_NOTE).trim(),
       image: createPlaceholderImage(getCueColor(instruction || title), title),
       latitude: parseOptionalNumber(cue.latitude),
       longitude: parseOptionalNumber(cue.longitude)
@@ -4452,12 +4453,26 @@ function buildCueSpeechText(cue) {
   const parts = [
     cue?.title,
     cue?.instruction,
-    cue?.notes
+    getDriverCueNotes(cue?.notes)
   ]
     .map((part) => String(part || "").trim())
     .filter(Boolean);
 
   return [...new Set(parts)].join(". ");
+}
+
+function getDriverCueNotes(notes) {
+  const text = String(notes || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text
+    .replaceAll(GENERATED_CUE_NOTE, "")
+    .replace(/No saved photo matched this generated cue yet\.?/gi, "")
+    .replace(/Matched saved photo(?: within \d+ m)?\.?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function speakCueText(textValue, force = false) {
