@@ -1238,9 +1238,18 @@ def normalize_ocr_line(line):
 
 def generate_route(payload):
     start, destination, start_label = resolve_route_endpoints(payload)
-    road_route = fetch_road_route(start, destination)
+    via = resolve_via_road(payload)
+    road_route = fetch_road_route(start, destination, [via] if via else None)
 
-    return format_generated_route(start, destination, start_label, road_route)
+    generated = format_generated_route(start, destination, start_label, road_route)
+    if via:
+        generated["viaLabel"] = via["label"]
+    return generated
+
+
+def resolve_via_road(payload):
+    via_text = str(payload.get("viaRoad") or "").strip()
+    return geocode_place(via_text) if via_text else None
 
 
 def resolve_route_endpoints(payload):
@@ -1330,6 +1339,14 @@ def prepare_route(payload):
 
 def prepare_route_options(payload):
     start, destination, start_label = resolve_route_endpoints(payload)
+    via = resolve_via_road(payload)
+
+    if via:
+        road_route = fetch_road_route(start, destination, [via])
+        generated = format_generated_route(start, destination, start_label, road_route)
+        generated["viaLabel"] = via["label"]
+        label = f'Via {via["label"]}'
+        return {"options": [match_prepared_route(generated, "via-road", label)]}
 
     if not requires_harbour_crossing(start, destination):
         road_route = fetch_road_route(start, destination)

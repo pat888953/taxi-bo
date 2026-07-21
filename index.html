@@ -148,14 +148,19 @@
               </select>
             </label>
 
-            <label id="destinationEntryGroup" class="field route-entry-group">
-              <span>Enter Destination for Giving Cue</span>
+            <div id="destinationEntryGroup" class="field route-entry-group">
+              <label for="destinationSearch">Destination for driving cues</label>
               <div class="voice-input-row">
                 <input id="destinationSearch" type="text" placeholder="Type or say the taxi destination address">
                 <button id="destinationVoiceButton" class="secondary-button voice-button" type="button" title="Speak destination" aria-label="Speak destination">Mic</button>
                 <button id="goDestinationButton" class="primary-button voice-button" type="button">GO</button>
               </div>
-            </label>
+              <label for="viaRoadSearch">Via road <span class="optional-label">(optional)</span></label>
+              <div class="voice-input-row via-road-row">
+                <input id="viaRoadSearch" type="text" placeholder="Type or say the requested road, e.g. Waterloo Road">
+                <button id="viaRoadVoiceButton" class="secondary-button voice-button" type="button" title="Speak via road" aria-label="Speak via road">Mic</button>
+              </div>
+            </div>
 
             <label id="savedRouteEntryGroup" class="field route-entry-group">
               <span>Saved route/start reference</span>
