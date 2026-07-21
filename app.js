@@ -88,6 +88,7 @@ const photoLatitudeInput = document.querySelector("#photoLatitude");
 const photoLongitudeInput = document.querySelector("#photoLongitude");
 const photoStepSelect = document.querySelector("#photoStep");
 const cueCoordinateStatus = document.querySelector("#cueCoordinateStatus");
+const snapCueToRouteButton = document.querySelector("#snapCueToRouteButton");
 const photoFileInput = document.querySelector("#photoFile");
 const photoPasteZone = document.querySelector("#photoPasteZone");
 const photoPreview = document.querySelector("#photoPreview");
@@ -701,6 +702,10 @@ photoStepSelect.addEventListener("change", () => {
   useSelectedCue();
 });
 
+snapCueToRouteButton?.addEventListener("click", () => {
+  snapSelectedCueToRouteLine();
+});
+
 photoForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -1261,6 +1266,107 @@ function useSelectedCue() {
   startPhotoEdit(route.id, cue.id);
 }
 
+function snapSelectedCueToRouteLine() {
+  const route = routes.find((item) => item.id === photoRouteSelect.value);
+  const step = Number(photoStepSelect.value);
+  const cue = route?.photos.find((photo) => photo.step === step);
+  const geometry = normalizeRouteGeometry(route?.routeGeometry);
+
+  if (!route || !geometry.length || geometry.length < 2) {
+    setCueCoordinateMessage("This route has no recorded route line to place the cue on.", true);
+    return;
+  }
+
+  const currentLatitude = parseOptionalNumber(photoLatitudeInput.value);
+  const currentLongitude = parseOptionalNumber(photoLongitudeInput.value);
+  const targetPoint = Number.isFinite(currentLatitude) && Number.isFinite(currentLongitude)
+    ? [currentLatitude, currentLongitude]
+    : getEstimatedCuePointOnRoute(route, step, geometry);
+  const snapped = findNearestPointOnRouteLine(targetPoint, geometry);
+
+  if (!snapped) {
+    setCueCoordinateMessage("Could not place this cue on the route line.", true);
+    return;
+  }
+
+  photoLatitudeInput.value = snapped[0].toFixed(6);
+  photoLongitudeInput.value = snapped[1].toFixed(6);
+  setMapPickMarker(snapped);
+
+  if (cue) {
+    cue.latitude = snapped[0];
+    cue.longitude = snapped[1];
+  }
+
+  setCueCoordinateMessage(`Cue placed on the recorded route line at ${snapped[0].toFixed(6)}, ${snapped[1].toFixed(6)}. Save or update the photo cue to keep it.`);
+  drawRouteMap(route);
+}
+
+function getEstimatedCuePointOnRoute(route, step, geometry) {
+  const orderedSteps = route.photos
+    .map((photo) => Number(photo.step))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  const stepIndex = Math.max(0, orderedSteps.indexOf(step));
+  const denominator = Math.max(1, orderedSteps.length - 1);
+  return pointAtRouteFraction(geometry, stepIndex / denominator);
+}
+
+function pointAtRouteFraction(geometry, fraction) {
+  const targetFraction = Math.max(0, Math.min(1, Number(fraction) || 0));
+  const segments = [];
+  let total = 0;
+
+  for (let index = 1; index < geometry.length; index += 1) {
+    const start = geometry[index - 1];
+    const end = geometry[index];
+    const length = haversineDistance(start, end);
+    if (length > 0) {
+      segments.push({ start, end, length });
+      total += length;
+    }
+  }
+
+  if (!segments.length || total <= 0) {
+    return geometry[0];
+  }
+
+  let remaining = total * targetFraction;
+  for (const segment of segments) {
+    if (remaining <= segment.length) {
+      const ratio = remaining / segment.length;
+      return [
+        segment.start[0] + (segment.end[0] - segment.start[0]) * ratio,
+        segment.start[1] + (segment.end[1] - segment.start[1]) * ratio
+      ];
+    }
+    remaining -= segment.length;
+  }
+
+  return geometry[geometry.length - 1];
+}
+
+function findNearestPointOnRouteLine(point, geometry) {
+  if (!Array.isArray(point) || point.length < 2 || !geometry.length) {
+    return null;
+  }
+
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (let index = 1; index < geometry.length; index += 1) {
+    const projection = projectPointToSegment(point, geometry[index - 1], geometry[index]);
+    const distance = haversineDistance(point, projection.point);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = projection.point;
+    }
+  }
+
+  return best;
+}
+
 function renderRouteList() {
   routeList.innerHTML = "";
 
@@ -1597,6 +1703,21 @@ function formatPhotoCoordinates(photo) {
     : "Coordinates not set.";
 }
 
+function createRoutePhotoMarkerIcon(photo) {
+  return L.divIcon({
+    className: "route-photo-map-marker",
+    html: `
+      <div class="route-photo-map-marker-frame">
+        <img src="${escapeHtml(photo.image)}" alt="${escapeHtml(photo.title || `Step ${photo.step}`)}">
+        <span>${escapeHtml(String(photo.step))}</span>
+      </div>
+    `,
+    iconSize: [62, 52],
+    iconAnchor: [31, 52],
+    popupAnchor: [0, -50]
+  });
+}
+
 async function drawRouteMap(route) {
   if (!map) {
     return;
@@ -1623,7 +1744,9 @@ async function drawRouteMap(route) {
   const latLngs = locatedPhotos.map((photo) => [photo.latitude, photo.longitude]);
 
   locatedPhotos.forEach((photo) => {
-    const marker = L.marker([photo.latitude, photo.longitude]).addTo(map);
+    const marker = L.marker([photo.latitude, photo.longitude], {
+      icon: createRoutePhotoMarkerIcon(photo)
+    }).addTo(map);
     marker.bindPopup(`
       <strong>${escapeHtml(photo.title)}</strong><br>
       Step ${photo.step}<br>
@@ -3137,6 +3260,11 @@ function updateCueCoordinateStatus(photo = getSelectedCue()) {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
   cueCoordinateStatus.className = "cue-coordinate-status";
   cueCoordinateStatus.innerHTML = `Coordinates: ${latitude}, ${longitude} <a href="${mapsUrl}" target="_blank" rel="noopener">Open in Google Maps</a>`;
+}
+
+function setCueCoordinateMessage(message, isError = false) {
+  cueCoordinateStatus.className = isError ? "cue-coordinate-status" : "cue-coordinate-status empty-state";
+  cueCoordinateStatus.textContent = message;
 }
 
 function getSelectedCue() {

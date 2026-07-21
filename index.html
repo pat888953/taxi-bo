@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=102">
+  <link rel="stylesheet" href="styles.css?v=103">
 </head>
 <body>
   <div class="page-shell">
@@ -290,7 +290,10 @@
                 <span>What should you do?</span>
                 <input id="photoInstruction" name="photoInstruction" type="text" placeholder="Keep right, then turn left at the next light" autocomplete="off" autocapitalize="sentences">
               </label>
-              <div id="cueCoordinateStatus" class="cue-coordinate-status empty-state">Pick a generated cue to load its coordinates.</div>
+              <div class="cue-coordinate-actions">
+                <div id="cueCoordinateStatus" class="cue-coordinate-status empty-state">Pick a generated cue to load its coordinates.</div>
+                <button id="snapCueToRouteButton" class="secondary-button small-button" type="button">Put cue on route line</button>
+              </div>
             </div>
           </div>
 
@@ -490,7 +493,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=102"></script>
+  <script src="app.js?v=103"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
