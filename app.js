@@ -17,6 +17,8 @@ const destinationSelect = document.querySelector("#destinationSelect");
 const acceptedTripState = document.querySelector("#acceptedTripState");
 const destinationSearch = document.querySelector("#destinationSearch");
 const destinationVoiceButton = document.querySelector("#destinationVoiceButton");
+const viaRoadSearch = document.querySelector("#viaRoadSearch");
+const viaRoadVoiceButton = document.querySelector("#viaRoadVoiceButton");
 const photoRouteSelect = document.querySelector("#photoRouteSelect");
 const refreshRoutesButton = document.querySelector("#refreshRoutesButton");
 const photoRouteStatus = document.querySelector("#photoRouteStatus");
@@ -163,6 +165,9 @@ let preparedRoute = null;
 let destinationRecognition = null;
 let isListeningForDestination = false;
 let destinationVoiceUnavailableReason = "";
+let viaRoadRecognition = null;
+let isListeningForViaRoad = false;
+let viaRoadVoiceUnavailableReason = "";
 let recordedRouteRecognition = null;
 let isListeningForRecordedRoute = false;
 let recordedRouteVoiceUnavailableReason = "";
@@ -297,6 +302,7 @@ render();
 initializeMap();
 setupInstallPrompt();
 setupDestinationVoiceInput();
+setupViaRoadVoiceInput();
 setupRecordedRouteVoiceInput();
 loadRoutes();
 loadSpeedWarnings();
@@ -328,6 +334,10 @@ destinationVoiceButton.addEventListener("click", () => {
   toggleDestinationVoiceInput();
 });
 
+viaRoadVoiceButton.addEventListener("click", () => {
+  toggleViaRoadVoiceInput();
+});
+
 recordedRouteVoiceButton.addEventListener("click", () => {
   toggleRecordedRouteVoiceInput();
 });
@@ -347,6 +357,16 @@ destinationSearch.addEventListener("input", (event) => {
   }
 });
 
+viaRoadSearch.addEventListener("input", () => {
+  preparedRoute = null;
+  if (destinationSearch.value.trim()) {
+    routeSummary.className = "route-summary empty-state";
+    routeSummary.textContent = viaRoadSearch.value.trim()
+      ? `Press GO to prepare driving cues via ${viaRoadSearch.value.trim()}.`
+      : "Press GO to prepare driving cues for this destination.";
+  }
+});
+
 destinationSelect.addEventListener("change", () => {
   setRouteEntryMode("saved");
   preparedRoute = null;
@@ -358,15 +378,20 @@ function setRouteEntryMode(mode) {
   routeEntryMode = mode === "destination" ? "destination" : "saved";
   const destinationActive = routeEntryMode === "destination";
 
-  if (!destinationActive && previousMode === "destination" && destinationSearch.value) {
-    destinationSearch.value = "";
-    renderDestinationSelect();
+  if (!destinationActive && previousMode === "destination") {
+    if (destinationSearch.value) {
+      destinationSearch.value = "";
+      renderDestinationSelect();
+    }
+    viaRoadSearch.value = "";
   }
 
   destinationModeRadio.checked = destinationActive;
   savedRouteModeRadio.checked = !destinationActive;
   destinationSearch.disabled = !destinationActive;
   destinationVoiceButton.disabled = !destinationActive;
+  viaRoadSearch.disabled = !destinationActive;
+  viaRoadVoiceButton.disabled = !destinationActive;
   goDestinationButton.disabled = !destinationActive;
   destinationSelect.disabled = destinationActive;
 
@@ -1029,6 +1054,73 @@ function toggleDestinationVoiceInput() {
     destinationRecognition.start();
   } catch {
     destinationRecognition.stop();
+  }
+}
+
+function setupViaRoadVoiceInput() {
+  const support = getSpeechRecognitionSupport();
+
+  if (!support.Recognition) {
+    viaRoadVoiceUnavailableReason = support.reason;
+    viaRoadVoiceButton.textContent = "Mic off";
+    viaRoadVoiceButton.title = support.reason;
+    viaRoadVoiceButton.setAttribute("aria-label", support.reason);
+    return;
+  }
+
+  viaRoadRecognition = new support.Recognition();
+  viaRoadRecognition.lang = "zh-HK";
+  viaRoadRecognition.interimResults = true;
+  viaRoadRecognition.continuous = false;
+  viaRoadRecognition.maxAlternatives = 3;
+  viaRoadVoiceButton.title = "Speak the requested road in Cantonese";
+  viaRoadVoiceButton.setAttribute("aria-label", "Speak the requested road in Cantonese");
+
+  viaRoadRecognition.addEventListener("start", () => {
+    isListeningForViaRoad = true;
+    viaRoadVoiceButton.classList.add("listening");
+    viaRoadVoiceButton.textContent = "\u8046\u807d\u4e2d";
+    routeSummary.className = "route-summary empty-state";
+    routeSummary.textContent = "\u6b63\u5728\u8046\u807d\u5ee3\u6771\u8a71\u9014\u7d93\u9053\u8def...";
+  });
+
+  viaRoadRecognition.addEventListener("result", (event) => {
+    const transcript = Array.from(event.results)
+      .map((result) => result[0]?.transcript || "")
+      .join(" ")
+      .trim();
+    if (transcript) {
+      viaRoadSearch.value = transcript;
+      viaRoadSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+
+  viaRoadRecognition.addEventListener("error", (event) => {
+    routeSummary.className = "route-summary";
+    routeSummary.innerHTML = `<strong>Voice input stopped.</strong><br>${escapeHtml(formatSpeechError(event.error))}`;
+  });
+
+  viaRoadRecognition.addEventListener("end", () => {
+    isListeningForViaRoad = false;
+    viaRoadVoiceButton.classList.remove("listening");
+    viaRoadVoiceButton.textContent = "Mic";
+  });
+}
+
+function toggleViaRoadVoiceInput() {
+  if (!viaRoadRecognition) {
+    routeSummary.className = "route-summary";
+    routeSummary.innerHTML = `<strong>Voice input is not available.</strong><br>${escapeHtml(viaRoadVoiceUnavailableReason || "Type the requested road instead.")}`;
+    return;
+  }
+  if (isListeningForViaRoad) {
+    viaRoadRecognition.stop();
+    return;
+  }
+  try {
+    viaRoadRecognition.start();
+  } catch {
+    viaRoadRecognition.stop();
   }
 }
 
@@ -2779,6 +2871,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     ? routes.find((item) => item.id === destinationSelect.value)
     : null;
   const typedDestination = destinationSearch.value.trim();
+  const viaRoad = routeEntryMode === "destination" ? viaRoadSearch.value.trim() : "";
   // A route-name search may remain in the text box after the driver picks a
   // saved route. In that case the database endpoints must win over the search
   // text, otherwise the app incorrectly falls back to the device location.
@@ -2828,9 +2921,11 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     const payload = {
       start,
       destination,
+      viaRoad,
       currentPosition
     };
     recordedMatches = findRecordedRouteMatches(destination, currentPosition);
+    const routeContext = `${locationContext}${viaRoad ? ` Via ${viaRoad}.` : ""}`;
 
     if (!offerAlternatives && recordedMatches.length) {
       selectRecordedRouteMatch(recordedMatches[0].route.id, true);
@@ -2840,12 +2935,12 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     if (offerAlternatives) {
       const options = await prepareRouteOptionsOnServer(payload);
       if (options.length > 1 || recordedMatches.length) {
-        showPreparedRouteChoices(options, destination, locationContext, recordedMatches);
+        showPreparedRouteChoices(options, destination, routeContext, recordedMatches);
         return;
       }
-      applyPreparedRoute(options[0], destination, locationContext);
+      applyPreparedRoute(options[0], destination, routeContext);
     } else {
-      applyPreparedRoute(await prepareRouteOnServer(payload), destination, locationContext);
+      applyPreparedRoute(await prepareRouteOnServer(payload), destination, routeContext);
     }
   } catch (error) {
     if (recordedMatches.length) {
