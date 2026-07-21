@@ -124,6 +124,16 @@ const cuePreviewDialogTitle = document.querySelector("#cuePreviewDialogTitle");
 const cuePreviewDialogInstruction = document.querySelector("#cuePreviewDialogInstruction");
 const cuePreviewDialogCoordinates = document.querySelector("#cuePreviewDialogCoordinates");
 const cuePreviewDialogSpeakButton = document.querySelector("#cuePreviewDialogSpeakButton");
+const dashcamRouteSelect = document.querySelector("#dashcamRouteSelect");
+const dashcamVideoInput = document.querySelector("#dashcamVideoInput");
+const dashcamVideo = document.querySelector("#dashcamVideo");
+const dashcamStartTime = document.querySelector("#dashcamStartTime");
+const dashcamCaptureButton = document.querySelector("#dashcamCaptureButton");
+const dashcamStatus = document.querySelector("#dashcamStatus");
+const dashcamPreview = document.querySelector("#dashcamPreview");
+const dashcamCueTitle = document.querySelector("#dashcamCueTitle");
+const dashcamCueInstruction = document.querySelector("#dashcamCueInstruction");
+const dashcamSaveButton = document.querySelector("#dashcamSaveButton");
 
 let routes = [];
 let map;
@@ -706,6 +716,22 @@ snapCueToRouteButton?.addEventListener("click", () => {
   snapSelectedCueToRouteLine();
 });
 
+dashcamRouteSelect?.addEventListener("change", () => {
+  updateDashcamStatus();
+});
+
+dashcamVideoInput?.addEventListener("change", () => {
+  loadDashcamVideoFile();
+});
+
+dashcamCaptureButton?.addEventListener("click", () => {
+  captureDashcamCueFrame();
+});
+
+dashcamSaveButton?.addEventListener("click", () => {
+  saveDashcamCuePhoto();
+});
+
 photoForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -875,6 +901,7 @@ async function savePhotoStop(photo) {
 function render() {
   renderDestinationSelect();
   renderPhotoRouteSelect();
+  renderDashcamRouteSelect();
   renderRouteList();
   updateMapPickerButton();
   updateRouteFormState();
@@ -1198,6 +1225,205 @@ function renderPhotoRouteSelect() {
 
   updatePhotoRouteStatus();
   renderPhotoStepOptions(photoRouteSelect.value);
+}
+
+function renderDashcamRouteSelect() {
+  if (!dashcamRouteSelect) {
+    return;
+  }
+
+  const previousValue = dashcamRouteSelect.value;
+  dashcamRouteSelect.innerHTML = "";
+
+  const eligibleRoutes = routes.filter((route) => route.recordedTrackPoints?.length >= 2);
+  if (!eligibleRoutes.length) {
+    dashcamRouteSelect.append(new Option("No timestamped recorded routes yet", ""));
+    dashcamRouteSelect.disabled = true;
+    updateDashcamStatus("Record and save a live drive first. New saved recordings keep timestamped GPS points for dashcam matching.", true);
+    return;
+  }
+
+  eligibleRoutes.forEach((route) => {
+    const option = new Option(
+      `${route.name} -> ${shortPlaceName(route.destination)} (${route.recordedTrackPoints.length} GPS points)`,
+      route.id
+    );
+    dashcamRouteSelect.append(option);
+  });
+
+  dashcamRouteSelect.disabled = false;
+  dashcamRouteSelect.value = eligibleRoutes.some((route) => route.id === previousValue)
+    ? previousValue
+    : eligibleRoutes[0].id;
+  updateDashcamStatus();
+}
+
+function getDashcamRoute() {
+  return routes.find((route) => route.id === dashcamRouteSelect?.value) || null;
+}
+
+function updateDashcamStatus(message = "", isError = false) {
+  if (!dashcamStatus) {
+    return;
+  }
+
+  const route = getDashcamRoute();
+  dashcamStatus.className = isError ? "form-state" : "form-state empty-state";
+
+  if (message) {
+    dashcamStatus.textContent = message;
+    return;
+  }
+
+  if (!route) {
+    dashcamStatus.textContent = "Pick a saved recorded route before loading dashcam video.";
+    return;
+  }
+
+  const firstPoint = route.recordedTrackPoints?.[0];
+  const firstTime = firstPoint ? new Date(firstPoint.timestamp) : null;
+  if (dashcamStartTime && firstTime && !Number.isNaN(firstTime.valueOf()) && !dashcamStartTime.value) {
+    dashcamStartTime.value = formatDateTimeLocal(firstTime);
+  }
+
+  dashcamStatus.textContent = `Ready for "${route.name}". Set the dashcam video start time, pause at a junction, then capture a cue frame.`;
+}
+
+function formatDateTimeLocal(date) {
+  const offsetMs = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function loadDashcamVideoFile() {
+  const file = dashcamVideoInput?.files?.[0];
+  if (!file || !dashcamVideo) {
+    return;
+  }
+
+  if (dashcamVideo.dataset.objectUrl) {
+    URL.revokeObjectURL(dashcamVideo.dataset.objectUrl);
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  dashcamVideo.dataset.objectUrl = objectUrl;
+  dashcamVideo.src = objectUrl;
+  dashcamVideo.hidden = false;
+  dashcamPreview.hidden = true;
+  dashcamSaveButton.disabled = true;
+  updateDashcamStatus("Video loaded. Enter the video start time, play it, pause at the landmark, then capture the frame.");
+}
+
+function getDashcamMatchedPoint() {
+  const route = getDashcamRoute();
+  const points = route?.recordedTrackPoints || [];
+  const videoStartMs = Date.parse(dashcamStartTime?.value || "");
+
+  if (!route || points.length < 2) {
+    throw new Error("Pick a recorded route with timestamped GPS points.");
+  }
+
+  if (!Number.isFinite(videoStartMs)) {
+    throw new Error("Enter the dashcam video start time first.");
+  }
+
+  if (!dashcamVideo || !Number.isFinite(dashcamVideo.currentTime)) {
+    throw new Error("Load and pause a dashcam video first.");
+  }
+
+  const targetTimestamp = videoStartMs + dashcamVideo.currentTime * 1000;
+  let nearest = points[0];
+  let nearestDelta = Math.abs(points[0].timestamp - targetTimestamp);
+
+  points.forEach((point) => {
+    const delta = Math.abs(point.timestamp - targetTimestamp);
+    if (delta < nearestDelta) {
+      nearest = point;
+      nearestDelta = delta;
+    }
+  });
+
+  return {
+    point: nearest,
+    targetTimestamp,
+    deltaSeconds: nearestDelta / 1000
+  };
+}
+
+function captureDashcamCueFrame() {
+  try {
+    if (!dashcamVideo || dashcamVideo.hidden || !dashcamVideo.videoWidth) {
+      throw new Error("Load the dashcam video and wait until the preview appears.");
+    }
+
+    const { point, deltaSeconds } = getDashcamMatchedPoint();
+    const canvas = document.createElement("canvas");
+    canvas.width = dashcamVideo.videoWidth;
+    canvas.height = dashcamVideo.videoHeight;
+    const context = canvas.getContext("2d");
+    context.drawImage(dashcamVideo, 0, 0, canvas.width, canvas.height);
+    const image = canvas.toDataURL("image/jpeg", 0.86);
+
+    dashcamPreview.src = image;
+    dashcamPreview.hidden = false;
+    dashcamPreview.dataset.image = image;
+    dashcamPreview.dataset.latitude = String(point.latitude);
+    dashcamPreview.dataset.longitude = String(point.longitude);
+    dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
+    dashcamSaveButton.disabled = false;
+    updateDashcamStatus(`Captured frame and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
+  } catch (error) {
+    dashcamSaveButton.disabled = true;
+    updateDashcamStatus(error.message || "Could not capture this dashcam cue.", true);
+  }
+}
+
+async function saveDashcamCuePhoto() {
+  const route = getDashcamRoute();
+  const image = dashcamPreview?.dataset.image;
+  const latitude = parseOptionalNumber(dashcamPreview?.dataset.latitude);
+  const longitude = parseOptionalNumber(dashcamPreview?.dataset.longitude);
+
+  if (!route || !image || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    updateDashcamStatus("Capture a dashcam frame before saving it as a cue.", true);
+    return;
+  }
+
+  const nextStep = route.photos.reduce((maxStep, photo) => Math.max(maxStep, Number(photo.step) || 0), 0) + 1;
+  const title = dashcamCueTitle.value.trim() || `Dashcam cue ${nextStep}`;
+  const instruction = dashcamCueInstruction.value.trim();
+  const cue = normalizeImportedPhoto({
+    id: crypto.randomUUID(),
+    step: nextStep,
+    title,
+    instruction,
+    notes: "Captured from dashcam video and matched to the recorded GPS route.",
+    image,
+    latitude,
+    longitude
+  });
+
+  dashcamSaveButton.disabled = true;
+  updateDashcamStatus("Saving dashcam cue photo to the route database...");
+
+  try {
+    route.photos.push(cue);
+    route.photos.sort((a, b) => a.step - b.step);
+    await saveRoutes();
+    photoRouteSelect.value = route.id;
+    renderPhotoStepOptions(route.id, cue.step);
+    displayRoute(route);
+    renderDashcamRouteSelect();
+    dashcamCueTitle.value = "";
+    dashcamCueInstruction.value = "";
+    dashcamPreview.hidden = true;
+    dashcamPreview.dataset.image = "";
+    updateDashcamStatus(`Saved "${cue.title}" as step ${cue.step} on the recorded route line.`);
+  } catch (error) {
+    route.photos = route.photos.filter((photo) => photo.id !== cue.id);
+    updateDashcamStatus(error.message || "Could not save this dashcam cue.", true);
+  } finally {
+    dashcamSaveButton.disabled = !dashcamPreview?.dataset.image;
+  }
 }
 
 function updatePhotoRouteStatus(message, isError = false) {
@@ -2282,10 +2508,34 @@ function normalizeImportedRoute(route) {
     destinationLatitude: parseOptionalNumber(route.destinationLatitude),
     destinationLongitude: parseOptionalNumber(route.destinationLongitude),
     routeGeometry: normalizeRouteGeometry(route.routeGeometry),
+    recordedTrackPoints: normalizeRecordedTrackPoints(route.recordedTrackPoints),
     routeDistanceMeters: parseOptionalNumber(route.routeDistanceMeters),
     routeDurationSeconds: parseOptionalNumber(route.routeDurationSeconds),
     photos: Array.isArray(route.photos) ? route.photos.map(normalizeImportedPhoto).sort((a, b) => a.step - b.step) : []
   };
+}
+
+function normalizeRecordedTrackPoints(points) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+
+  return points
+    .map((point) => ({
+      latitude: parseOptionalNumber(point?.latitude),
+      longitude: parseOptionalNumber(point?.longitude),
+      timestamp: Number(point?.timestamp),
+      accuracy: parseOptionalNumber(point?.accuracy),
+      speed: parseOptionalNumber(point?.speed),
+      heading: parseOptionalNumber(point?.heading)
+    }))
+    .filter((point) =>
+      Number.isFinite(point.latitude) &&
+      Number.isFinite(point.longitude) &&
+      Number.isFinite(point.timestamp) &&
+      point.timestamp > 0
+    )
+    .sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function normalizeImportedPhoto(photo) {
@@ -3869,6 +4119,7 @@ async function saveCompletedRecordingAsRoute() {
     destinationLatitude: last.latitude,
     destinationLongitude: last.longitude,
     routeGeometry: recording.points.map((point) => [point.latitude, point.longitude]),
+    recordedTrackPoints: recording.points.map((point) => ({ ...point })),
     routeDistanceMeters: recording.distanceMeters,
     routeDurationSeconds: recording.durationSeconds,
     photos: Array.isArray(sourceRoute.photos)

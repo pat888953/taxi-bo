@@ -373,6 +373,58 @@
         </form>
       </section>
 
+      <section class="panel dashcam-cue-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Dashcam cue import</p>
+            <h2>Put video frames onto a recorded route</h2>
+          </div>
+        </div>
+
+        <div class="dashcam-grid">
+          <div class="stack">
+            <label class="field">
+              <span>Recorded route</span>
+              <select id="dashcamRouteSelect"></select>
+            </label>
+
+            <label class="field">
+              <span>Dashcam video</span>
+              <input id="dashcamVideoInput" type="file" accept="video/*">
+            </label>
+
+            <label class="field">
+              <span>Video start time</span>
+              <input id="dashcamStartTime" type="datetime-local">
+            </label>
+
+            <div class="split-fields">
+              <label class="field">
+                <span>Cue name</span>
+                <input id="dashcamCueTitle" type="text" placeholder="Left after tunnel exit" autocomplete="off">
+              </label>
+
+              <label class="field">
+                <span>Driver instruction</span>
+                <input id="dashcamCueInstruction" type="text" placeholder="Keep left after the sign" autocomplete="off">
+              </label>
+            </div>
+
+            <div class="finder-actions">
+              <button id="dashcamCaptureButton" class="primary-button" type="button">Capture frame to cue</button>
+              <button id="dashcamSaveButton" class="secondary-button" type="button" disabled>Save dashcam cue</button>
+            </div>
+
+            <div id="dashcamStatus" class="form-state empty-state">Pick a recorded route, load a dashcam video, then pause at a junction.</div>
+          </div>
+
+          <div class="dashcam-preview-stack">
+            <video id="dashcamVideo" class="dashcam-video" controls playsinline hidden></video>
+            <img id="dashcamPreview" class="dashcam-preview" alt="Captured dashcam cue preview" hidden>
+          </div>
+        </div>
+      </section>
+
       <section class="panel routes-panel">
         <div class="panel-header">
           <div>
@@ -493,7 +545,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=103"></script>
+  <script src="app.js?v=104"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

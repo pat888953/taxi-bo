@@ -117,6 +117,7 @@ def initialize_db(mode=None):
               destination_latitude REAL,
               destination_longitude REAL,
               route_geometry TEXT NOT NULL DEFAULT '[]',
+              recorded_track_points TEXT NOT NULL DEFAULT '[]',
               route_distance_meters REAL,
               route_duration_seconds REAL,
               position INTEGER NOT NULL DEFAULT 0,
@@ -250,6 +251,7 @@ def ensure_route_columns(db):
         "destination_latitude": "REAL",
         "destination_longitude": "REAL",
         "route_geometry": "TEXT NOT NULL DEFAULT '[]'",
+        "recorded_track_points": "TEXT NOT NULL DEFAULT '[]'",
         "route_distance_meters": "REAL",
         "route_duration_seconds": "REAL",
     }
@@ -291,7 +293,7 @@ def fetch_routes():
             SELECT
               id, name, variant, start, destination, time_window, traffic_pattern, notes,
               start_latitude, start_longitude, destination_latitude, destination_longitude,
-              route_geometry, route_distance_meters, route_duration_seconds
+              route_geometry, recorded_track_points, route_distance_meters, route_duration_seconds
             FROM routes
             ORDER BY position ASC, updated_at DESC
             """
@@ -334,6 +336,7 @@ def fetch_routes():
             "destinationLatitude": route["destination_latitude"],
             "destinationLongitude": route["destination_longitude"],
             "routeGeometry": json.loads(route["route_geometry"] or "[]"),
+            "recordedTrackPoints": json.loads(route["recorded_track_points"] or "[]"),
             "routeDistanceMeters": route["route_distance_meters"],
             "routeDurationSeconds": route["route_duration_seconds"],
             "photos": photos_by_route.get(route["id"], []),
@@ -353,10 +356,10 @@ def replace_routes(routes):
                 INSERT INTO routes (
                   id, name, variant, start, destination, time_window,
                   traffic_pattern, notes, start_latitude, start_longitude,
-                  destination_latitude, destination_longitude, route_geometry,
+                  destination_latitude, destination_longitude, route_geometry, recorded_track_points,
                   route_distance_meters, route_duration_seconds, position, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     route.get("id", ""),
@@ -372,6 +375,7 @@ def replace_routes(routes):
                     route.get("destinationLatitude"),
                     route.get("destinationLongitude"),
                     json.dumps(route.get("routeGeometry") or []),
+                    json.dumps(route.get("recordedTrackPoints") or []),
                     route.get("routeDistanceMeters"),
                     route.get("routeDurationSeconds"),
                     position,
