@@ -1419,6 +1419,15 @@ body[data-cue-ui-mode="drive"] .layout {
   transition: opacity 140ms ease;
 }
 
+.compact-drive-setting {
+  grid-template-columns: auto minmax(190px, 1fr);
+  align-items: center;
+}
+
+.compact-drive-setting select {
+  min-height: 42px;
+}
+
 .route-entry-group.is-disabled {
   opacity: 0.48;
 }

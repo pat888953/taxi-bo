@@ -9,6 +9,7 @@ const SPEED_WARNINGS_API = "/api/speed-warnings";
 const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
+const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -21,6 +22,7 @@ const refreshRoutesButton = document.querySelector("#refreshRoutesButton");
 const photoRouteStatus = document.querySelector("#photoRouteStatus");
 const reviewRouteButton = document.querySelector("#reviewRouteButton");
 const goDestinationButton = document.querySelector("#goDestinationButton");
+const goStartModeSelect = document.querySelector("#goStartModeSelect");
 const destinationModeRadio = document.querySelector("#destinationModeRadio");
 const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
@@ -231,8 +233,44 @@ function setCueUiMode(mode) {
   });
 }
 
+function getGoStartMode() {
+  return localStorage.getItem(TAXIBO_GO_START_MODE_KEY) === "auto" ? "auto" : "manual";
+}
+
+function setGoStartMode(mode) {
+  const nextMode = mode === "auto" ? "auto" : "manual";
+  localStorage.setItem(TAXIBO_GO_START_MODE_KEY, nextMode);
+
+  if (goStartModeSelect) {
+    goStartModeSelect.value = nextMode;
+  }
+}
+
+function shouldAutoStartLiveDriveAfterGo() {
+  return getGoStartMode() === "auto" && document.body.dataset.cueUiMode === "drive";
+}
+
+function maybeStartLiveDriveAfterGo() {
+  if (!shouldAutoStartLiveDriveAfterGo()) {
+    return;
+  }
+
+  if (liveDriveWatchId !== null || liveDriveSimulationId !== null) {
+    return;
+  }
+
+  setLiveDriveStatus("Route is ready. Auto-starting live drive...");
+  window.setTimeout(() => {
+    startLiveDrive();
+  }, 250);
+}
+
 cueModeButtons.forEach((button) => {
   button.addEventListener("click", () => setCueUiMode(button.dataset.cueMode));
+});
+
+goStartModeSelect?.addEventListener("change", () => {
+  setGoStartMode(goStartModeSelect.value);
 });
 
 maintenanceDrawer?.addEventListener("toggle", () => {
@@ -243,6 +281,7 @@ maintenanceDrawer?.addEventListener("toggle", () => {
 });
 
 setCueUiMode(getDefaultCueUiMode());
+setGoStartMode(getGoStartMode());
 render();
 initializeMap();
 setupInstallPrompt();
@@ -2538,6 +2577,7 @@ function selectRecordedRouteMatch(routeId, automatic = false) {
     Destination: ${escapeHtml(route.destination)}<br>
     ${automatic ? "Matched from the destination text. " : ""}Using the actual recorded GPS track and saved photo cues. ${escapeHtml(formatRouteContext(route))}
   `;
+  maybeStartLiveDriveAfterGo();
 }
 
 function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
@@ -2579,6 +2619,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     ${trustWarningHtml}
     ${warningHtml}
   `;
+  maybeStartLiveDriveAfterGo();
 }
 
 function formatRouteWarningBadge(warnings = []) {
