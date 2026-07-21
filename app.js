@@ -149,8 +149,10 @@ let pendingGeneratedCues = [];
 let preparedRoute = null;
 let destinationRecognition = null;
 let isListeningForDestination = false;
+let destinationVoiceUnavailableReason = "";
 let recordedRouteRecognition = null;
 let isListeningForRecordedRoute = false;
+let recordedRouteVoiceUnavailableReason = "";
 let liveDriveWatchId = null;
 let liveDrivePosition = null;
 let speedMonitoringWatchId = null;
@@ -888,16 +890,19 @@ function setupDestinationVoiceInput() {
     return;
   }
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const support = getSpeechRecognitionSupport();
 
-  if (!SpeechRecognition) {
-    destinationVoiceButton.disabled = true;
-    destinationVoiceButton.title = "Voice input is not supported in this browser.";
+  if (!support.Recognition) {
+    destinationVoiceUnavailableReason = support.reason;
+    destinationRecognition = null;
     destinationVoiceButton.textContent = "Mic off";
+    destinationVoiceButton.title = support.reason;
+    destinationVoiceButton.setAttribute("aria-label", support.reason);
     return;
   }
 
-  destinationRecognition = new SpeechRecognition();
+  destinationVoiceUnavailableReason = "";
+  destinationRecognition = new support.Recognition();
   destinationRecognition.lang = "zh-HK";
   destinationRecognition.interimResults = true;
   destinationRecognition.continuous = false;
@@ -940,7 +945,7 @@ function setupDestinationVoiceInput() {
 function toggleDestinationVoiceInput() {
   if (!destinationRecognition) {
     routeSummary.className = "route-summary";
-    routeSummary.innerHTML = `<strong>Voice input is not available.</strong><br>Type the destination address instead.`;
+    routeSummary.innerHTML = `<strong>Voice input is not available.</strong><br>${escapeHtml(destinationVoiceUnavailableReason || "Type the destination address instead.")}`;
     return;
   }
 
@@ -961,16 +966,19 @@ function setupRecordedRouteVoiceInput() {
     return;
   }
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const support = getSpeechRecognitionSupport();
 
-  if (!SpeechRecognition) {
-    recordedRouteVoiceButton.disabled = true;
-    recordedRouteVoiceButton.title = "Voice input is not supported in this browser.";
+  if (!support.Recognition) {
+    recordedRouteVoiceUnavailableReason = support.reason;
+    recordedRouteRecognition = null;
     recordedRouteVoiceButton.textContent = "Mic off";
+    recordedRouteVoiceButton.title = support.reason;
+    recordedRouteVoiceButton.setAttribute("aria-label", support.reason);
     return;
   }
 
-  recordedRouteRecognition = new SpeechRecognition();
+  recordedRouteVoiceUnavailableReason = "";
+  recordedRouteRecognition = new support.Recognition();
   recordedRouteRecognition.lang = "zh-HK";
   recordedRouteRecognition.interimResults = true;
   recordedRouteRecognition.continuous = false;
@@ -1011,7 +1019,7 @@ function setupRecordedRouteVoiceInput() {
 function toggleRecordedRouteVoiceInput() {
   if (!recordedRouteRecognition) {
     routeRecorder.dataset.state = "error";
-    routeRecorderState.textContent = "Voice input is not available. Type the route name instead.";
+    routeRecorderState.textContent = recordedRouteVoiceUnavailableReason || "Voice input is not available. Type the route name instead.";
     return;
   }
 
@@ -1027,13 +1035,45 @@ function toggleRecordedRouteVoiceInput() {
   }
 }
 
+function getSpeechRecognitionSupport() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!window.isSecureContext) {
+    return {
+      Recognition: null,
+      reason: "Microphone voice input needs HTTPS. Use the Render URL, not an insecure local network URL."
+    };
+  }
+
+  if (!Recognition) {
+    return {
+      Recognition: null,
+      reason: "This tablet browser does not support speech recognition. Try Android Chrome, or type the destination manually."
+    };
+  }
+
+  return { Recognition, reason: "" };
+}
+
 function formatSpeechError(error) {
   if (error === "not-allowed" || error === "service-not-allowed") {
-    return "Allow microphone permission in the browser, or type the address manually.";
+    return "Allow microphone permission for this TaxiBo site in the browser, then try Mic again.";
+  }
+
+  if (error === "audio-capture") {
+    return "The tablet did not provide a microphone input. Check the tablet microphone permission or hardware.";
   }
 
   if (error === "no-speech") {
     return "No speech was heard. Try again, or type the address manually.";
+  }
+
+  if (error === "network") {
+    return "The browser speech service could not connect. Check internet connection, or type the address manually.";
+  }
+
+  if (error === "aborted") {
+    return "Voice input was stopped before a destination was captured.";
   }
 
   return "Type the address manually if voice input is unavailable.";
