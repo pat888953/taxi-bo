@@ -10,6 +10,7 @@ const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
+const TAXIBO_PHONE_DRIVE_SCREEN_KEY = "taxiBoPhoneDriveScreen";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -109,6 +110,7 @@ const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryBu
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
 const cueModeButtons = document.querySelectorAll("[data-cue-mode]");
+const phoneDriveScreenButtons = document.querySelectorAll("[data-phone-drive-screen]");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
 const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
 const cueCaptureTitle = document.querySelector("#cueCaptureTitle");
@@ -249,6 +251,28 @@ function setCueUiMode(mode) {
   });
 }
 
+function getPhoneDriveScreen() {
+  return localStorage.getItem(TAXIBO_PHONE_DRIVE_SCREEN_KEY) === "input" ? "input" : "cue";
+}
+
+function setPhoneDriveScreen(screen) {
+  const nextScreen = screen === "input" ? "input" : "cue";
+  document.body.dataset.phoneDriveScreen = nextScreen;
+  localStorage.setItem(TAXIBO_PHONE_DRIVE_SCREEN_KEY, nextScreen);
+
+  phoneDriveScreenButtons.forEach((button) => {
+    const isActive = button.dataset.phoneDriveScreen === nextScreen;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  window.requestAnimationFrame(() => {
+    if (map) {
+      map.invalidateSize();
+    }
+  });
+}
+
 function getGoStartMode() {
   return localStorage.getItem(TAXIBO_GO_START_MODE_KEY) === "auto" ? "auto" : "manual";
 }
@@ -285,6 +309,10 @@ cueModeButtons.forEach((button) => {
   button.addEventListener("click", () => setCueUiMode(button.dataset.cueMode));
 });
 
+phoneDriveScreenButtons.forEach((button) => {
+  button.addEventListener("click", () => setPhoneDriveScreen(button.dataset.phoneDriveScreen));
+});
+
 goStartModeSelect?.addEventListener("change", () => {
   setGoStartMode(goStartModeSelect.value);
 });
@@ -297,6 +325,7 @@ maintenanceDrawer?.addEventListener("toggle", () => {
 });
 
 setCueUiMode(getDefaultCueUiMode());
+setPhoneDriveScreen(getPhoneDriveScreen());
 setGoStartMode(getGoStartMode());
 render();
 initializeMap();
@@ -324,6 +353,7 @@ reviewRouteButton.addEventListener("click", () => {
   setRouteEntryMode("saved");
   preparedRoute = null;
   displaySelectedRoute();
+  setPhoneDriveScreen("cue");
 });
 
 goDestinationButton.addEventListener("click", () => {
@@ -371,6 +401,7 @@ destinationSelect.addEventListener("change", () => {
   setRouteEntryMode("saved");
   preparedRoute = null;
   displaySelectedRoute();
+  setPhoneDriveScreen("cue");
 });
 
 function setRouteEntryMode(mode) {
@@ -3045,6 +3076,7 @@ function selectRecordedRouteMatch(routeId, automatic = false) {
     Destination: ${escapeHtml(route.destination)}<br>
     ${automatic ? "Matched from the destination text. " : ""}Using the actual recorded GPS track and saved photo cues. ${escapeHtml(formatRouteContext(route))}
   `;
+  setPhoneDriveScreen("cue");
   maybeStartLiveDriveAfterGo();
 }
 
@@ -3087,6 +3119,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     ${trustWarningHtml}
     ${warningHtml}
   `;
+  setPhoneDriveScreen("cue");
   maybeStartLiveDriveAfterGo();
 }
 
@@ -4415,13 +4448,16 @@ function renderSpeedWarningList() {
 function updateSpeedAwareness(position) {
   addSpeedWarningButton.disabled = !getCurrentWarningPosition();
   updateSpeedMonitoringToggle();
+  const phoneDriveUi = isPhoneDriveUi();
 
   if (!position) {
     currentSpeed.textContent = "--";
     speedAwareness.dataset.state = "idle";
-    speedWarningBadge.textContent = "Monitoring off";
-    speedWarningTitle.textContent = "No nearby speed warning";
-    speedWarningStatus.textContent = "Switch monitoring on to read speed and check warning points.";
+    speedWarningBadge.textContent = phoneDriveUi ? "Ready" : "Monitoring off";
+    speedWarningTitle.textContent = phoneDriveUi ? "Speed warning ready" : "No nearby speed warning";
+    speedWarningStatus.textContent = phoneDriveUi
+      ? "Press Drive to monitor speed and warning points."
+      : "Switch monitoring on to read speed and check warning points.";
     lastSpeedSample = null;
     stopSpeedWarningTick();
     return;
@@ -4434,7 +4470,9 @@ function updateSpeedAwareness(position) {
     speedAwareness.dataset.state = "idle";
     speedWarningBadge.textContent = "No points";
     speedWarningTitle.textContent = "No speed warnings in the database";
-    speedWarningStatus.textContent = "Open Manage warning points to mark a known camera or enforcement area.";
+    speedWarningStatus.textContent = phoneDriveUi
+      ? "No warning points saved yet."
+      : "Open Manage warning points to mark a known camera or enforcement area.";
     stopSpeedWarningTick();
     return;
   }
@@ -4460,6 +4498,11 @@ function updateSpeedAwareness(position) {
   speedWarningTitle.textContent = `${nearest.warning.label} · ${Math.round(nearest.warning.speedLimitMph)} mph`;
   speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${Math.round(speedMph)} mph` : ""}.`;
   updateSpeedWarningTick(nearest.warning.id, nearest.distance, Number(nearest.warning.radiusMeters), isOverspeed);
+}
+
+function isPhoneDriveUi() {
+  return document.body.dataset.cueUiMode === "drive" &&
+    window.matchMedia?.("(max-width: 720px)").matches;
 }
 
 function getCurrentWarningPosition() {

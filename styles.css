@@ -384,6 +384,10 @@ h3 {
   box-shadow: 0 5px 14px rgba(23, 107, 77, 0.18);
 }
 
+.phone-drive-screen-switcher {
+  display: none;
+}
+
 body[data-cue-ui-mode="drive"] .maintenance-drawer {
   display: none;
 }
@@ -2352,11 +2356,7 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .module-switcher {
-    margin: 0;
-    border-right: 0;
-    border-left: 0;
-    border-radius: 0;
-    box-shadow: none;
+    display: none;
   }
 
   body[data-cue-ui-mode="drive"] .module-links {
@@ -2369,6 +2369,7 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .rehearse-panel {
     margin: 0;
+    padding-top: 10px;
     border-right: 0;
     border-left: 0;
     border-radius: 0;
@@ -2391,11 +2392,64 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .top-driver-bar {
     margin: 0;
-    padding: 12px;
+    padding: 82px 12px 12px;
     border-right: 0;
     border-left: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .speed-awareness {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 12;
+    margin: 0;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  body[data-cue-ui-mode="drive"] .speed-monitor-toggle {
+    pointer-events: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .speed-monitor-switch {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-drive-screen-switcher {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-drive-screen-button {
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted);
+    font-weight: 900;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-drive-screen-button.is-active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="cue"] .rehearse-panel {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .cue-preview-header,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .drive-controls-row,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .route-recorder,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .top-cue-preview {
+    display: none !important;
   }
 
   body[data-cue-ui-mode="drive"] .cue-preview-header {
