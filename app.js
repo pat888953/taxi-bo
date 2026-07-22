@@ -2924,6 +2924,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
   }
 
   goDestinationButton.disabled = true;
+  goDestinationButton.classList.add("is-preparing");
   routeSummary.className = "route-summary";
   routeSummary.innerHTML = `<strong>Preparing route.</strong><br>Generating from ${escapeHtml(start || "current location")} and matching saved photo cues near its turns...`;
 
@@ -2974,6 +2975,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
       routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;
     }
   } finally {
+    goDestinationButton.classList.remove("is-preparing");
     goDestinationButton.disabled = routeEntryMode !== "destination";
   }
 }

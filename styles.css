@@ -1633,6 +1633,22 @@ button:hover,
   color: var(--text);
 }
 
+#goDestinationButton {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+#goDestinationButton:hover {
+  background: #fff;
+}
+
+#goDestinationButton.is-preparing {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .route-summary {
   padding: 15px;
   border-left: 4px solid var(--amber);
