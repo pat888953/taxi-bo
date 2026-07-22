@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=112">
+  <link rel="stylesheet" href="styles.css?v=113">
 </head>
 <body>
   <div class="page-shell">
@@ -43,6 +43,7 @@
         </div>
         <div class="drive-controls-row">
           <button id="liveDriveStartButton" class="primary-button small-button" type="button" data-phone-label="Drive">Start live drive</button>
+          <button id="cruiseMonitorButton" class="secondary-button small-button cruise-monitor-button" type="button" data-phone-label="Cruise">Cruise monitor</button>
           <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button" data-phone-label="Brief">Brief the route</button>
           <button id="liveDriveStopButton" class="secondary-button small-button" type="button" data-phone-label="Stop" disabled>Stop live drive</button>
         </div>
@@ -135,7 +136,7 @@
                 <span>New destination</span>
               </label>
               <label>
-                <input id="savedRouteModeRadio" type="radio" name="routeEntryMode" value="saved" checked>
+                <input id="savedRouteModeRadio" type="radio" name="routeEntryMode" value="saved">
                 <span>Saved route</span>
               </label>
             </div>
@@ -550,7 +551,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=112"></script>
+  <script src="app.js?v=113"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

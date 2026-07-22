@@ -2441,6 +2441,10 @@ input[type="range"]:focus {
     gap: 6px;
   }
 
+  body[data-cue-ui-mode="drive"] #liveDriveSimulateButton {
+    display: none;
+  }
+
   body[data-cue-ui-mode="drive"] .drive-controls-row button {
     width: 100%;
     min-height: 36px;

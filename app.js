@@ -43,6 +43,7 @@ const simulationResetButton = document.querySelector("#simulationResetButton");
 const simulationStatus = document.querySelector("#simulationStatus");
 const simulationUpcoming = document.querySelector("#simulationUpcoming");
 const liveDriveStartButton = document.querySelector("#liveDriveStartButton");
+const cruiseMonitorButton = document.querySelector("#cruiseMonitorButton");
 const liveDriveSimulateButton = document.querySelector("#liveDriveSimulateButton");
 const liveDriveStopButton = document.querySelector("#liveDriveStopButton");
 const liveDriveStatus = document.querySelector("#liveDriveStatus");
@@ -198,7 +199,7 @@ let lastSpokenCueId = "";
 let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
-let routeEntryMode = "saved";
+let routeEntryMode = "destination";
 let pendingCueEditLink = parseCueEditLink();
 
 function getTaxiBoStorageMode() {
@@ -321,7 +322,7 @@ loadSpeedWarnings();
 startAcceptedTripPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
-setRouteEntryMode("saved");
+setRouteEntryMode("destination");
 setDriveControlMode("idle");
 
 destinationModeRadio.addEventListener("change", () => {
@@ -562,6 +563,11 @@ if (simulationResetButton) {
 liveDriveStartButton.addEventListener("click", () => {
   armSpeedAudio();
   startLiveDrive();
+});
+
+cruiseMonitorButton.addEventListener("click", () => {
+  armSpeedAudio();
+  startCruiseMonitoring();
 });
 
 liveDriveSimulateButton.addEventListener("click", () => {
@@ -867,7 +873,7 @@ async function loadRoutes() {
     routes = Array.isArray(savedRoutes) ? savedRoutes.map(normalizeImportedRoute) : [];
     render();
     if (!acceptedTripContext) {
-      setRouteEntryMode(routes.length ? "saved" : "destination");
+      setRouteEntryMode("destination");
     }
     displaySelectedRoute();
     updatePhotoRouteStatus();
@@ -4441,7 +4447,7 @@ function updateSpeedAwareness(position) {
     speedWarningBadge.textContent = phoneDriveUi ? "Ready" : "Monitoring off";
     speedWarningTitle.textContent = phoneDriveUi ? "Speed warning ready" : "No nearby speed warning";
     speedWarningStatus.textContent = phoneDriveUi
-      ? "Press Drive to monitor speed and warning points."
+      ? "Press Drive or Cruise to monitor speed and warning points."
       : "Switch monitoring on to read speed and check warning points.";
     lastSpeedSample = null;
     stopSpeedWarningTick();
@@ -4701,9 +4707,10 @@ function stopSpeedWarningTick() {
 }
 
 function setDriveControlMode(mode = "idle") {
-  const normalizedMode = ["idle", "live", "simulate"].includes(mode) ? mode : "idle";
+  const normalizedMode = ["idle", "live", "simulate", "cruise"].includes(mode) ? mode : "idle";
   const buttons = [
     liveDriveStartButton,
+    cruiseMonitorButton,
     liveDriveSimulateButton,
     liveDriveStopButton
   ];
@@ -4716,16 +4723,25 @@ function setDriveControlMode(mode = "idle") {
   if (normalizedMode === "live") {
     liveDriveStartButton.classList.add("is-drive-active");
     liveDriveStopButton.classList.add("is-drive-standby");
+    cruiseMonitorButton.classList.add("is-drive-standby");
     liveDriveSimulateButton.classList.add("is-drive-standby");
     liveDriveStartButton.setAttribute("aria-pressed", "true");
+  } else if (normalizedMode === "cruise") {
+    cruiseMonitorButton.classList.add("is-drive-active");
+    liveDriveStopButton.classList.add("is-drive-standby");
+    liveDriveStartButton.classList.add("is-drive-standby");
+    liveDriveSimulateButton.classList.add("is-drive-standby");
+    cruiseMonitorButton.setAttribute("aria-pressed", "true");
   } else if (normalizedMode === "simulate") {
     liveDriveSimulateButton.classList.add("is-drive-active");
     liveDriveStopButton.classList.add("is-drive-standby");
     liveDriveStartButton.classList.add("is-drive-standby");
+    cruiseMonitorButton.classList.add("is-drive-standby");
     liveDriveSimulateButton.setAttribute("aria-pressed", "true");
   } else {
     liveDriveStopButton.classList.add("is-drive-active");
     liveDriveStartButton.classList.add("is-drive-standby");
+    cruiseMonitorButton.classList.add("is-drive-standby");
     liveDriveSimulateButton.classList.add("is-drive-standby");
     liveDriveStopButton.setAttribute("aria-pressed", "true");
   }
@@ -4787,6 +4803,7 @@ async function startLiveDrive() {
   renderLiveDrive(route);
   setLiveDriveStatus("Requesting location permission. Allow location access to start live drive mode.");
   liveDriveStartButton.disabled = true;
+  cruiseMonitorButton.disabled = true;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("live");
   scheduleLiveDriveWaitingMessage();
@@ -4811,6 +4828,30 @@ async function startLiveDrive() {
   }
 }
 
+async function startCruiseMonitoring() {
+  stopLiveDrive(false);
+  setPhoneDriveScreen("cue");
+  setLiveDriveStatus("Cruise monitoring started. Speed warnings are active without route cues.");
+  liveDriveStartButton.disabled = false;
+  cruiseMonitorButton.disabled = true;
+  liveDriveSimulateButton.disabled = false;
+  liveDriveStopButton.disabled = false;
+  setDriveControlMode("cruise");
+
+  try {
+    await startSpeedMonitoring();
+    if (speedMonitoringWatchId === null && !isRouteGpsActive()) {
+      cruiseMonitorButton.disabled = false;
+      liveDriveStopButton.disabled = true;
+      setDriveControlMode("idle");
+    }
+  } catch {
+    cruiseMonitorButton.disabled = false;
+    liveDriveStopButton.disabled = true;
+    setDriveControlMode("idle");
+  }
+}
+
 function stopLiveDrive(updateStatus = true) {
   finishRouteRecording();
   clearLiveDriveTimeout();
@@ -4823,9 +4864,11 @@ function stopLiveDrive(updateStatus = true) {
   }
 
   liveDriveStartButton.disabled = false;
+  cruiseMonitorButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = true;
   setDriveControlMode("idle");
+  stopSpeedMonitoring(false);
   updateSpeedMonitoringToggle();
 
   if (updateStatus) {
@@ -4869,6 +4912,7 @@ function startLiveDriveSimulation() {
   liveDriveSimulationIndex = 0;
   isLiveDriveSimulationRunning = true;
   liveDriveStartButton.disabled = true;
+  cruiseMonitorButton.disabled = true;
   liveDriveSimulateButton.disabled = true;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("simulate");
@@ -4888,6 +4932,7 @@ function startLiveDriveSimulation() {
       stopLiveDriveSimulation(false);
       setLiveDriveStatus("Tablet simulation reached the end of the route.");
       liveDriveStartButton.disabled = false;
+      cruiseMonitorButton.disabled = false;
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
       setDriveControlMode("idle");
