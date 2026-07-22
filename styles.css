@@ -1428,6 +1428,13 @@ body[data-cue-ui-mode="drive"] .layout {
   color: #fff;
 }
 
+.route-console-top {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(190px, auto);
+  gap: 10px;
+  align-items: end;
+}
+
 .route-entry-toggle {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1480,6 +1487,25 @@ body[data-cue-ui-mode="drive"] .layout {
 
 .compact-drive-setting select {
   min-height: 42px;
+}
+
+.via-road-entry-group {
+  padding-top: 2px;
+}
+
+.via-road-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.via-road-chips button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--text);
+  font-size: 0.82rem;
 }
 
 .route-entry-group.is-disabled {
@@ -2413,6 +2439,46 @@ input[type="range"]:focus {
     min-height: 188px;
     max-height: 228px;
     overflow: auto;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-console-top {
+    grid-template-columns: minmax(0, 1fr) minmax(112px, 0.42fr);
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-entry-toggle span {
+    padding: 10px 8px;
+    font-size: 0.84rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .compact-drive-setting {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  body[data-cue-ui-mode="drive"] .compact-drive-setting span {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+  }
+
+  body[data-cue-ui-mode="drive"] .compact-drive-setting select {
+    min-height: 38px;
+    padding: 7px 8px;
+    font-size: 0.82rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .via-road-chips {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  body[data-cue-ui-mode="drive"] .via-road-chips button {
+    min-height: 30px;
+    padding: 5px 4px;
+    font-size: 0.72rem;
   }
 
   body[data-cue-ui-mode="drive"] .top-driver-bar {

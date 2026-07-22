@@ -28,6 +28,7 @@ const goStartModeSelect = document.querySelector("#goStartModeSelect");
 const destinationModeRadio = document.querySelector("#destinationModeRadio");
 const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
+const viaRoadEntryGroup = document.querySelector("#viaRoadEntryGroup");
 const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
 const exportRoutesButton = document.querySelector("#exportRoutesButton");
 const importRoutesInput = document.querySelector("#importRoutesInput");
@@ -323,14 +324,23 @@ startAcceptedTripPolling();
 renderRouteRecorder();
 window.startLiveDriveSimulation = startLiveDriveSimulation;
 setRouteEntryMode("destination");
+routeSummary.textContent = "Type the passenger destination, add an optional via road, then press GO.";
 setDriveControlMode("idle");
 
 destinationModeRadio.addEventListener("change", () => {
-  if (destinationModeRadio.checked) setRouteEntryMode("destination");
+  if (destinationModeRadio.checked) {
+    setRouteEntryMode("destination");
+    routeSummary.className = "route-summary empty-state";
+    routeSummary.textContent = "Type the passenger destination, add an optional via road, then press GO.";
+  }
 });
 
 savedRouteModeRadio.addEventListener("change", () => {
-  if (savedRouteModeRadio.checked) setRouteEntryMode("saved");
+  if (savedRouteModeRadio.checked) {
+    setRouteEntryMode("saved");
+    preparedRoute = null;
+    displaySelectedRoute();
+  }
 });
 
 reviewRouteButton.addEventListener("click", () => {
@@ -350,6 +360,13 @@ destinationVoiceButton.addEventListener("click", () => {
 
 viaRoadVoiceButton.addEventListener("click", () => {
   toggleViaRoadVoiceInput();
+});
+
+document.querySelectorAll("[data-via-road]").forEach((button) => {
+  button.addEventListener("click", () => {
+    viaRoadSearch.value = button.dataset.viaRoad || "";
+    viaRoadSearch.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 });
 
 recordedRouteVoiceButton.addEventListener("click", () => {
@@ -410,10 +427,16 @@ function setRouteEntryMode(mode) {
   goDestinationButton.disabled = !destinationActive;
   destinationSelect.disabled = destinationActive;
 
+  destinationEntryGroup.hidden = !destinationActive;
+  viaRoadEntryGroup.hidden = !destinationActive;
+  savedRouteEntryGroup.hidden = destinationActive;
   destinationEntryGroup.classList.toggle("is-disabled", !destinationActive);
+  viaRoadEntryGroup.classList.toggle("is-disabled", !destinationActive);
   savedRouteEntryGroup.classList.toggle("is-disabled", destinationActive);
   destinationEntryGroup.setAttribute("aria-disabled", String(!destinationActive));
+  viaRoadEntryGroup.setAttribute("aria-disabled", String(!destinationActive));
   savedRouteEntryGroup.setAttribute("aria-disabled", String(destinationActive));
+  renderDestinationSelect();
 }
 
 exportRoutesButton.addEventListener("click", () => {
