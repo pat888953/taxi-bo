@@ -567,7 +567,11 @@ liveDriveStartButton.addEventListener("click", () => {
 
 cruiseMonitorButton.addEventListener("click", () => {
   armSpeedAudio();
-  startCruiseMonitoring();
+  if (isCruiseMonitoringActive()) {
+    stopLiveDrive();
+  } else {
+    startCruiseMonitoring();
+  }
 });
 
 liveDriveSimulateButton.addEventListener("click", () => {
@@ -4504,6 +4508,10 @@ function isRouteGpsActive() {
   return liveDriveWatchId !== null || isLiveDriveSimulationRunning;
 }
 
+function isCruiseMonitoringActive() {
+  return speedMonitoringWatchId !== null && !isRouteGpsActive();
+}
+
 function updateSpeedMonitoringToggle() {
   if (!speedMonitoringToggle) {
     return;
@@ -4719,6 +4727,11 @@ function setDriveControlMode(mode = "idle") {
     button.classList.remove("is-drive-active", "is-drive-standby");
     button.setAttribute("aria-pressed", "false");
   });
+  cruiseMonitorButton.textContent = normalizedMode === "cruise" ? "Stop" : "Cruise";
+  cruiseMonitorButton.setAttribute(
+    "aria-label",
+    normalizedMode === "cruise" ? "Stop cruise monitoring" : "Start cruise monitoring"
+  );
 
   if (normalizedMode === "live") {
     liveDriveStartButton.classList.add("is-drive-active");
@@ -4833,7 +4846,7 @@ async function startCruiseMonitoring() {
   setPhoneDriveScreen("cue");
   setLiveDriveStatus("Cruise monitoring started. Speed warnings are active without route cues.");
   liveDriveStartButton.disabled = false;
-  cruiseMonitorButton.disabled = true;
+  cruiseMonitorButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("cruise");
@@ -4853,6 +4866,7 @@ async function startCruiseMonitoring() {
 }
 
 function stopLiveDrive(updateStatus = true) {
+  const wasCruiseOnly = isCruiseMonitoringActive();
   finishRouteRecording();
   clearLiveDriveTimeout();
   stopLiveDriveSimulation(false);
@@ -4879,6 +4893,9 @@ function stopLiveDrive(updateStatus = true) {
     liveDriveUpcoming.innerHTML = "";
     setLiveDriveStatus("Live drive stopped.");
     setMapDriverMode(false);
+    if (wasCruiseOnly || !completedRouteRecording) {
+      setPhoneDriveScreen("input");
+    }
   }
 }
 

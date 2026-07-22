@@ -487,6 +487,18 @@ body[data-cue-ui-mode="drive"] .layout {
   color: var(--text);
 }
 
+.speed-warning-copy .cruise-monitor-button.is-drive-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.speed-warning-copy .cruise-monitor-button.is-drive-standby {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
 .drive-controls-row button:disabled.is-drive-active,
 .drive-controls-row button:disabled.is-drive-standby {
   opacity: 1;
