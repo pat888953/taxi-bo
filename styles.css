@@ -2359,6 +2359,10 @@ input[type="range"]:focus {
     box-shadow: none;
   }
 
+  body[data-cue-ui-mode="drive"] .module-links {
+    display: none;
+  }
+
   body[data-cue-ui-mode="drive"] .rehearse-panel {
     margin: 0;
     border-right: 0;
