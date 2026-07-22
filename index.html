@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=106">
+  <link rel="stylesheet" href="styles.css?v=107">
 </head>
 <body>
   <div class="page-shell">
@@ -42,9 +42,9 @@
           <h2>Scroll to review every upcoming cue</h2>
         </div>
         <div class="drive-controls-row">
-          <button id="liveDriveStartButton" class="primary-button small-button" type="button">Start live drive</button>
-          <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button">Brief the route</button>
-          <button id="liveDriveStopButton" class="secondary-button small-button" type="button" disabled>Stop live drive</button>
+          <button id="liveDriveStartButton" class="primary-button small-button" type="button" data-phone-label="Drive">Start live drive</button>
+          <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button" data-phone-label="Brief">Brief the route</button>
+          <button id="liveDriveStopButton" class="secondary-button small-button" type="button" data-phone-label="Stop" disabled>Stop live drive</button>
         </div>
         <section id="speedAwareness" class="speed-awareness" data-state="idle" aria-live="assertive">
           <div class="speed-readout">
@@ -550,7 +550,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=106"></script>
+  <script src="app.js?v=107"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

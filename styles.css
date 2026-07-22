@@ -2405,18 +2405,20 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .drive-controls-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
   }
 
   body[data-cue-ui-mode="drive"] .drive-controls-row button {
     width: 100%;
-    min-height: 42px;
-    padding-inline: 8px;
+    min-height: 36px;
+    padding: 7px 6px;
+    font-size: 0;
   }
 
-  body[data-cue-ui-mode="drive"] #liveDriveStopButton {
-    grid-column: 1 / -1;
+  body[data-cue-ui-mode="drive"] .drive-controls-row button::after {
+    content: attr(data-phone-label);
+    font-size: 0.9rem;
   }
 
   body[data-cue-ui-mode="drive"] .speed-awareness,
