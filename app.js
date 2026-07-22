@@ -10,7 +10,6 @@ const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
-const TAXIBO_PHONE_DRIVE_SCREEN_KEY = "taxiBoPhoneDriveScreen";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -110,7 +109,6 @@ const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryBu
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
 const cueModeButtons = document.querySelectorAll("[data-cue-mode]");
-const phoneDriveScreenButtons = document.querySelectorAll("[data-phone-drive-screen]");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
 const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
 const cueCaptureTitle = document.querySelector("#cueCaptureTitle");
@@ -251,20 +249,9 @@ function setCueUiMode(mode) {
   });
 }
 
-function getPhoneDriveScreen() {
-  return localStorage.getItem(TAXIBO_PHONE_DRIVE_SCREEN_KEY) === "input" ? "input" : "cue";
-}
-
 function setPhoneDriveScreen(screen) {
   const nextScreen = screen === "input" ? "input" : "cue";
   document.body.dataset.phoneDriveScreen = nextScreen;
-  localStorage.setItem(TAXIBO_PHONE_DRIVE_SCREEN_KEY, nextScreen);
-
-  phoneDriveScreenButtons.forEach((button) => {
-    const isActive = button.dataset.phoneDriveScreen === nextScreen;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  });
 
   window.requestAnimationFrame(() => {
     if (map) {
@@ -309,10 +296,6 @@ cueModeButtons.forEach((button) => {
   button.addEventListener("click", () => setCueUiMode(button.dataset.cueMode));
 });
 
-phoneDriveScreenButtons.forEach((button) => {
-  button.addEventListener("click", () => setPhoneDriveScreen(button.dataset.phoneDriveScreen));
-});
-
 goStartModeSelect?.addEventListener("change", () => {
   setGoStartMode(goStartModeSelect.value);
 });
@@ -325,7 +308,7 @@ maintenanceDrawer?.addEventListener("toggle", () => {
 });
 
 setCueUiMode(getDefaultCueUiMode());
-setPhoneDriveScreen(getPhoneDriveScreen());
+setPhoneDriveScreen("input");
 setGoStartMode(getGoStartMode());
 render();
 initializeMap();
@@ -4272,6 +4255,7 @@ async function saveCompletedRecordingAsRoute() {
     displayRoute(recordedRoute);
     renderRouteRecorder();
     setLiveDriveStatus(`Saved actual drive as route variant "${variant}".`);
+    setPhoneDriveScreen("input");
   } catch (error) {
     routes = routes.filter((route) => route.id !== routeId);
     routeRecorder.dataset.state = "error";
@@ -4301,6 +4285,7 @@ async function discardCompletedRecording() {
     recordedRouteVariant.value = "Passenger shortcut";
     renderRouteRecorder();
     setLiveDriveStatus("Recorded drive discarded.");
+    setPhoneDriveScreen("input");
   } catch (error) {
     routeRecorder.dataset.state = "error";
     routeRecorderState.textContent = error.message || "Could not discard the recording.";
