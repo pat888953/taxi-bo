@@ -2342,6 +2342,139 @@ input[type="range"]:focus {
 }
 
 @media (max-width: 720px) {
+  body[data-cue-ui-mode="drive"] {
+    background-size: 44px 44px;
+  }
+
+  body[data-cue-ui-mode="drive"] .page-shell {
+    width: 100%;
+    padding: 0;
+  }
+
+  body[data-cue-ui-mode="drive"] .module-switcher {
+    margin: 0;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .rehearse-panel {
+    margin: 0;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .rehearse-panel .panel-header,
+  body[data-cue-ui-mode="drive"] .route-stage {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .rehearsal-grid {
+    display: block;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-summary {
+    max-height: 132px;
+    overflow: auto;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-driver-bar {
+    margin: 0;
+    padding: 12px;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .cue-preview-header {
+    display: grid;
+    gap: 2px;
+  }
+
+  body[data-cue-ui-mode="drive"] .cue-preview-header h2 {
+    font-size: 0.98rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .drive-controls-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] .drive-controls-row button {
+    width: 100%;
+    min-height: 42px;
+    padding-inline: 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] #liveDriveStopButton {
+    grid-column: 1 / -1;
+  }
+
+  body[data-cue-ui-mode="drive"] .speed-awareness,
+  body[data-cue-ui-mode="drive"] .route-recorder {
+    padding: 10px;
+  }
+
+  body[data-cue-ui-mode="drive"] .speed-warning-manager {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] #liveDriveStatus {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-preview {
+    display: block !important;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-card {
+    min-height: 0;
+    padding: 10px;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-card:nth-child(n + 2) {
+    display: none !important;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-image-wrap {
+    height: clamp(260px, 58vh, 520px) !important;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-copy {
+    display: block !important;
+    padding: 10px 4px 2px;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-copy span,
+  body[data-cue-ui-mode="drive"] .top-cue-copy .photo-card-coordinates,
+  body[data-cue-ui-mode="drive"] .top-cue-copy .photo-card-notes {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-copy strong {
+    font-size: 1.08rem;
+    white-space: normal;
+  }
+
+  body[data-cue-ui-mode="drive"] .top-cue-copy p:not(.top-cue-coordinates) {
+    -webkit-line-clamp: 2;
+    font-size: 0.98rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .cue-audio-button {
+    right: 18px;
+    bottom: 86px;
+    width: 52px;
+    height: 52px;
+  }
+
   .route-recorder {
     grid-template-columns: 1fr;
   }
