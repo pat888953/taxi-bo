@@ -2489,6 +2489,40 @@ input[type="range"]:focus {
     display: none;
   }
 
+  body[data-cue-ui-mode="drive"] .route-recorder {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-recorder-header strong {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .recording-badge {
+    min-width: 48px;
+    padding: 6px 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] .recording-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    justify-content: stretch;
+  }
+
+  body[data-cue-ui-mode="drive"] .recording-metrics > div {
+    min-width: 0;
+    padding: 6px 7px;
+  }
+
+  body[data-cue-ui-mode="drive"] .recording-metrics span {
+    font-size: 0.58rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .recording-metrics strong {
+    font-size: 0.86rem;
+  }
+
   body[data-cue-ui-mode="drive"] #liveDriveStatus {
     display: none;
   }
