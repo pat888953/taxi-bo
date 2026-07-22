@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=113">
+  <link rel="stylesheet" href="styles.css?v=114">
 </head>
 <body>
   <div class="page-shell">
@@ -43,7 +43,6 @@
         </div>
         <div class="drive-controls-row">
           <button id="liveDriveStartButton" class="primary-button small-button" type="button" data-phone-label="Drive">Start live drive</button>
-          <button id="cruiseMonitorButton" class="secondary-button small-button cruise-monitor-button" type="button" data-phone-label="Cruise">Cruise monitor</button>
           <button id="liveDriveSimulateButton" class="secondary-button small-button" type="button" data-phone-label="Brief">Brief the route</button>
           <button id="liveDriveStopButton" class="secondary-button small-button" type="button" data-phone-label="Stop" disabled>Stop live drive</button>
         </div>
@@ -60,6 +59,7 @@
             </label>
             <strong id="speedWarningTitle">No nearby speed warning</strong>
             <p id="speedWarningStatus">Switch monitoring on to read speed and check warning points.</p>
+            <button id="cruiseMonitorButton" class="secondary-button small-button cruise-monitor-button" type="button">Cruise</button>
           </div>
           <details class="speed-warning-manager">
             <summary>Manage warning points</summary>
@@ -551,7 +551,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=113"></script>
+  <script src="app.js?v=114"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

@@ -2441,10 +2441,6 @@ input[type="range"]:focus {
     gap: 6px;
   }
 
-  body[data-cue-ui-mode="drive"] #liveDriveSimulateButton {
-    display: none;
-  }
-
   body[data-cue-ui-mode="drive"] .drive-controls-row button {
     width: 100%;
     min-height: 36px;
@@ -2481,7 +2477,9 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .speed-warning-copy {
     display: grid;
-    gap: 2px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 8px;
+    align-items: center;
   }
 
   body[data-cue-ui-mode="drive"] .speed-monitor-toggle {
@@ -2503,10 +2501,12 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .speed-warning-copy strong {
+    grid-column: 1;
     font-size: 0.92rem;
   }
 
   body[data-cue-ui-mode="drive"] .speed-warning-copy p {
+    grid-column: 1;
     display: -webkit-box;
     margin: 0;
     overflow: hidden;
@@ -2515,6 +2515,15 @@ input[type="range"]:focus {
     line-height: 1.25;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+  }
+
+  body[data-cue-ui-mode="drive"] .cruise-monitor-button {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: stretch;
+    min-height: 42px;
+    padding: 7px 9px;
+    white-space: nowrap;
   }
 
   body[data-cue-ui-mode="drive"] .speed-warning-manager {
