@@ -1302,6 +1302,14 @@ async function lookupStopPlace() {
 function renderDestinationSelect() {
   const previousValue = destinationSelect.value;
   destinationSelect.innerHTML = "";
+
+  if (routeEntryMode === "destination") {
+    destinationSelect.append(new Option("Saved routes are off while entering a new destination", ""));
+    destinationSelect.value = "";
+    filteredRoutes = [];
+    return;
+  }
+
   filteredRoutes = getFilteredRoutes();
 
   if (!filteredRoutes.length) {
