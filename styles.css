@@ -1394,8 +1394,14 @@ body[data-cue-ui-mode="drive"] .layout {
   align-items: center;
 }
 
-.voice-input-row input {
+.voice-input-row input,
+.voice-input-row textarea {
   min-width: 0;
+}
+
+.voice-input-row textarea {
+  min-height: 44px;
+  resize: vertical;
 }
 
 .via-road-row {
@@ -2463,6 +2469,15 @@ input[type="range"]:focus {
   body[data-cue-ui-mode="drive"] .drive-controls-row button::after {
     content: attr(data-phone-label);
     font-size: 0.9rem;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] #destinationSearch {
+    min-height: 104px;
+    line-height: 1.35;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] #destinationEntryGroup .voice-input-row:first-of-type {
+    align-items: stretch;
   }
 
   body[data-cue-ui-mode="drive"] .speed-awareness,
