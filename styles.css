@@ -2363,6 +2363,10 @@ input[type="range"]:focus {
     display: none;
   }
 
+  body[data-cue-ui-mode="drive"] .cue-mode-switcher {
+    display: none;
+  }
+
   body[data-cue-ui-mode="drive"] .rehearse-panel {
     margin: 0;
     border-right: 0;
