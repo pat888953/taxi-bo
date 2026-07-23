@@ -58,6 +58,7 @@ const recordingPointCount = document.querySelector("#recordingPointCount");
 const recordingCompletion = document.querySelector("#recordingCompletion");
 const recordedRouteVariant = document.querySelector("#recordedRouteVariant");
 const recordedRouteVoiceButton = document.querySelector("#recordedRouteVoiceButton");
+const routeRecordButton = document.querySelector("#routeRecordButton");
 const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton");
 const discardRecordingButton = document.querySelector("#discardRecordingButton");
 const speedAwareness = document.querySelector("#speedAwareness");
@@ -186,6 +187,8 @@ let acceptedTripPollInFlight = false;
 let acceptedTripContext = null;
 let activeRouteRecording = null;
 let completedRouteRecording = null;
+let routeRecordingWatchId = null;
+let routeRecordingPosition = null;
 let recordingFlushTimeoutId = null;
 let recordingFlushInFlight = false;
 let recordingFlushPromise = null;
@@ -371,6 +374,14 @@ document.querySelectorAll("[data-via-road]").forEach((button) => {
 
 recordedRouteVoiceButton.addEventListener("click", () => {
   toggleRecordedRouteVoiceInput();
+});
+
+routeRecordButton.addEventListener("click", () => {
+  if (routeRecordingWatchId !== null || activeRouteRecording) {
+    stopRouteRecordingOnly();
+  } else {
+    startRouteRecordingOnly();
+  }
 });
 
 destinationSearch.addEventListener("input", (event) => {
@@ -3974,6 +3985,122 @@ async function recoverInterruptedRouteRecording() {
   }
 }
 
+async function startRouteRecordingOnly() {
+  if (completedRouteRecording) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = "Save or discard the completed recording before starting another recording.";
+    return;
+  }
+
+  if (activeRouteRecording) {
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = "Route recording needs HTTPS or localhost so the browser allows GPS.";
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    routeRecorder.dataset.state = "error";
+    routeRecorderState.textContent = "This browser does not support GPS route recording.";
+    return;
+  }
+
+  armSpeedAudio();
+  stopSpeedMonitoring(false);
+  routeRecordButton.disabled = true;
+  routeRecorder.dataset.state = "recording";
+  routeRecorderBadge.textContent = "Starting";
+  routeRecorderState.textContent = "Requesting GPS permission for route recording...";
+  setPhoneDriveScreen("cue");
+
+  try {
+    const firstPosition = await getCurrentPosition();
+    routeRecordingPosition = firstPosition;
+    liveDrivePosition = firstPosition;
+    updateSpeedAwareness(firstPosition);
+    await beginRouteRecording(createManualRecordingRoute(firstPosition), firstPosition);
+    routeRecordingWatchId = navigator.geolocation.watchPosition(
+      (position) => handleRouteRecordingPosition(position),
+      (error) => handleRouteRecordingError(error),
+      {
+        enableHighAccuracy: true,
+        maximumAge: 3000,
+        timeout: 12000
+      }
+    );
+    renderRouteRecorder();
+    updateSpeedMonitoringToggle();
+  } catch (error) {
+    handleRouteRecordingError(error);
+  }
+}
+
+function createManualRecordingRoute(position) {
+  const destination = destinationSearch.value.trim()
+    || routes.find((route) => route.id === destinationSelect.value)?.destination
+    || "Dashcam route recording";
+  const label = `Current GPS ${Number(position.coords.latitude).toFixed(5)}, ${Number(position.coords.longitude).toFixed(5)}`;
+
+  return {
+    id: "",
+    name: "Dashcam road recording",
+    start: label,
+    destination,
+    photos: []
+  };
+}
+
+function handleRouteRecordingPosition(position) {
+  routeRecordingPosition = position;
+  liveDrivePosition = position;
+  updateSpeedAwareness(position);
+  appendRouteRecordingPoint(position);
+  renderRouteRecorder();
+  updateSpeedMonitoringToggle();
+}
+
+function handleRouteRecordingError(error) {
+  stopRouteRecordingWatch();
+  if (activeRouteRecording) {
+    finishRouteRecording();
+  } else {
+    renderRouteRecorder();
+  }
+  const message = error?.code === 1
+    ? "Location permission was denied. Allow location access to record the route."
+    : error?.code === 2
+      ? "The browser could not determine the taxi position."
+      : error?.code === 3
+        ? "GPS timed out. Try again outdoors or on a phone/tablet with location enabled."
+        : error.message || "Could not record the taxi position.";
+  routeRecorder.dataset.state = "error";
+  routeRecorderState.textContent = message;
+  routeRecordButton.disabled = Boolean(completedRouteRecording);
+  updateSpeedMonitoringToggle();
+}
+
+function stopRouteRecordingOnly() {
+  stopRouteRecordingWatch();
+  finishRouteRecording();
+  updateSpeedMonitoringToggle();
+
+  if (!liveDriveWatchId && !speedMonitoringWatchId) {
+    liveDrivePosition = null;
+    routeRecordingPosition = null;
+    updateSpeedAwareness(null);
+  }
+}
+
+function stopRouteRecordingWatch() {
+  if (routeRecordingWatchId !== null) {
+    navigator.geolocation.clearWatch(routeRecordingWatchId);
+    routeRecordingWatchId = null;
+  }
+}
+
 async function beginRouteRecording(route, position) {
   const firstPoint = createRecordingPoint(position);
   const startedAtMs = firstPoint.timestamp;
@@ -4203,12 +4330,14 @@ function renderRouteRecorder() {
   if (!recording) {
     routeRecorder.dataset.state = "idle";
     routeRecorderBadge.textContent = "Ready";
-    routeRecorderState.textContent = "Route recording starts with live drive";
+    routeRecorderState.textContent = "Route recording ready for dashcam matching";
     recordingElapsed.textContent = "00:00";
     recordingDistance.textContent = "0.0 mi";
     recordingPointCount.textContent = "0";
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
+    routeRecordButton.textContent = "Record";
+    routeRecordButton.disabled = false;
     return;
   }
 
@@ -4224,6 +4353,8 @@ function renderRouteRecorder() {
       : `Recording actual drive to ${shortPlaceName(recording.destination)}`;
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
+    routeRecordButton.textContent = "Stop";
+    routeRecordButton.disabled = false;
     return;
   }
 
@@ -4236,6 +4367,8 @@ function renderRouteRecorder() {
       : "Actual drive recorded. Save it as a reusable route variant or discard it.";
   recordingCompletion.hidden = false;
   recordedRouteVoiceButton.disabled = !recordedRouteRecognition;
+  routeRecordButton.textContent = "Record";
+  routeRecordButton.disabled = true;
 }
 
 function formatRecordingDuration(seconds) {
@@ -4534,11 +4667,11 @@ function isPhoneDriveUi() {
 }
 
 function getCurrentWarningPosition() {
-  return liveDrivePosition || speedMonitoringPosition;
+  return liveDrivePosition || routeRecordingPosition || speedMonitoringPosition;
 }
 
 function isRouteGpsActive() {
-  return liveDriveWatchId !== null || isLiveDriveSimulationRunning;
+  return liveDriveWatchId !== null || routeRecordingWatchId !== null || isLiveDriveSimulationRunning;
 }
 
 function isCruiseMonitoringActive() {
@@ -4829,6 +4962,11 @@ async function startLiveDrive() {
     return;
   }
 
+  if (activeRouteRecording) {
+    setLiveDriveStatus("Stop or save the current route recording before starting live drive.", true);
+    return;
+  }
+
   if (!getLocatedCues(route).length) {
     setLiveDriveStatus("This route has no cue coordinates yet. Generate cues or add cue locations first.", true);
     return;
@@ -4900,7 +5038,9 @@ async function startCruiseMonitoring() {
 
 function stopLiveDrive(updateStatus = true) {
   const wasCruiseOnly = isCruiseMonitoringActive();
-  finishRouteRecording();
+  if (routeRecordingWatchId === null) {
+    finishRouteRecording();
+  }
   clearLiveDriveTimeout();
   stopLiveDriveSimulation(false);
   clearLiveDriveMap();

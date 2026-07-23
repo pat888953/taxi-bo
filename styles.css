@@ -687,7 +687,7 @@ body[data-cue-ui-mode="drive"] .layout {
 
 .route-recorder {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
@@ -799,6 +799,17 @@ body[data-cue-ui-mode="drive"] .layout {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.route-record-button {
+  min-width: 84px;
+  align-self: stretch;
+}
+
+.route-recorder[data-state="recording"] .route-record-button {
+  border-color: #b84531;
+  background: #b84531;
+  color: #fff;
 }
 
 .cue-preview-strip #liveDriveStatus {
@@ -2626,7 +2637,7 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .route-recorder {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
   }
 
@@ -2657,6 +2668,12 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .recording-metrics strong {
     font-size: 0.86rem;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-record-button {
+    min-width: 58px;
+    min-height: 42px;
+    padding: 7px 9px;
   }
 
   body[data-cue-ui-mode="drive"] #liveDriveStatus {
