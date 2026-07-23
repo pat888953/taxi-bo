@@ -2494,7 +2494,7 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .top-driver-bar {
     margin: 0;
-    padding: 104px 10px 12px;
+    padding: 154px 10px 12px;
     border-right: 0;
     border-left: 0;
     border-radius: 0;
@@ -2636,10 +2636,38 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .route-recorder {
+    position: fixed;
+    top: 80px;
+    left: 0;
+    right: 0;
+    z-index: 11;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 6px;
     align-items: stretch;
+    margin: 0;
     padding: 7px;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: 0 6px 16px rgba(24, 35, 29, 0.08);
+  }
+
+  body[data-cue-ui-mode="drive"] .route-recorder[data-state="completed"] {
+    position: static;
+    margin-top: 0;
+    border-right: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .route-recorder[data-state="error"] {
+    position: static;
+    margin-top: 0;
+    border-right: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: none;
   }
 
   body[data-cue-ui-mode="drive"] .route-recorder-header strong {
