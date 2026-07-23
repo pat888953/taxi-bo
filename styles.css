@@ -2527,7 +2527,6 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .cue-preview-header,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .drive-controls-row,
-  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .route-recorder,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .top-cue-preview {
     display: none !important;
   }
