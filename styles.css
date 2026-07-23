@@ -2494,7 +2494,7 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .top-driver-bar {
     margin: 0;
-    padding: 154px 10px 12px;
+    padding: 188px 10px 12px;
     border-right: 0;
     border-left: 0;
     border-radius: 0;
@@ -2637,7 +2637,7 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .route-recorder {
     position: fixed;
-    top: 80px;
+    top: 116px;
     left: 0;
     right: 0;
     z-index: 11;
