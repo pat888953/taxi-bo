@@ -2554,6 +2554,14 @@ input[type="range"]:focus {
     display: none;
   }
 
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .rehearse-panel,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .cue-preview-header,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .drive-controls-row,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] #liveDriveStatus,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .top-cue-preview {
+    display: none !important;
+  }
+
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .cue-preview-header,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .drive-controls-row,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .top-cue-preview {

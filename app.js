@@ -262,7 +262,7 @@ function setCueUiMode(mode) {
 }
 
 function setPhoneDriveScreen(screen) {
-  const nextScreen = screen === "input" ? "input" : "cue";
+  const nextScreen = screen === "input" || screen === "recording" ? screen : "cue";
   document.body.dataset.phoneDriveScreen = nextScreen;
   updateSpeedUnitDisplay();
   renderRouteRecorder();
@@ -4086,7 +4086,7 @@ async function startRouteRecordingOnly() {
   routeRecorder.dataset.state = "recording";
   routeRecorderBadge.textContent = "Starting";
   routeRecorderState.textContent = "Requesting GPS permission for route recording...";
-  setPhoneDriveScreen("cue");
+  setPhoneDriveScreen("recording");
 
   try {
     const firstPosition = await getCurrentPosition();
@@ -4157,6 +4157,7 @@ function handleRouteRecordingError(error) {
 function stopRouteRecordingOnly() {
   stopRouteRecordingWatch();
   finishRouteRecording();
+  setPhoneDriveScreen("recording");
   updateSpeedMonitoringToggle();
 
   if (!liveDriveWatchId && !speedMonitoringWatchId) {
@@ -4408,7 +4409,7 @@ function renderRouteRecorder() {
     recordingPointCount.textContent = "0";
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
-    routeRecordButton.textContent = "Record";
+    routeRecordButton.textContent = "Record route";
     routeRecordButton.disabled = false;
     return;
   }
@@ -4425,7 +4426,7 @@ function renderRouteRecorder() {
       : `Recording actual drive to ${shortPlaceName(recording.destination)}`;
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
-    routeRecordButton.textContent = "Stop";
+    routeRecordButton.textContent = "Stop recording";
     routeRecordButton.disabled = false;
     return;
   }
@@ -4439,7 +4440,7 @@ function renderRouteRecorder() {
       : "Actual drive recorded. Save it as a reusable route variant or discard it.";
   recordingCompletion.hidden = false;
   recordedRouteVoiceButton.disabled = !recordedRouteRecognition;
-  routeRecordButton.textContent = "Record";
+  routeRecordButton.textContent = "Record route";
   routeRecordButton.disabled = true;
 }
 
