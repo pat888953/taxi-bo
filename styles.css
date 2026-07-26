@@ -2463,7 +2463,7 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .route-console-top {
-    grid-template-columns: minmax(0, 1fr) minmax(112px, 0.42fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     align-items: stretch;
   }
@@ -2474,7 +2474,7 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .phone-route-source-compact {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 6px;
     align-items: center;
     min-height: 44px;
@@ -2500,21 +2500,13 @@ input[type="range"]:focus {
     padding: 6px 10px;
   }
 
+  body[data-cue-ui-mode="drive"] .phone-go-mode-button {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+
   body[data-cue-ui-mode="drive"] .compact-drive-setting {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 3px;
-  }
-
-  body[data-cue-ui-mode="drive"] .compact-drive-setting span {
-    font-size: 0.68rem;
-    text-transform: uppercase;
-  }
-
-  body[data-cue-ui-mode="drive"] .compact-drive-setting select {
-    min-height: 38px;
-    padding: 7px 8px;
-    font-size: 0.82rem;
+    display: none;
   }
 
   body[data-cue-ui-mode="drive"] .via-road-chips {

@@ -30,6 +30,7 @@ const destinationModeRadio = document.querySelector("#destinationModeRadio");
 const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
 const phoneRouteSourceLabel = document.querySelector("#phoneRouteSourceLabel");
 const phoneRouteSourceButton = document.querySelector("#phoneRouteSourceButton");
+const phoneGoStartModeButton = document.querySelector("#phoneGoStartModeButton");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
 const viaRoadEntryGroup = document.querySelector("#viaRoadEntryGroup");
 const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
@@ -284,6 +285,15 @@ function setGoStartMode(mode) {
   if (goStartModeSelect) {
     goStartModeSelect.value = nextMode;
   }
+  if (phoneGoStartModeButton) {
+    const isAuto = nextMode === "auto";
+    phoneGoStartModeButton.textContent = isAuto ? "Auto" : "Manual";
+    phoneGoStartModeButton.setAttribute("aria-pressed", String(isAuto));
+    phoneGoStartModeButton.setAttribute(
+      "aria-label",
+      isAuto ? "Switch GO to manual start" : "Switch GO to auto drive"
+    );
+  }
 }
 
 function shouldAutoStartLiveDriveAfterGo() {
@@ -328,6 +338,10 @@ cueModeButtons.forEach((button) => {
 
 goStartModeSelect?.addEventListener("change", () => {
   setGoStartMode(goStartModeSelect.value);
+});
+
+phoneGoStartModeButton?.addEventListener("click", () => {
+  setGoStartMode(getGoStartMode() === "auto" ? "manual" : "auto");
 });
 
 phoneThemeButton?.addEventListener("click", () => {
