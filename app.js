@@ -760,6 +760,10 @@ discardRecordingButton.addEventListener("click", () => {
   discardCompletedRecording();
 });
 
+recordedRouteVariant?.addEventListener("input", () => {
+  recordedRouteVariant.dataset.autoName = "false";
+});
+
 window.addEventListener("pagehide", () => {
   flushRouteRecording(true);
 });
@@ -1294,6 +1298,7 @@ function setupRecordedRouteVoiceInput() {
 
     if (transcript) {
       recordedRouteVariant.value = transcript;
+      recordedRouteVariant.dataset.autoName = "false";
     }
   });
 
@@ -4322,6 +4327,7 @@ function finishRouteRecording() {
   activeRouteRecording = null;
   completedRouteRecording = recording;
   recording.endedAt = new Date().toISOString();
+  applyDefaultRecordedRouteName(recording, true);
   recording.durationSeconds = Math.max(
     recording.durationSeconds,
     (Date.now() - recording.startedAtMs) / 1000
@@ -4432,6 +4438,7 @@ function renderRouteRecorder() {
   }
 
   routeRecorder.dataset.state = recording.syncError ? "error" : "completed";
+  applyDefaultRecordedRouteName(recording);
   routeRecorderBadge.textContent = recording.syncError ? "Unsynced" : "Saved";
   routeRecorderState.textContent = recording.syncError
     ? "Trip complete, but database sync failed. Keep this page open and try saving the route."
@@ -4442,6 +4449,71 @@ function renderRouteRecorder() {
   recordedRouteVoiceButton.disabled = !recordedRouteRecognition;
   routeRecordButton.textContent = "Record route";
   routeRecordButton.disabled = true;
+}
+
+function applyDefaultRecordedRouteName(recording, force = false) {
+  if (!recordedRouteVariant || !recording || activeRouteRecording) {
+    return;
+  }
+
+  const currentName = recordedRouteVariant.value.trim();
+  const isAutomaticName = recordedRouteVariant.dataset.autoName !== "false";
+  if (!force && currentName && !isAutomaticName) {
+    return;
+  }
+
+  const defaultName = buildRecordedRouteDefaultName(recording);
+  if (!defaultName) {
+    return;
+  }
+
+  recordedRouteVariant.value = defaultName;
+  recordedRouteVariant.dataset.autoName = "true";
+}
+
+function buildRecordedRouteDefaultName(recording) {
+  const startDate = parseRecordingDate(recording.startedAt || recording.startedAtMs);
+  const stopDate = parseRecordingDate(recording.endedAt);
+
+  if (!startDate && !stopDate) {
+    return "Recorded drive";
+  }
+
+  if (!stopDate) {
+    return `Recorded drive ${formatRecordingDateTime(startDate)}`;
+  }
+
+  const sameDay = startDate && startDate.toDateString() === stopDate.toDateString();
+  const stopText = sameDay ? formatRecordingTime(stopDate) : formatRecordingDateTime(stopDate);
+  return `Recorded drive ${formatRecordingDateTime(startDate || stopDate)} to ${stopText}`;
+}
+
+function parseRecordingDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatRecordingDateTime(date) {
+  if (!date) {
+    return "";
+  }
+
+  return `${date.toLocaleDateString([], {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  })} ${formatRecordingTime(date)}`;
+}
+
+function formatRecordingTime(date) {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function formatRecordingDuration(seconds) {
@@ -4462,15 +4534,15 @@ async function saveCompletedRecordingAsRoute() {
     return;
   }
 
-  const variant = recordedRouteVariant.value.trim() || "Passenger shortcut";
+  const routeName = recordedRouteVariant.value.trim() || buildRecordedRouteDefaultName(recording);
   const sourceRoute = recording.sourceRoute || {};
   const first = recording.points[0];
   const last = recording.points.at(-1);
   const routeId = crypto.randomUUID();
   const recordedRoute = normalizeImportedRoute({
     id: routeId,
-    name: `${sourceRoute.name || shortPlaceName(recording.destination)} - recorded`,
-    variant,
+    name: routeName,
+    variant: sourceRoute.name ? `Recorded from ${sourceRoute.name}` : "Recorded drive",
     start: recording.startLabel || "Recorded start",
     destination: recording.destination,
     notes: `Actual drive recorded ${new Date(recording.startedAt).toLocaleString()}.`,
@@ -4498,12 +4570,14 @@ async function saveCompletedRecordingAsRoute() {
     completedRouteRecording = null;
     preparedRoute = null;
     destinationSearch.value = "";
+    recordedRouteVariant.value = "";
+    recordedRouteVariant.dataset.autoName = "true";
     render();
     destinationSelect.value = routeId;
     photoRouteSelect.value = routeId;
     displayRoute(recordedRoute);
     renderRouteRecorder();
-    setLiveDriveStatus(`Saved actual drive as route variant "${variant}".`);
+    setLiveDriveStatus(`Saved actual drive as "${routeName}".`);
     setPhoneDriveScreen("input");
   } catch (error) {
     routes = routes.filter((route) => route.id !== routeId);
@@ -4531,7 +4605,8 @@ async function discardCompletedRecording() {
       await postRouteRecording("discard", { id: recording.id });
     }
     completedRouteRecording = null;
-    recordedRouteVariant.value = "Passenger shortcut";
+    recordedRouteVariant.value = "";
+    recordedRouteVariant.dataset.autoName = "true";
     renderRouteRecorder();
     setLiveDriveStatus("Recorded drive discarded.");
     setPhoneDriveScreen("input");
