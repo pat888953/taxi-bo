@@ -239,6 +239,7 @@ function setCueUiMode(mode) {
   const nextMode = ["drive", "maintenance", "testing"].includes(mode) ? mode : "drive";
   document.body.dataset.cueUiMode = nextMode;
   localStorage.setItem(TAXIBO_CUE_UI_MODE_KEY, nextMode);
+  updateSpeedUnitDisplay();
 
   cueModeButtons.forEach((button) => {
     const isActive = button.dataset.cueMode === nextMode;
@@ -260,6 +261,8 @@ function setCueUiMode(mode) {
 function setPhoneDriveScreen(screen) {
   const nextScreen = screen === "input" ? "input" : "cue";
   document.body.dataset.phoneDriveScreen = nextScreen;
+  updateSpeedUnitDisplay();
+  renderRouteRecorder();
 
   window.requestAnimationFrame(() => {
     if (map) {
@@ -327,6 +330,11 @@ goStartModeSelect?.addEventListener("change", () => {
 
 phoneThemeButton?.addEventListener("click", () => {
   setPhoneTheme(getPhoneTheme() === "night" ? "day" : "night");
+});
+
+window.addEventListener("resize", () => {
+  updateSpeedUnitDisplay();
+  renderRouteRecorder();
 });
 
 maintenanceDrawer?.addEventListener("toggle", () => {
@@ -4635,7 +4643,7 @@ function updateSpeedAwareness(position) {
   addSpeedWarningButton.disabled = !getCurrentWarningPosition();
   updateSpeedMonitoringToggle();
   const phoneDriveUi = isPhoneDriveUi();
-  currentSpeedUnit.textContent = phoneDriveUi ? "km/h" : "mph";
+  updateSpeedUnitDisplay();
 
   if (!position) {
     currentSpeed.textContent = "--";
@@ -4707,7 +4715,17 @@ function formatSpeedForUi(speedMph, useKmh = false) {
 
 function isPhoneDriveUi() {
   return document.body.dataset.cueUiMode === "drive" &&
-    window.matchMedia?.("(max-width: 720px)").matches;
+    (window.matchMedia?.("(max-width: 720px)").matches ||
+      window.matchMedia?.("(pointer: coarse)").matches ||
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+}
+
+function updateSpeedUnitDisplay() {
+  if (!currentSpeedUnit) {
+    return;
+  }
+
+  currentSpeedUnit.textContent = isPhoneDriveUi() ? "km/h" : "mph";
 }
 
 function getCurrentWarningPosition() {
