@@ -108,6 +108,7 @@ def initialize_db(mode=None):
               name TEXT NOT NULL,
               variant TEXT NOT NULL,
               start TEXT NOT NULL,
+              via TEXT NOT NULL DEFAULT '',
               destination TEXT NOT NULL,
               time_window TEXT NOT NULL DEFAULT '',
               traffic_pattern TEXT NOT NULL DEFAULT '',
@@ -248,6 +249,7 @@ def ensure_route_columns(db):
     columns = {
         "start_latitude": "REAL",
         "start_longitude": "REAL",
+        "via": "TEXT NOT NULL DEFAULT ''",
         "destination_latitude": "REAL",
         "destination_longitude": "REAL",
         "route_geometry": "TEXT NOT NULL DEFAULT '[]'",
@@ -291,7 +293,7 @@ def fetch_routes():
         route_rows = db.execute(
             """
             SELECT
-              id, name, variant, start, destination, time_window, traffic_pattern, notes,
+              id, name, variant, start, via, destination, time_window, traffic_pattern, notes,
               start_latitude, start_longitude, destination_latitude, destination_longitude,
               route_geometry, recorded_track_points, route_distance_meters, route_duration_seconds
             FROM routes
@@ -327,6 +329,7 @@ def fetch_routes():
             "name": route["name"],
             "variant": route["variant"],
             "start": route["start"],
+            "via": route["via"],
             "destination": route["destination"],
             "timeWindow": route["time_window"],
             "trafficPattern": route["traffic_pattern"],
@@ -354,18 +357,19 @@ def replace_routes(routes):
             db.execute(
                 """
                 INSERT INTO routes (
-                  id, name, variant, start, destination, time_window,
+                  id, name, variant, start, via, destination, time_window,
                   traffic_pattern, notes, start_latitude, start_longitude,
                   destination_latitude, destination_longitude, route_geometry, recorded_track_points,
                   route_distance_meters, route_duration_seconds, position, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     route.get("id", ""),
                     route.get("name", "Untitled route"),
                     route.get("variant", "Standard"),
                     route.get("start", ""),
+                    route.get("via", ""),
                     route.get("destination", ""),
                     route.get("timeWindow", ""),
                     route.get("trafficPattern", ""),

@@ -14,6 +14,26 @@ const TAXIBO_PHONE_THEME_KEY = "taxiBoPhoneTheme";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
+function createUuid() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
 const destinationSelect = document.querySelector("#destinationSelect");
 const acceptedTripState = document.querySelector("#acceptedTripState");
 const destinationSearch = document.querySelector("#destinationSearch");
@@ -776,6 +796,7 @@ routeForm.addEventListener("submit", async (event) => {
     name: formData.get("routeName").toString().trim(),
     variant: formData.get("routeVariant").toString().trim() || "Standard",
     start: formData.get("routeStart").toString().trim(),
+    via: formData.get("routeVia").toString().trim(),
     destination: formData.get("routeDestination").toString().trim(),
     timeWindow: formData.get("routeTimeWindow").toString().trim(),
     trafficPattern: formData.get("routeTrafficPattern").toString().trim(),
@@ -819,7 +840,7 @@ routeForm.addEventListener("submit", async (event) => {
   }
 
   const route = {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     ...routePayload,
     photos: pendingGeneratedCues.map(normalizeImportedPhoto)
   };
@@ -950,7 +971,7 @@ photoForm.addEventListener("submit", async (event) => {
     }
   } else {
     route.photos.push({
-      id: crypto.randomUUID(),
+      id: createUuid(),
       ...photoPayload
     });
     route.photos.sort((a, b) => a.step - b.step);
@@ -1627,7 +1648,7 @@ async function saveDashcamCuePhoto() {
   const title = dashcamCueTitle.value.trim() || `Dashcam cue ${nextStep}`;
   const instruction = dashcamCueInstruction.value.trim();
   const cue = normalizeImportedPhoto({
-    id: crypto.randomUUID(),
+    id: createUuid(),
     step: nextStep,
     title,
     instruction,
@@ -1842,7 +1863,7 @@ function renderRouteList() {
   const visibleRoutes = routes.filter((route) => {
     const type = getRouteLibraryType(route);
     const matchesType = filter === "all" || filter === type;
-    const searchable = `${route.name} ${route.variant} ${route.start} ${route.destination} ${route.notes}`.toLowerCase();
+    const searchable = `${route.name} ${route.variant} ${route.start} ${route.via || ""} ${route.destination} ${route.notes}`.toLowerCase();
     return matchesType && (!query || searchable.includes(query));
   }).sort((first, second) => {
     const priority = { recorded: 0, prepared: 1, standard: 2 };
@@ -1871,6 +1892,7 @@ function renderRouteList() {
         </div>
         <h3>${escapeHtml(route.name || "Untitled route")}</h3>
         <p class="route-start">Start: ${escapeHtml(route.start || "Unknown start")}</p>
+        ${route.via ? `<p class="route-via">Via: ${escapeHtml(route.via)}</p>` : ""}
         <p class="route-destination">Destination: ${escapeHtml(route.destination)}</p>
         <p class="route-meta">${escapeHtml(formatRouteContext(route))}</p>
       </div>
@@ -1964,6 +1986,8 @@ function displayRoute(route) {
   routeSummary.className = "route-summary";
   routeSummary.innerHTML = `
     <strong>${escapeHtml(route.name || "Untitled route")}</strong><br>
+    Start: ${escapeHtml(route.start || "Unknown start")}<br>
+    ${route.via ? `Via: ${escapeHtml(route.via)}<br>` : ""}
     Destination: ${escapeHtml(route.destination)}<br>
     ${escapeHtml(formatRouteContext(route))}
   `;
@@ -2595,7 +2619,7 @@ function getFilteredRoutes() {
   }
 
   return routes.filter((route) => {
-    const haystack = `${route.name} ${route.variant} ${route.start} ${route.destination} ${route.timeWindow} ${route.trafficPattern} ${route.notes}`.toLowerCase();
+    const haystack = `${route.name} ${route.variant} ${route.start} ${route.via || ""} ${route.destination} ${route.timeWindow} ${route.trafficPattern} ${route.notes}`.toLowerCase();
     return haystack.includes(query);
   });
 }
@@ -2730,10 +2754,11 @@ async function importRoutes(file) {
 
 function normalizeImportedRoute(route) {
   return {
-    id: typeof route.id === "string" && route.id ? route.id : crypto.randomUUID(),
+    id: typeof route.id === "string" && route.id ? route.id : createUuid(),
     name: String(route.name ?? "Untitled route").trim(),
     variant: String(route.variant ?? "Standard").trim() || "Standard",
     start: String(route.start ?? "").trim(),
+    via: String(route.via ?? "").trim(),
     destination: String(route.destination ?? "").trim(),
     timeWindow: String(route.timeWindow ?? "").trim(),
     trafficPattern: String(route.trafficPattern ?? "").trim(),
@@ -2775,7 +2800,7 @@ function normalizeRecordedTrackPoints(points) {
 
 function normalizeImportedPhoto(photo) {
   return {
-    id: typeof photo.id === "string" && photo.id ? photo.id : crypto.randomUUID(),
+    id: typeof photo.id === "string" && photo.id ? photo.id : createUuid(),
     step: Number.isFinite(Number(photo.step)) ? Number(photo.step) : 1,
     title: String(photo.title ?? "Untitled stop").trim(),
     instruction: String(photo.instruction ?? "").trim(),
@@ -2822,13 +2847,14 @@ function startRouteEdit(routeId) {
   document.querySelector("#routeName").value = route.name;
   document.querySelector("#routeVariant").value = route.variant || "Standard";
   document.querySelector("#routeStart").value = route.start;
+  document.querySelector("#routeVia").value = route.via || "";
   document.querySelector("#routeDestination").value = route.destination;
   document.querySelector("#routeTimeWindow").value = route.timeWindow || "";
   document.querySelector("#routeTrafficPattern").value = route.trafficPattern || "";
   document.querySelector("#routeNotes").value = route.notes;
   setRouteMapFields(route);
   updateRouteFormState();
-  setGenerateRouteStatus("Loaded from SQLite. Change the name, start, or destination, then regenerate to update this database route.");
+  setGenerateRouteStatus("Loaded from SQLite. Change the name, start, via, or destination, then regenerate to update this database route.");
   document.querySelector("#routeName").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -2873,6 +2899,7 @@ function setGenerateRouteStatus(message, isError = false) {
 
 async function generateRouteFromCurrentLocation() {
   const start = document.querySelector("#routeStart").value.trim();
+  const via = document.querySelector("#routeVia").value.trim();
   const destination = document.querySelector("#routeDestination").value.trim();
 
   if (!destination) {
@@ -2882,7 +2909,7 @@ async function generateRouteFromCurrentLocation() {
   }
 
   generateRouteButton.disabled = true;
-  setGenerateRouteStatus(start ? "Finding start and destination..." : "Waiting for your current location...");
+  setGenerateRouteStatus(start ? `Finding start${via ? ", via," : " and"} destination...` : "Waiting for your current location...");
 
   try {
     let currentPosition = null;
@@ -2902,11 +2929,13 @@ async function generateRouteFromCurrentLocation() {
     setGenerateRouteStatus("Generating driving route...");
     const generatedRoute = await generateRouteOnServer({
       start,
+      viaRoad: via,
       destination,
       currentPosition
     });
 
     document.querySelector("#routeStart").value = generatedRoute.startLabel;
+    document.querySelector("#routeVia").value = generatedRoute.viaLabel || via;
     document.querySelector("#routeDestination").value = generatedRoute.destinationLabel;
 
     const routeNameInput = document.querySelector("#routeName");
@@ -2952,7 +2981,7 @@ function createGeneratedCues(cues) {
     const title = String(cue.title || `Turn cue ${index + 1}`).trim();
     const instruction = String(cue.instruction || "").trim();
     return {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       step: Number.isFinite(Number(cue.step)) ? Number(cue.step) : index + 1,
       title,
       instruction,
@@ -4184,7 +4213,7 @@ async function beginRouteRecording(route, position) {
   const startedAtMs = firstPoint.timestamp;
 
   activeRouteRecording = {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     sourceRouteId: route.id || "",
     routeName: route.name || "Recorded drive",
     startLabel: route.start || "Current location",
@@ -4538,7 +4567,7 @@ async function saveCompletedRecordingAsRoute() {
   const sourceRoute = recording.sourceRoute || {};
   const first = recording.points[0];
   const last = recording.points.at(-1);
-  const routeId = crypto.randomUUID();
+  const routeId = createUuid();
   const recordedRoute = normalizeImportedRoute({
     id: routeId,
     name: routeName,
@@ -4555,7 +4584,7 @@ async function saveCompletedRecordingAsRoute() {
     routeDistanceMeters: recording.distanceMeters,
     routeDurationSeconds: recording.durationSeconds,
     photos: Array.isArray(sourceRoute.photos)
-      ? sourceRoute.photos.map((photo) => ({ ...photo, id: crypto.randomUUID() }))
+      ? sourceRoute.photos.map((photo) => ({ ...photo, id: createUuid() }))
       : []
   });
 
@@ -5831,7 +5860,8 @@ function formatRouteLabel(route) {
   const variant = route.variant || "Standard";
   const timeWindow = route.timeWindow ? `, ${route.timeWindow}` : "";
   const suffix = variant === "Standard" && !timeWindow ? "" : ` (${variant}${timeWindow ? timeWindow : ""})`;
-  return `${route.name || "Untitled route"} -> ${shortPlaceName(route.destination)}${suffix}`;
+  const via = route.via ? ` via ${shortPlaceName(route.via)}` : "";
+  return `${route.name || "Untitled route"} -> ${shortPlaceName(route.destination)}${via}${suffix}`;
 }
 
 function formatRoutePickerLabel(route) {

@@ -1355,11 +1355,17 @@ body[data-cue-ui-mode="drive"] .layout {
 }
 
 .simple-route-form .split-fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .simple-route-form .split-fields .field:first-child {
   grid-column: 1 / -1;
+}
+
+.simple-route-form .field small {
+  color: var(--text-muted);
+  font-size: 0.78em;
+  font-weight: 600;
 }
 
 .route-generate-bar {

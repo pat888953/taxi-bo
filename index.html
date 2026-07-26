@@ -244,6 +244,11 @@
             </label>
 
             <label class="field">
+              <span>Via <small>(optional)</small></span>
+              <input id="routeVia" name="routeVia" type="text" placeholder="Road, landmark, or stopover" autocomplete="off" autocapitalize="words" spellcheck="false">
+            </label>
+
+            <label class="field">
               <span>Destination</span>
               <input id="routeDestination" name="routeDestination" type="text" placeholder="East Chapel Hill High" autocomplete="off" autocapitalize="words" spellcheck="false" required>
             </label>
@@ -264,7 +269,7 @@
           <div class="route-generate-bar">
             <button id="generateRouteButton" class="primary-button" type="button">Generate and save route</button>
             <button id="reviewRouteButton" class="secondary-button" type="button">Replay saved route</button>
-            <div id="generateRouteStatus" class="form-state empty-state">Enter the route name, start, and destination.</div>
+            <div id="generateRouteStatus" class="form-state empty-state">Enter the route name, start, optional via, and destination.</div>
             <button id="routeSubmitButton" type="submit" hidden>Save route</button>
             <button id="routeCancelEditButton" type="button" class="secondary-button" hidden>Cancel edit</button>
           </div>
