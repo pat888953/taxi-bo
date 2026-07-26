@@ -65,6 +65,7 @@ const saveRecordedRouteButton = document.querySelector("#saveRecordedRouteButton
 const discardRecordingButton = document.querySelector("#discardRecordingButton");
 const speedAwareness = document.querySelector("#speedAwareness");
 const currentSpeed = document.querySelector("#currentSpeed");
+const currentSpeedUnit = document.querySelector("#currentSpeedUnit");
 const speedMonitoringToggle = document.querySelector("#speedMonitoringToggle");
 const speedWarningBadge = document.querySelector("#speedWarningBadge");
 const speedWarningTitle = document.querySelector("#speedWarningTitle");
@@ -4634,6 +4635,7 @@ function updateSpeedAwareness(position) {
   addSpeedWarningButton.disabled = !getCurrentWarningPosition();
   updateSpeedMonitoringToggle();
   const phoneDriveUi = isPhoneDriveUi();
+  currentSpeedUnit.textContent = phoneDriveUi ? "km/h" : "mph";
 
   if (!position) {
     currentSpeed.textContent = "--";
@@ -4649,7 +4651,8 @@ function updateSpeedAwareness(position) {
   }
 
   const speedMph = calculateSpeedMph(position);
-  currentSpeed.textContent = Number.isFinite(speedMph) ? String(Math.round(speedMph)) : "--";
+  const displaySpeed = phoneDriveUi ? convertMphToKmh(speedMph) : speedMph;
+  currentSpeed.textContent = Number.isFinite(displaySpeed) ? String(Math.round(displaySpeed)) : "--";
 
   if (!speedWarnings.length) {
     speedAwareness.dataset.state = "idle";
@@ -4674,15 +4677,24 @@ function updateSpeedAwareness(position) {
     speedAwareness.dataset.state = "idle";
     speedWarningBadge.textContent = "Monitoring";
     speedWarningTitle.textContent = `Nearest: ${nearest.warning.label}`;
-    speedWarningStatus.textContent = `${formatMeters(nearest.distance)} away · ${Math.round(nearest.warning.speedLimitMph)} mph warning point.`;
+    speedWarningStatus.textContent = `${formatMeters(nearest.distance)} away · ${formatSpeedForUi(nearest.warning.speedLimitMph, phoneDriveUi)} warning point.`;
     return;
   }
 
   speedAwareness.dataset.state = isOverspeed ? "overspeed" : "warning";
   speedWarningBadge.textContent = isOverspeed ? "Slow down" : "Warning ahead";
-  speedWarningTitle.textContent = `${nearest.warning.label} · ${Math.round(nearest.warning.speedLimitMph)} mph`;
-  speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${Math.round(speedMph)} mph` : ""}.`;
+  speedWarningTitle.textContent = `${nearest.warning.label} · ${formatSpeedForUi(nearest.warning.speedLimitMph, phoneDriveUi)}`;
+  speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${formatSpeedForUi(speedMph, phoneDriveUi)}` : ""}.`;
   updateSpeedWarningTick(nearest.warning.id, nearest.distance, Number(nearest.warning.radiusMeters), isOverspeed);
+}
+
+function convertMphToKmh(speedMph) {
+  return Number(speedMph) * 1.609344;
+}
+
+function formatSpeedForUi(speedMph, useKmh = false) {
+  const speed = useKmh ? convertMphToKmh(speedMph) : Number(speedMph);
+  return Number.isFinite(speed) ? `${Math.round(speed)} ${useKmh ? "km/h" : "mph"}` : `-- ${useKmh ? "km/h" : "mph"}`;
 }
 
 function isPhoneDriveUi() {
