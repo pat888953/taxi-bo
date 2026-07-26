@@ -4357,7 +4357,7 @@ function renderRouteRecorder() {
     routeRecorderBadge.textContent = "Ready";
     routeRecorderState.textContent = "Route recording ready for dashcam matching";
     recordingElapsed.textContent = "00:00";
-    recordingDistance.textContent = "0.0 mi";
+    recordingDistance.textContent = formatRecordingDistance(0);
     recordingPointCount.textContent = "0";
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
@@ -4367,7 +4367,7 @@ function renderRouteRecorder() {
   }
 
   recordingElapsed.textContent = formatRecordingDuration(recording.durationSeconds);
-  recordingDistance.textContent = formatDistance(recording.distanceMeters);
+  recordingDistance.textContent = formatRecordingDistance(recording.distanceMeters);
   recordingPointCount.textContent = String(recording.points.length);
 
   if (activeRouteRecording) {
@@ -4686,6 +4686,14 @@ function updateSpeedAwareness(position) {
   speedWarningTitle.textContent = `${nearest.warning.label} · ${formatSpeedForUi(nearest.warning.speedLimitMph, phoneDriveUi)}`;
   speedWarningStatus.textContent = `${formatMeters(nearest.distance)} ahead${isOverspeed ? ` · currently ${formatSpeedForUi(speedMph, phoneDriveUi)}` : ""}.`;
   updateSpeedWarningTick(nearest.warning.id, nearest.distance, Number(nearest.warning.radiusMeters), isOverspeed);
+}
+
+function formatRecordingDistance(meters) {
+  if (isPhoneDriveUi()) {
+    return formatDistanceKilometers(meters);
+  }
+
+  return formatDistance(meters);
 }
 
 function convertMphToKmh(speedMph) {
@@ -5748,6 +5756,15 @@ function formatDistance(meters) {
 
   const miles = meters / 1609.344;
   return `${miles.toFixed(miles >= 10 ? 0 : 1)} mi`;
+}
+
+function formatDistanceKilometers(meters) {
+  if (!Number.isFinite(meters)) {
+    return "";
+  }
+
+  const kilometers = meters / 1000;
+  return `${kilometers.toFixed(kilometers >= 10 ? 0 : 1)} km`;
 }
 
 function formatRouteDuration(seconds) {
