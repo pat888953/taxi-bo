@@ -499,6 +499,12 @@ body[data-cue-ui-mode="drive"] .layout {
   color: var(--text);
 }
 
+.phone-theme-button {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
 .drive-controls-row button:disabled.is-drive-active,
 .drive-controls-row button:disabled.is-drive-standby {
   opacity: 1;
@@ -2624,15 +2630,105 @@ input[type="range"]:focus {
 
   body[data-cue-ui-mode="drive"] .cruise-monitor-button {
     grid-column: 2;
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 2;
     align-self: stretch;
-    min-height: 42px;
+    min-height: 38px;
     padding: 7px 9px;
+    white-space: nowrap;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-theme-button {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: stretch;
+    min-height: 28px;
+    padding: 4px 9px;
     white-space: nowrap;
   }
 
   body[data-cue-ui-mode="drive"] .speed-warning-manager {
     display: none;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] {
+    color: #e4ebe6;
+    background:
+      linear-gradient(90deg, rgba(111, 138, 124, 0.08) 1px, transparent 1px),
+      linear-gradient(180deg, rgba(111, 138, 124, 0.08) 1px, transparent 1px),
+      #050807;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .top-driver-bar,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .rehearse-panel {
+    background: #070b09;
+    color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .speed-awareness,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-recorder {
+    border-color: #2d463a;
+    background: #0c1310;
+    color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-recorder[data-state="recording"] {
+    border-color: #8f5d2e;
+    background: #1c1309;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-recorder[data-state="completed"] {
+    border-color: #426b59;
+    background: #0d1713;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .speed-warning-copy p,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-summary,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .field span,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-entry-group > label,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-entry-group .optional-label {
+    color: #aab9af;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .recording-metrics > div,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-summary,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] input,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] select {
+    border-color: #293a33;
+    background: #101713;
+    color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] input::placeholder {
+    color: #7f8e84;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-entry-toggle,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .via-road-chips button,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .secondary-button {
+    border-color: #31463b;
+    background: #101713;
+    color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .phone-theme-button {
+    border-color: #5b7668;
+    background: #d8e2dc;
+    color: #08100c;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-entry-toggle input:checked + span,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .primary-button,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .drive-controls-row button.is-drive-active,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .speed-warning-copy .cruise-monitor-button.is-drive-active {
+    background: #0e5d42;
+    color: #ecf4ef;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .top-cue-card,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-choice-summary {
+    border-color: #263a31;
+    background: #0d1411;
+    color: #e4ebe6;
   }
 
   body[data-cue-ui-mode="drive"] .route-recorder {

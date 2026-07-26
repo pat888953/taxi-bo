@@ -10,6 +10,7 @@ const PHOTO_STOPS_API = "/api/photo-stops";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
+const TAXIBO_PHONE_THEME_KEY = "taxiBoPhoneTheme";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -45,6 +46,7 @@ const simulationStatus = document.querySelector("#simulationStatus");
 const simulationUpcoming = document.querySelector("#simulationUpcoming");
 const liveDriveStartButton = document.querySelector("#liveDriveStartButton");
 const cruiseMonitorButton = document.querySelector("#cruiseMonitorButton");
+const phoneThemeButton = document.querySelector("#phoneThemeButton");
 const liveDriveSimulateButton = document.querySelector("#liveDriveSimulateButton");
 const liveDriveStopButton = document.querySelector("#liveDriveStopButton");
 const liveDriveStatus = document.querySelector("#liveDriveStatus");
@@ -282,6 +284,23 @@ function shouldAutoStartLiveDriveAfterGo() {
   return getGoStartMode() === "auto" && document.body.dataset.cueUiMode === "drive";
 }
 
+function getPhoneTheme() {
+  return localStorage.getItem(TAXIBO_PHONE_THEME_KEY) === "night" ? "night" : "day";
+}
+
+function setPhoneTheme(theme) {
+  const nextTheme = theme === "night" ? "night" : "day";
+  document.body.dataset.phoneTheme = nextTheme;
+  localStorage.setItem(TAXIBO_PHONE_THEME_KEY, nextTheme);
+
+  if (phoneThemeButton) {
+    const isNight = nextTheme === "night";
+    phoneThemeButton.textContent = isNight ? "Day" : "Night";
+    phoneThemeButton.setAttribute("aria-pressed", String(isNight));
+    phoneThemeButton.setAttribute("aria-label", isNight ? "Switch to day mode" : "Switch to night mode");
+  }
+}
+
 function maybeStartLiveDriveAfterGo() {
   if (!shouldAutoStartLiveDriveAfterGo()) {
     return;
@@ -305,6 +324,10 @@ goStartModeSelect?.addEventListener("change", () => {
   setGoStartMode(goStartModeSelect.value);
 });
 
+phoneThemeButton?.addEventListener("click", () => {
+  setPhoneTheme(getPhoneTheme() === "night" ? "day" : "night");
+});
+
 maintenanceDrawer?.addEventListener("toggle", () => {
   const mode = document.body.dataset.cueUiMode;
   if (mode !== "drive" && !maintenanceDrawer.open) {
@@ -315,6 +338,7 @@ maintenanceDrawer?.addEventListener("toggle", () => {
 setCueUiMode(getDefaultCueUiMode());
 setPhoneDriveScreen("input");
 setGoStartMode(getGoStartMode());
+setPhoneTheme(getPhoneTheme());
 render();
 initializeMap();
 setupInstallPrompt();
