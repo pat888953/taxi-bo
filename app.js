@@ -28,6 +28,8 @@ const goDestinationButton = document.querySelector("#goDestinationButton");
 const goStartModeSelect = document.querySelector("#goStartModeSelect");
 const destinationModeRadio = document.querySelector("#destinationModeRadio");
 const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
+const phoneRouteSourceLabel = document.querySelector("#phoneRouteSourceLabel");
+const phoneRouteSourceButton = document.querySelector("#phoneRouteSourceButton");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
 const viaRoadEntryGroup = document.querySelector("#viaRoadEntryGroup");
 const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
@@ -379,6 +381,18 @@ savedRouteModeRadio.addEventListener("change", () => {
   }
 });
 
+phoneRouteSourceButton?.addEventListener("click", () => {
+  const nextMode = routeEntryMode === "destination" ? "saved" : "destination";
+  setRouteEntryMode(nextMode);
+  preparedRoute = null;
+  if (nextMode === "saved") {
+    displaySelectedRoute();
+  } else {
+    routeSummary.className = "route-summary empty-state";
+    routeSummary.textContent = "Type the passenger destination, add an optional via road, then press GO.";
+  }
+});
+
 reviewRouteButton.addEventListener("click", () => {
   setRouteEntryMode("saved");
   preparedRoute = null;
@@ -464,6 +478,17 @@ function setRouteEntryMode(mode) {
 
   destinationModeRadio.checked = destinationActive;
   savedRouteModeRadio.checked = !destinationActive;
+  if (phoneRouteSourceLabel) {
+    phoneRouteSourceLabel.textContent = destinationActive ? "Source: New" : "Source: Saved";
+  }
+  if (phoneRouteSourceButton) {
+    phoneRouteSourceButton.textContent = destinationActive ? "Saved" : "New";
+    phoneRouteSourceButton.setAttribute("aria-pressed", String(!destinationActive));
+    phoneRouteSourceButton.setAttribute(
+      "aria-label",
+      destinationActive ? "Switch to saved route" : "Switch to new destination"
+    );
+  }
   destinationSearch.disabled = !destinationActive;
   destinationVoiceButton.disabled = !destinationActive;
   viaRoadSearch.disabled = !destinationActive;

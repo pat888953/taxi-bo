@@ -1493,6 +1493,10 @@ body[data-cue-ui-mode="drive"] .layout {
   outline-offset: 2px;
 }
 
+.phone-route-source-compact {
+  display: none;
+}
+
 .route-entry-group {
   transition: opacity 140ms ease;
 }
@@ -2464,9 +2468,36 @@ input[type="range"]:focus {
     align-items: stretch;
   }
 
-  body[data-cue-ui-mode="drive"] .route-entry-toggle span {
-    padding: 10px 8px;
-    font-size: 0.84rem;
+  body[data-cue-ui-mode="drive"] .route-entry-toggle {
+    display: none;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-route-source-compact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+    min-height: 44px;
+    padding: 5px 6px 5px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface-soft);
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-route-source-compact span {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 900;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  body[data-cue-ui-mode="drive"] .phone-route-source-button {
+    min-height: 34px;
+    padding: 6px 10px;
   }
 
   body[data-cue-ui-mode="drive"] .compact-drive-setting {
@@ -2703,11 +2734,16 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-entry-toggle,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .phone-route-source-compact,
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .via-road-chips button,
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .secondary-button {
     border-color: #31463b;
     background: #101713;
     color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .phone-route-source-compact span {
+    color: #aab9af;
   }
 
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .phone-theme-button {
