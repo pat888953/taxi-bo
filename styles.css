@@ -3174,6 +3174,10 @@ input[type="range"]:focus {
   font-weight: 800;
 }
 
+.academy-feedback:empty {
+  display: none;
+}
+
 .academy-feedback.is-correct {
   border-color: rgba(23, 107, 77, 0.45);
   background: #ecf8ef;
@@ -3187,9 +3191,14 @@ input[type="range"]:focus {
 }
 
 .academy-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.academy-actions button {
+  width: 100%;
+  padding-inline: 10px;
 }
 
 .academy-history {
