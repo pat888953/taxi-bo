@@ -563,7 +563,9 @@ def fetch_academy_question():
             "start": question_row["start"],
             "destination": question_row["destination"],
             "step": question_row["step"],
-            "title": question_row["title"],
+            # Cue titles frequently describe the correct maneuver. Keep the
+            # quiz heading neutral so API clients cannot accidentally reveal it.
+            "title": "Street-photo question",
             "image": question_row["image"],
             "imageNeedsReplacement": is_placeholder_photo(question_row["image"]),
             "prompt": "Look at this street photo. What should the taxi driver do here?",

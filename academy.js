@@ -96,12 +96,14 @@ async function loadQuestion() {
 }
 
 function renderQuestion(question) {
-  academyQuestionTitle.textContent = question.title || "Street-photo question";
+  // A saved cue title often contains the maneuver itself, so showing it here
+  // would reveal the correct answer before the driver makes a choice.
+  academyQuestionTitle.textContent = "Street-photo question";
   academyRouteBadge.textContent = `Step ${question.step || "?"}`;
   academyState.textContent = "Choose the best answer, then submit.";
   academyState.className = "form-state empty-state";
   academyPhoto.src = question.image;
-  academyPhoto.alt = question.title || "Street photo question";
+  academyPhoto.alt = `Street photo for Academy step ${question.step || "unknown"}`;
   academyPhotoWrap.classList.toggle("needs-picture", Boolean(question.imageNeedsReplacement));
   academyPhotoNotice.textContent = question.imageNeedsReplacement
     ? "Sample image - click to add real street photo in TaxiBo Cue"
