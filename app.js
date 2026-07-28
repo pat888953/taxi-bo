@@ -491,9 +491,16 @@ viaRoadSearch.addEventListener("input", () => {
   }
 });
 
-destinationSelect.addEventListener("change", () => {
+destinationSelect.addEventListener("change", async () => {
   setRouteEntryMode("saved");
   preparedRoute = null;
+  if (shouldLoadLeanRoutes()) {
+    try {
+      await ensureRouteImages(destinationSelect.value);
+    } catch (error) {
+      setLiveDriveStatus(error.message || "Could not load this route's cue photos.", true);
+    }
+  }
   displaySelectedRoute();
   setPhoneDriveScreen("cue");
 });
@@ -687,9 +694,14 @@ if (simulationResetButton) {
   });
 }
 
-liveDriveStartButton.addEventListener("click", () => {
+liveDriveStartButton.addEventListener("click", async () => {
   armSpeedAudio();
-  startLiveDrive();
+  try {
+    await ensureRouteImages(getActiveRoute());
+    startLiveDrive();
+  } catch (error) {
+    setLiveDriveStatus(error.message || "Could not load this route's cue photos.", true);
+  }
 });
 
 cruiseMonitorButton.addEventListener("click", () => {
@@ -701,9 +713,14 @@ cruiseMonitorButton.addEventListener("click", () => {
   }
 });
 
-liveDriveSimulateButton.addEventListener("click", () => {
+liveDriveSimulateButton.addEventListener("click", async () => {
   armSpeedAudio();
-  startLiveDriveSimulation();
+  try {
+    await ensureRouteImages(getActiveRoute());
+    startLiveDriveSimulation();
+  } catch (error) {
+    setLiveDriveStatus(error.message || "Could not load this route's cue photos.", true);
+  }
 });
 
 addSpeedWarningButton.addEventListener("click", () => {
@@ -993,7 +1010,8 @@ photoCancelEditButton.addEventListener("click", () => {
 
 async function loadRoutes() {
   try {
-    const response = await fetch(ROUTES_API, {
+    const leanRoutes = shouldLoadLeanRoutes();
+    const response = await fetch(`${ROUTES_API}${leanRoutes ? "?images=0" : ""}`, {
       headers: storageHeaders({
         Accept: "application/json",
         "Cache-Control": "no-store"
@@ -1006,7 +1024,13 @@ async function loadRoutes() {
     }
 
     const savedRoutes = await response.json();
-    routes = Array.isArray(savedRoutes) ? savedRoutes.map(normalizeImportedRoute) : [];
+    routes = Array.isArray(savedRoutes)
+      ? savedRoutes.map((route) => {
+          const normalizedRoute = normalizeImportedRoute(route);
+          normalizedRoute.imagesLoaded = !leanRoutes;
+          return normalizedRoute;
+        })
+      : [];
     render();
     if (!acceptedTripContext) {
       setRouteEntryMode("destination");
@@ -1028,9 +1052,43 @@ async function loadRoutes() {
       Then open <code>http://127.0.0.1:8020/index.html</code>.
     `;
     updateDataFileStatus(error.message || "The route database is not available.", true);
-    updatePhotoRouteStatus("Could not load routes from SQLite.", true);
-    updateRouteLibraryStatus("Could not load routes from SQLite. Make sure you opened the app from server.py, not a static file server.", true);
+    updatePhotoRouteStatus("Could not load routes from the database.", true);
+    updateRouteLibraryStatus("Could not load routes from the database. The cloud may be slow or the phone connection may be weak.", true);
   }
+}
+
+function shouldLoadLeanRoutes() {
+  return document.body.dataset.cueUiMode === "drive" && window.matchMedia("(max-width: 720px)").matches;
+}
+
+async function ensureRouteImages(routeOrId) {
+  const routeId = typeof routeOrId === "string" ? routeOrId : routeOrId?.id;
+  const route = routes.find((item) => item.id === routeId);
+
+  if (!route || route.imagesLoaded || route.id.startsWith("prepared-")) {
+    return route;
+  }
+
+  const response = await fetch(`${ROUTES_API}/${encodeURIComponent(route.id)}`, {
+    headers: storageHeaders({
+      Accept: "application/json",
+      "Cache-Control": "no-store"
+    }),
+    cache: "no-store"
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok || !result.route) {
+    throw new Error(result.error || "Could not load this route's cue photos.");
+  }
+
+  const fullRoute = normalizeImportedRoute(result.route);
+  fullRoute.imagesLoaded = true;
+  const routeIndex = routes.findIndex((item) => item.id === route.id);
+  if (routeIndex >= 0) {
+    routes[routeIndex] = fullRoute;
+  }
+  return fullRoute;
 }
 
 async function saveRoutes() {

@@ -10,7 +10,7 @@ import re
 import sys
 import sqlite3
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -288,24 +288,32 @@ def ensure_incoming_order_columns(db):
             db.execute(f"ALTER TABLE incoming_orders ADD COLUMN {name} {definition}")
 
 
-def fetch_routes():
+def fetch_routes(include_images=True, route_id=None):
     with connect_db() as db:
+        route_filter = "WHERE id = ?" if route_id else ""
+        route_params = (route_id,) if route_id else ()
         route_rows = db.execute(
-            """
+            f"""
             SELECT
               id, name, variant, start, via, destination, time_window, traffic_pattern, notes,
               start_latitude, start_longitude, destination_latitude, destination_longitude,
               route_geometry, recorded_track_points, route_distance_meters, route_duration_seconds
             FROM routes
+            {route_filter}
             ORDER BY position ASC, updated_at DESC
-            """
+            """,
+            route_params,
         ).fetchall()
+        photo_filter = "WHERE route_id = ?" if route_id else ""
+        photo_params = (route_id,) if route_id else ()
         photo_rows = db.execute(
-            """
+            f"""
             SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
             FROM photo_stops
+            {photo_filter}
             ORDER BY step ASC, created_at ASC
-            """
+            """,
+            photo_params,
         ).fetchall()
 
     photos_by_route = {}
@@ -317,7 +325,7 @@ def fetch_routes():
                 "title": photo["title"],
                 "instruction": photo["instruction"],
                 "notes": photo["notes"],
-                "image": photo["image"],
+                "image": photo["image"] if include_images else "",
                 "latitude": photo["latitude"],
                 "longitude": photo["longitude"],
             }
@@ -348,8 +356,17 @@ def fetch_routes():
     ]
 
 
+def fetch_route(route_id):
+    routes = fetch_routes(include_images=True, route_id=route_id)
+    return routes[0] if routes else None
+
+
 def replace_routes(routes):
     with connect_db() as db:
+        existing_photo_images = {
+            row["id"]: row["image"]
+            for row in db.execute("SELECT id, image FROM photo_stops").fetchall()
+        }
         db.execute("DELETE FROM photo_stops")
         db.execute("DELETE FROM routes")
 
@@ -387,6 +404,11 @@ def replace_routes(routes):
             )
 
             for photo in route.get("photos", []):
+                photo_id = photo.get("id", "")
+                photo_image = photo.get("image", "")
+                if photo_id in existing_photo_images and is_placeholder_photo(photo_image):
+                    photo_image = existing_photo_images[photo_id]
+
                 db.execute(
                     """
                     INSERT INTO photo_stops (
@@ -396,13 +418,13 @@ def replace_routes(routes):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """,
                     (
-                        photo.get("id", ""),
+                        photo_id,
                         route.get("id", ""),
                         int(photo.get("step") or 1),
                         photo.get("title", "Untitled stop"),
                         photo.get("instruction", ""),
                         photo.get("notes", ""),
-                        photo.get("image", ""),
+                        photo_image,
                         photo.get("latitude"),
                         photo.get("longitude"),
                     ),
@@ -2002,7 +2024,21 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/routes":
-            self.send_json(fetch_routes())
+            query = parse_qs(urlparse(self.path).query)
+            include_images = query.get("images", ["1"])[0] != "0"
+            self.send_json(fetch_routes(include_images=include_images))
+            return
+
+        if path.startswith("/api/routes/"):
+            route_id = unquote(path[len("/api/routes/"):]).strip()
+            if not route_id or "/" in route_id:
+                self.send_json({"ok": False, "error": "A valid route ID is required."}, status=400)
+                return
+            route = fetch_route(route_id)
+            if not route:
+                self.send_json({"ok": False, "error": "Route not found."}, status=404)
+                return
+            self.send_json({"ok": True, "route": route})
             return
 
         if path == "/api/incoming-order":
