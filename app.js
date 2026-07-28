@@ -137,6 +137,7 @@ const routeLibraryFilter = document.querySelector("#routeLibraryFilter");
 const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryButton");
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
+const cueApproachBar = document.querySelector("#cueApproachBar");
 const cueModeButtons = document.querySelectorAll("[data-cue-mode]");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
 const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
@@ -5429,6 +5430,7 @@ function renderLiveDrive(route = getActiveRoute()) {
   liveDriveUpcoming.innerHTML = "";
 
   if (!route) {
+    renderCueApproachGauge();
     setLiveDriveStatus("Choose a route with cue coordinates, then start live drive.");
     return;
   }
@@ -5436,11 +5438,13 @@ function renderLiveDrive(route = getActiveRoute()) {
   const locatedCues = getLocatedCues(route);
 
   if (!locatedCues.length) {
+    renderCueApproachGauge();
     setLiveDriveStatus("This route has no cue coordinates yet. Generate cues or add cue locations first.");
     return;
   }
 
   if (!liveDrivePosition) {
+    renderCueApproachGauge(locatedCues[0]);
     setLiveDriveStatus("Live drive is ready. Start GPS tracking to show the next three cues.");
     renderCuePreviewCards(locatedCues);
     renderPhotoCards(locatedCues.slice(0, 3), liveDriveUpcoming, (photo, index) => `Upcoming ${index + 1} - Step ${photo.step}`);
@@ -5456,6 +5460,7 @@ function renderLiveDrive(route = getActiveRoute()) {
   const mapFollowStatus = mapFollowError ? ` Map follow unavailable: ${mapFollowError}` : "";
 
   if (!upcoming.length) {
+    renderCueApproachGauge();
     setLiveDriveStatus(`You appear to be beyond the last saved cue.${accuracy}${mapFollowStatus}`);
     renderCuePreviewCards([]);
     liveDriveUpcoming.innerHTML = `<div class="route-summary empty-state">No more upcoming cues on this route.</div>`;
@@ -5469,8 +5474,65 @@ function renderLiveDrive(route = getActiveRoute()) {
     speakCueText(buildCueSpeechText(nearest));
   }
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
+  renderCueApproachGauge(nearest, distance);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
+}
+
+function renderCueApproachGauge(cue = null, distanceMeters = null) {
+  if (!cueApproachBar) {
+    return;
+  }
+
+  if (!cue) {
+    cueApproachBar.hidden = true;
+    cueApproachBar.innerHTML = "";
+    cueApproachBar.dataset.state = "idle";
+    return;
+  }
+
+  const distance = Number(distanceMeters);
+  const hasDistance = Number.isFinite(distance);
+  const maxDistance = 500;
+  const blockCount = 14;
+  const closeness = hasDistance
+    ? 1 - Math.min(1, Math.max(0, distance) / maxDistance)
+    : 0;
+  const filledBlocks = hasDistance
+    ? Math.max(1, Math.min(blockCount, Math.ceil(closeness * blockCount)))
+    : 0;
+  const state = !hasDistance
+    ? "waiting"
+    : distance <= 40
+      ? "now"
+      : distance <= 120
+        ? "ready"
+        : "coming";
+  const stateText = state === "waiting"
+    ? "Waiting for GPS"
+    : state === "now"
+      ? "NOW"
+      : state === "ready"
+        ? "Get ready"
+        : "Coming up";
+  const distanceText = hasDistance ? `${formatMeters(distance)} to cue` : "Start Drive or Brief";
+  const blocks = Array.from({ length: blockCount }, (_, index) =>
+    `<span class="${index < filledBlocks ? "is-filled" : ""}" aria-hidden="true"></span>`
+  ).join("");
+
+  cueApproachBar.hidden = false;
+  cueApproachBar.dataset.state = state;
+  cueApproachBar.innerHTML = `
+    <div class="cue-approach-copy">
+      <span>Approaching photo cue</span>
+      <strong>${escapeHtml(cue.title || `Step ${cue.step}`)}</strong>
+    </div>
+    <div class="cue-approach-meter" aria-label="${escapeHtml(`${stateText}, ${distanceText}`)}">${blocks}</div>
+    <div class="cue-approach-distance">
+      <strong>${escapeHtml(stateText)}</strong>
+      <span>${escapeHtml(distanceText)}</span>
+    </div>
+  `;
 }
 
 function buildCueSpeechText(cue) {

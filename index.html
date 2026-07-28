@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=133">
+  <link rel="stylesheet" href="styles.css?v=134">
 </head>
 <body>
   <div class="page-shell">
@@ -118,6 +118,7 @@
           </div>
         </section>
         <div id="liveDriveStatus" class="form-state empty-state">Choose a route with cue coordinates, then start live drive.</div>
+        <div id="cueApproachBar" class="cue-approach-bar" hidden aria-live="polite"></div>
         <div id="topCuePreview" class="top-cue-preview"></div>
       </section>
 
@@ -574,7 +575,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=133"></script>
+  <script src="app.js?v=134"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
