@@ -896,6 +896,64 @@ body[data-cue-ui-mode="drive"] .layout {
   background: linear-gradient(180deg, #2a6eaa 0%, #b84531 100%);
 }
 
+.trip-progress-bar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(180px, 1.35fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f7faf8;
+  color: var(--text);
+}
+
+.trip-progress-bar[hidden] {
+  display: none;
+}
+
+.trip-progress-copy,
+.trip-progress-distance {
+  min-width: 0;
+}
+
+.trip-progress-copy span,
+.trip-progress-distance span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trip-progress-copy strong,
+.trip-progress-distance strong {
+  display: block;
+  overflow: hidden;
+  font-size: 0.95rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trip-progress-meter {
+  overflow: hidden;
+  height: 14px;
+  border: 1px solid #bfd0c5;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 18px, rgba(93, 112, 101, 0.18) 18px 20px),
+    #e8f0eb;
+}
+
+.trip-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #2f8d6a);
+  transition: width 180ms ease;
+}
+
 .top-cue-preview {
   display: grid !important;
   grid-template-columns: none !important;
@@ -2639,6 +2697,7 @@ input[type="range"]:focus {
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .drive-controls-row,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] #liveDriveStatus,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .cue-approach-bar,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .trip-progress-bar,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="recording"] .top-cue-preview {
     display: none !important;
   }
@@ -2646,6 +2705,7 @@ input[type="range"]:focus {
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .cue-preview-header,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .drive-controls-row,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .cue-approach-bar,
+  body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .trip-progress-bar,
   body[data-cue-ui-mode="drive"][data-phone-drive-screen="input"] .top-cue-preview {
     display: none !important;
   }
@@ -2843,10 +2903,18 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .top-cue-card,
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .trip-progress-bar,
   body[data-cue-ui-mode="drive"][data-phone-theme="night"] .route-choice-summary {
     border-color: #263a31;
     background: #0d1411;
     color: #e4ebe6;
+  }
+
+  body[data-cue-ui-mode="drive"][data-phone-theme="night"] .trip-progress-meter {
+    border-color: #31463b;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 18px, rgba(216, 226, 220, 0.16) 18px 20px),
+      #111f18;
   }
 
   body[data-cue-ui-mode="drive"] .route-recorder {
@@ -2952,6 +3020,22 @@ input[type="range"]:focus {
   }
 
   body[data-cue-ui-mode="drive"] .cue-approach-distance span {
+    text-align: right;
+  }
+
+  body[data-cue-ui-mode="drive"] .trip-progress-bar {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] .trip-progress-distance {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  body[data-cue-ui-mode="drive"] .trip-progress-distance span {
     text-align: right;
   }
 

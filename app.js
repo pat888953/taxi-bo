@@ -138,6 +138,7 @@ const refreshRouteLibraryButton = document.querySelector("#refreshRouteLibraryBu
 const routeLibraryStatus = document.querySelector("#routeLibraryStatus");
 const topCuePreview = document.querySelector("#topCuePreview");
 const cueApproachBar = document.querySelector("#cueApproachBar");
+const tripProgressBar = document.querySelector("#tripProgressBar");
 const cueModeButtons = document.querySelectorAll("[data-cue-mode]");
 const photoCardTemplate = document.querySelector("#photoCardTemplate");
 const cueCaptureDialog = document.querySelector("#cueCaptureDialog");
@@ -5503,6 +5504,7 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   if (!route) {
     renderCueApproachGauge();
+    renderTripProgressBar();
     setLiveDriveStatus("Choose a route with cue coordinates, then start live drive.");
     return;
   }
@@ -5511,12 +5513,14 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   if (!locatedCues.length) {
     renderCueApproachGauge();
+    renderTripProgressBar();
     setLiveDriveStatus("This route has no cue coordinates yet. Generate cues or add cue locations first.");
     return;
   }
 
   if (!liveDrivePosition) {
     renderCueApproachGauge(locatedCues[0]);
+    renderTripProgressBar(route);
     setLiveDriveStatus("Live drive is ready. Start GPS tracking to show the next three cues.");
     renderCuePreviewCards(locatedCues);
     renderPhotoCards(locatedCues.slice(0, 3), liveDriveUpcoming, (photo, index) => `Upcoming ${index + 1} - Step ${photo.step}`);
@@ -5534,6 +5538,7 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   if (!upcoming.length) {
     renderCueApproachGauge();
+    renderTripProgressBar(route, currentLatLng);
     setLiveDriveStatus(`You appear to be beyond the last saved cue.${accuracy}${mapFollowStatus}`);
     renderCuePreviewCards([]);
     liveDriveUpcoming.innerHTML = `<div class="route-summary empty-state">No more upcoming cues on this route.</div>`;
@@ -5545,6 +5550,7 @@ function renderLiveDrive(route = getActiveRoute()) {
   const distance = nearestItem.distance;
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCueApproachGauge(nearest, distance);
+  renderTripProgressBar(route, currentLatLng);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
   queueLiveCueSpeech(nearest, distance);
@@ -5626,6 +5632,63 @@ function renderCueApproachGauge(cue = null, distanceMeters = null) {
       <span>${escapeHtml(distanceText)}</span>
     </div>
   `;
+}
+
+function renderTripProgressBar(route = null, currentLatLng = null) {
+  if (!tripProgressBar) {
+    return;
+  }
+
+  const routeGeometry = normalizeRouteGeometry(route?.routeGeometry);
+
+  if (!route || routeGeometry.length < 2) {
+    hideTripProgressBar();
+    return;
+  }
+
+  const routeMeasure = buildRouteMeasure(routeGeometry);
+  const totalDistance = routeMeasure.cumulative[routeMeasure.cumulative.length - 1] || 0;
+
+  if (!Number.isFinite(totalDistance) || totalDistance <= 0) {
+    hideTripProgressBar();
+    return;
+  }
+
+  const hasPosition = Array.isArray(currentLatLng) &&
+    currentLatLng.length === 2 &&
+    currentLatLng.every((value) => Number.isFinite(value));
+  const projected = hasPosition ? projectPointOntoRoute(currentLatLng, routeMeasure) : null;
+  const progress = projected
+    ? Math.max(0, Math.min(totalDistance, projected.progress))
+    : 0;
+  const remaining = Math.max(0, totalDistance - progress);
+  const percent = Math.max(0, Math.min(100, Math.round((progress / totalDistance) * 100)));
+  const statusText = hasPosition ? `${percent}% complete` : "Waiting for GPS";
+  const remainingText = hasPosition ? `${formatMeters(remaining)} left` : `${formatMeters(totalDistance)} total`;
+
+  tripProgressBar.hidden = false;
+  tripProgressBar.innerHTML = `
+    <div class="trip-progress-copy">
+      <span>Trip progress</span>
+      <strong>${escapeHtml(statusText)}</strong>
+    </div>
+    <div class="trip-progress-meter" aria-label="${escapeHtml(`${statusText}, ${remainingText}`)}">
+      <div class="trip-progress-fill" style="width: ${percent}%"></div>
+    </div>
+    <div class="trip-progress-distance">
+      <strong>${escapeHtml(remainingText)}</strong>
+      <span>${escapeHtml(formatMeters(totalDistance))} route</span>
+    </div>
+  `;
+}
+
+function hideTripProgressBar() {
+  if (!tripProgressBar) {
+    return;
+  }
+
+  tripProgressBar.hidden = true;
+  tripProgressBar.innerHTML = "";
 }
 
 function buildCueSpeechText(cue) {
