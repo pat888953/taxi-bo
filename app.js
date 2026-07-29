@@ -5524,7 +5524,8 @@ function renderLiveDrive(route = getActiveRoute()) {
   }
 
   const currentLatLng = [liveDrivePosition.coords.latitude, liveDrivePosition.coords.longitude];
-  const upcoming = getUpcomingCuesForPosition(route, currentLatLng);
+  const upcomingItems = getUpcomingCueItemsForPosition(route, currentLatLng);
+  const upcoming = upcomingItems.map((item) => item.cue);
   const mapFollowError = updateLiveDriveMap(currentLatLng, liveDrivePosition.coords.accuracy, upcoming[0]);
   const accuracy = Number.isFinite(liveDrivePosition.coords.accuracy)
     ? ` GPS accuracy ${Math.round(liveDrivePosition.coords.accuracy)} m.`
@@ -5539,8 +5540,9 @@ function renderLiveDrive(route = getActiveRoute()) {
     return;
   }
 
-  const nearest = upcoming[0];
-  const distance = haversineDistance(currentLatLng, [nearest.latitude, nearest.longitude]);
+  const nearestItem = upcomingItems[0];
+  const nearest = nearestItem.cue;
+  const distance = nearestItem.distance;
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCueApproachGauge(nearest, distance);
   renderCuePreviewCards(upcoming);
@@ -5904,6 +5906,10 @@ function getLocatedCues(route) {
 }
 
 function getUpcomingCuesForPosition(route, currentLatLng) {
+  return getUpcomingCueItemsForPosition(route, currentLatLng).map((item) => item.cue);
+}
+
+function getUpcomingCueItemsForPosition(route, currentLatLng) {
   const locatedCues = getLocatedCues(route);
   const routeGeometry = normalizeRouteGeometry(route.routeGeometry);
 
@@ -5914,21 +5920,25 @@ function getUpcomingCuesForPosition(route, currentLatLng) {
         distance: haversineDistance(currentLatLng, [cue.latitude, cue.longitude])
       }))
       .sort((a, b) => a.distance - b.distance)
-      .slice(0, 3)
-      .map((item) => item.cue);
+      .slice(0, 3);
   }
 
   const routeMeasure = buildRouteMeasure(routeGeometry);
   const currentProgress = projectPointOntoRoute(currentLatLng, routeMeasure).progress;
 
   return locatedCues
-    .map((cue) => ({
-      cue,
-      progress: projectPointOntoRoute([cue.latitude, cue.longitude], routeMeasure).progress
-    }))
-    .filter((item) => item.progress >= currentProgress - 35)
+    .map((cue) => {
+      const cueProgress = projectPointOntoRoute([cue.latitude, cue.longitude], routeMeasure).progress;
+      const distance = cueProgress - currentProgress;
+      return {
+        cue,
+        progress: cueProgress,
+        distance: Math.max(0, distance)
+      };
+    })
+    .filter((item) => item.progress >= currentProgress - 20)
     .sort((a, b) => a.progress - b.progress)
-    .map((item) => item.cue);
+    .slice(0, 3);
 }
 
 function buildRouteMeasure(points) {
