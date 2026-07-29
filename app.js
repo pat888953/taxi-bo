@@ -1914,8 +1914,28 @@ function renderRouteList() {
   routeList.innerHTML = "";
 
   if (!routes.length) {
-    routeList.innerHTML = `<div class="route-summary empty-state">No routes saved yet.</div>`;
-    updateRouteLibraryStatus("No routes in SQLite yet. Generate and save a route above.");
+    const isLocalStorage = getTaxiBoStorageMode() === "local";
+    routeList.innerHTML = `
+      <div class="route-summary empty-state">
+        <strong>${isLocalStorage ? "No routes in local SQLite." : "No cloud routes saved yet."}</strong>
+        ${isLocalStorage ? `
+          <p>This Maintenance screen is currently using the empty in-house database.</p>
+          <button id="loadCloudRoutesButton" class="primary-button small-button" type="button">Load cloud routes</button>
+        ` : ""}
+      </div>
+    `;
+    if (isLocalStorage) {
+      document.querySelector("#loadCloudRoutesButton")?.addEventListener("click", async () => {
+        localStorage.setItem(TAXIBO_STORAGE_MODE_KEY, "cloud");
+        updateRouteLibraryStatus("Loading saved routes from the cloud database...");
+        await loadRoutes();
+      });
+    }
+    updateRouteLibraryStatus(
+      isLocalStorage
+        ? "Local SQLite has 0 routes. Load cloud routes to select routes saved in PostgreSQL."
+        : "The cloud database has no saved routes yet."
+    );
     return;
   }
 
@@ -1968,11 +1988,19 @@ function renderRouteList() {
     `;
 
     article.querySelector(".route-review-button").addEventListener("click", () => {
+      setCueUiMode("testing");
       setRouteEntryMode("saved");
       preparedRoute = null;
       destinationSearch.value = "";
       destinationSelect.value = route.id;
       displayRoute(route);
+      window.requestAnimationFrame(() => {
+        map?.invalidateSize();
+        document.querySelector(".rehearse-panel")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+      });
     });
 
     article.querySelector(".route-edit-button").addEventListener("click", () => {
