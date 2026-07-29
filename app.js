@@ -227,6 +227,7 @@ let lastSpeedAlert = { id: "", at: 0, overspeed: false };
 let speedTickTimeoutId = null;
 let activeSpeedTick = null;
 let lastSpokenCueId = "";
+let pendingLiveCueSpeechTimeoutId = null;
 let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
@@ -5249,6 +5250,8 @@ async function startLiveDrive() {
 
   stopLiveDrive(false);
   liveDrivePosition = null;
+  lastSpokenCueId = "";
+  clearPendingLiveCueSpeech();
   renderLiveDrive(route);
   setLiveDriveStatus("Requesting location permission. Allow location access to start live drive mode.");
   liveDriveStartButton.disabled = true;
@@ -5326,6 +5329,7 @@ function stopLiveDrive(updateStatus = true) {
   if (updateStatus) {
     liveDrivePosition = null;
     lastSpokenCueId = "";
+    clearPendingLiveCueSpeech();
     window.speechSynthesis?.cancel();
     updateSpeedAwareness(null);
     liveDriveUpcoming.innerHTML = "";
@@ -5365,6 +5369,8 @@ function startLiveDriveSimulation() {
   stopLiveDrive(false);
   stopSpeedMonitoring(false);
   liveDriveSimulationIndex = 0;
+  lastSpokenCueId = "";
+  clearPendingLiveCueSpeech();
   isLiveDriveSimulationRunning = true;
   liveDriveStartButton.disabled = true;
   cruiseMonitorButton.disabled = true;
@@ -5407,6 +5413,7 @@ function stopLiveDriveSimulation(clearPosition = true) {
     liveDriveSimulationId = null;
   }
 
+  clearPendingLiveCueSpeech();
   liveDriveSimulationIndex = 0;
   isLiveDriveSimulationRunning = false;
 
@@ -5484,6 +5491,13 @@ function clearLiveDriveTimeout() {
   }
 }
 
+function clearPendingLiveCueSpeech() {
+  if (pendingLiveCueSpeechTimeoutId !== null) {
+    window.clearTimeout(pendingLiveCueSpeechTimeoutId);
+    pendingLiveCueSpeechTimeoutId = null;
+  }
+}
+
 function renderLiveDrive(route = getActiveRoute()) {
   liveDriveUpcoming.innerHTML = "";
 
@@ -5527,14 +5541,33 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   const nearest = upcoming[0];
   const distance = haversineDistance(currentLatLng, [nearest.latitude, nearest.longitude]);
-  if (distance <= 500 && lastSpokenCueId !== nearest.id) {
-    lastSpokenCueId = nearest.id;
-    speakCueText(buildCueSpeechText(nearest));
-  }
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCueApproachGauge(nearest, distance);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
+  queueLiveCueSpeech(nearest, distance);
+}
+
+function queueLiveCueSpeech(cue, distanceMeters) {
+  if (!cue?.id || !Number.isFinite(distanceMeters) || distanceMeters > 500 || lastSpokenCueId === cue.id) {
+    return;
+  }
+
+  if (pendingLiveCueSpeechTimeoutId !== null) {
+    window.clearTimeout(pendingLiveCueSpeechTimeoutId);
+    pendingLiveCueSpeechTimeoutId = null;
+  }
+
+  lastSpokenCueId = cue.id;
+  pendingLiveCueSpeechTimeoutId = window.setTimeout(() => {
+    pendingLiveCueSpeechTimeoutId = null;
+    const currentRoute = getActiveRoute();
+    const currentCue = currentRoute?.photos?.find((photo) => photo.id === cue.id);
+    if (!currentCue) {
+      return;
+    }
+    speakCueText(buildCueSpeechText(currentCue), true);
+  }, 120);
 }
 
 function renderCueApproachGauge(cue = null, distanceMeters = null) {
@@ -5627,6 +5660,9 @@ function speakCueText(textValue, force = false) {
 
   if (force) {
     window.speechSynthesis.cancel();
+  }
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
   }
 
   const utterance = new SpeechSynthesisUtterance(text);
