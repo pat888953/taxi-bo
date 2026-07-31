@@ -229,6 +229,8 @@ let speedTickTimeoutId = null;
 let activeSpeedTick = null;
 let lastSpokenCueId = "";
 let pendingLiveCueSpeechTimeoutId = null;
+let liveDriveProgressRouteId = "";
+let liveDriveRouteProgress = null;
 let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
@@ -3292,6 +3294,7 @@ function selectRecordedRouteMatch(routeId, automatic = false) {
 
   pendingRouteChoices = [];
   preparedRoute = null;
+  resetLiveDriveRouteProgress();
   setRouteEntryMode("saved");
   destinationSelect.value = route.id;
 
@@ -3342,6 +3345,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     photos: createPreparedCues(generatedRoute.cues || [])
   });
 
+  resetLiveDriveRouteProgress();
   displayRoute(preparedRoute);
   routeSummary.className = "route-summary";
   routeSummary.innerHTML = `
@@ -5280,6 +5284,7 @@ async function startLiveDrive() {
   stopLiveDrive(false);
   liveDrivePosition = null;
   lastSpokenCueId = "";
+  resetLiveDriveRouteProgress();
   clearPendingLiveCueSpeech();
   renderLiveDrive(route);
   setLiveDriveStatus("Requesting location permission. Allow location access to start live drive mode.");
@@ -5358,6 +5363,7 @@ function stopLiveDrive(updateStatus = true) {
   if (updateStatus) {
     liveDrivePosition = null;
     lastSpokenCueId = "";
+    resetLiveDriveRouteProgress();
     clearPendingLiveCueSpeech();
     window.speechSynthesis?.cancel();
     updateSpeedAwareness(null);
@@ -5399,6 +5405,7 @@ function startLiveDriveSimulation() {
   stopSpeedMonitoring(false);
   liveDriveSimulationIndex = 0;
   lastSpokenCueId = "";
+  resetLiveDriveRouteProgress();
   clearPendingLiveCueSpeech();
   isLiveDriveSimulationRunning = true;
   liveDriveStartButton.disabled = true;
@@ -5492,6 +5499,16 @@ function handleLivePosition(position, route) {
 
 function handleLiveError(error) {
   clearLiveDriveTimeout();
+  const isTemporaryGpsLoss = error?.code === 2 || error?.code === 3;
+  if (isTemporaryGpsLoss && liveDriveWatchId !== null) {
+    const lastCueText = liveDrivePosition
+      ? "Keeping the last route cue until GPS comes back."
+      : "Waiting for the first reliable GPS point.";
+    setLiveDriveStatus(`GPS signal temporarily lost, possibly inside a tunnel. ${lastCueText}`, true);
+    renderLiveDrive(getActiveRoute());
+    return;
+  }
+
   const message = error?.code === 1
     ? "Location permission was denied. Allow location access in the browser to use live drive mode."
     : error?.code === 2
@@ -5556,7 +5573,8 @@ function renderLiveDrive(route = getActiveRoute()) {
   }
 
   const currentLatLng = [liveDrivePosition.coords.latitude, liveDrivePosition.coords.longitude];
-  const upcomingItems = getUpcomingCueItemsForPosition(route, currentLatLng);
+  const routeProgress = updateLiveDriveRouteProgress(route, currentLatLng);
+  const upcomingItems = getUpcomingCueItemsForPosition(route, currentLatLng, routeProgress);
   const upcoming = upcomingItems.map((item) => item.cue);
   const mapFollowError = updateLiveDriveMap(currentLatLng, liveDrivePosition.coords.accuracy, upcoming[0]);
   const accuracy = Number.isFinite(liveDrivePosition.coords.accuracy)
@@ -5566,7 +5584,7 @@ function renderLiveDrive(route = getActiveRoute()) {
 
   if (!upcoming.length) {
     renderCueApproachGauge();
-    renderTripProgressBar(route, currentLatLng);
+    renderTripProgressBar(route, currentLatLng, routeProgress);
     setLiveDriveStatus(`You appear to be beyond the last saved cue.${accuracy}${mapFollowStatus}`);
     renderCuePreviewCards([]);
     liveDriveUpcoming.innerHTML = `<div class="route-summary empty-state">No more upcoming cues on this route.</div>`;
@@ -5578,7 +5596,7 @@ function renderLiveDrive(route = getActiveRoute()) {
   const distance = nearestItem.distance;
   setLiveDriveStatus(`Live drive running. Next cue: step ${nearest.step}, about ${formatMeters(distance)} away.${accuracy}${mapFollowStatus}`);
   renderCueApproachGauge(nearest, distance);
-  renderTripProgressBar(route, currentLatLng);
+  renderTripProgressBar(route, currentLatLng, routeProgress);
   renderCuePreviewCards(upcoming);
   renderPhotoCards(upcoming.slice(0, 3), liveDriveUpcoming, (photo, index) => `Live next ${index + 1} - Step ${photo.step}`);
   queueLiveCueSpeech(nearest, distance);
@@ -5662,7 +5680,7 @@ function renderCueApproachGauge(cue = null, distanceMeters = null) {
   `;
 }
 
-function renderTripProgressBar(route = null, currentLatLng = null) {
+function renderTripProgressBar(route = null, currentLatLng = null, progressInfo = null) {
   if (!tripProgressBar) {
     return;
   }
@@ -5674,8 +5692,8 @@ function renderTripProgressBar(route = null, currentLatLng = null) {
     return;
   }
 
-  const routeMeasure = buildRouteMeasure(routeGeometry);
-  const totalDistance = routeMeasure.cumulative[routeMeasure.cumulative.length - 1] || 0;
+  const routeMeasure = progressInfo?.routeMeasure || buildRouteMeasure(routeGeometry);
+  const totalDistance = progressInfo?.totalDistance || routeMeasure.cumulative[routeMeasure.cumulative.length - 1] || 0;
 
   if (!Number.isFinite(totalDistance) || totalDistance <= 0) {
     hideTripProgressBar();
@@ -5685,9 +5703,9 @@ function renderTripProgressBar(route = null, currentLatLng = null) {
   const hasPosition = Array.isArray(currentLatLng) &&
     currentLatLng.length === 2 &&
     currentLatLng.every((value) => Number.isFinite(value));
-  const projected = hasPosition ? projectPointOntoRoute(currentLatLng, routeMeasure) : null;
+  const projected = hasPosition ? (progressInfo?.projected || projectPointOntoRoute(currentLatLng, routeMeasure)) : null;
   const progress = projected
-    ? Math.max(0, Math.min(totalDistance, projected.progress))
+    ? Math.max(0, Math.min(totalDistance, progressInfo?.progress ?? projected.progress))
     : 0;
   const remaining = Math.max(0, totalDistance - progress);
   const percent = Math.max(0, Math.min(100, Math.round((progress / totalDistance) * 100)));
@@ -5708,6 +5726,56 @@ function renderTripProgressBar(route = null, currentLatLng = null) {
       <span>${escapeHtml(formatMeters(totalDistance))} route</span>
     </div>
   `;
+}
+
+function resetLiveDriveRouteProgress() {
+  liveDriveProgressRouteId = "";
+  liveDriveRouteProgress = null;
+}
+
+function updateLiveDriveRouteProgress(route, currentLatLng) {
+  const routeGeometry = normalizeRouteGeometry(route?.routeGeometry);
+
+  if (!route || routeGeometry.length < 2) {
+    resetLiveDriveRouteProgress();
+    return null;
+  }
+
+  const routeMeasure = buildRouteMeasure(routeGeometry);
+  const totalDistance = routeMeasure.cumulative[routeMeasure.cumulative.length - 1] || 0;
+
+  if (!Number.isFinite(totalDistance) || totalDistance <= 0) {
+    resetLiveDriveRouteProgress();
+    return null;
+  }
+
+  if (liveDriveProgressRouteId !== route.id) {
+    const projected = projectPointOntoRoute(currentLatLng, routeMeasure);
+    const rawProgress = Math.max(0, Math.min(totalDistance, projected.progress));
+    liveDriveProgressRouteId = route.id;
+    liveDriveRouteProgress = rawProgress;
+    return {
+      projected,
+      routeMeasure,
+      totalDistance,
+      progress: liveDriveRouteProgress
+    };
+  } else {
+    const projected = projectPointOntoRouteAfterProgress(
+      currentLatLng,
+      routeMeasure,
+      Math.max(0, (liveDriveRouteProgress ?? 0) - 50)
+    );
+    const rawProgress = Math.max(0, Math.min(totalDistance, projected.progress));
+    liveDriveRouteProgress = Math.max(liveDriveRouteProgress ?? 0, rawProgress);
+
+    return {
+      projected,
+      routeMeasure,
+      totalDistance,
+      progress: liveDriveRouteProgress
+    };
+  }
 }
 
 function hideTripProgressBar() {
@@ -6000,7 +6068,7 @@ function getUpcomingCuesForPosition(route, currentLatLng) {
   return getUpcomingCueItemsForPosition(route, currentLatLng).map((item) => item.cue);
 }
 
-function getUpcomingCueItemsForPosition(route, currentLatLng) {
+function getUpcomingCueItemsForPosition(route, currentLatLng, progressInfo = null) {
   const locatedCues = getLocatedCues(route);
   const routeGeometry = normalizeRouteGeometry(route.routeGeometry);
 
@@ -6014,8 +6082,10 @@ function getUpcomingCueItemsForPosition(route, currentLatLng) {
       .slice(0, 3);
   }
 
-  const routeMeasure = buildRouteMeasure(routeGeometry);
-  const currentProgress = projectPointOntoRoute(currentLatLng, routeMeasure).progress;
+  const routeMeasure = progressInfo?.routeMeasure || buildRouteMeasure(routeGeometry);
+  const currentProgress = Number.isFinite(progressInfo?.progress)
+    ? progressInfo.progress
+    : projectPointOntoRoute(currentLatLng, routeMeasure).progress;
 
   return locatedCues
     .map((cue) => {
@@ -6066,6 +6136,40 @@ function projectPointOntoRoute(point, routeMeasure) {
   }
 
   return best;
+}
+
+function projectPointOntoRouteAfterProgress(point, routeMeasure, minProgress = 0) {
+  let best = {
+    distance: Infinity,
+    progress: Math.max(0, minProgress)
+  };
+  let foundForwardSegment = false;
+
+  for (let index = 0; index < routeMeasure.points.length - 1; index += 1) {
+    const startProgress = routeMeasure.cumulative[index] || 0;
+    const endProgress = routeMeasure.cumulative[index + 1] || startProgress;
+
+    if (endProgress < minProgress) {
+      continue;
+    }
+
+    const start = routeMeasure.points[index];
+    const end = routeMeasure.points[index + 1];
+    const projected = projectPointToSegment(point, start, end);
+    const projectedProgress = startProgress + haversineDistance(start, projected.point);
+    const progress = Math.max(minProgress, projectedProgress);
+    const distance = haversineDistance(point, projected.point);
+    foundForwardSegment = true;
+
+    if (distance < best.distance) {
+      best = {
+        distance,
+        progress
+      };
+    }
+  }
+
+  return foundForwardSegment ? best : projectPointOntoRoute(point, routeMeasure);
 }
 
 function projectPointToSegment(point, start, end) {
