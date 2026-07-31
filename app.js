@@ -2816,6 +2816,59 @@ function findRecordedRouteMatches(destinationText, currentPosition = null, limit
     .slice(0, limit);
 }
 
+function getSavedRouteConfidenceLabel(score) {
+  if (score >= 115) {
+    return "High confidence";
+  }
+
+  if (score >= 75) {
+    return "Good match";
+  }
+
+  return "Possible match";
+}
+
+function getSavedRouteReadinessLabel(route) {
+  const cueCount = route.photos?.length || 0;
+  const hasTrack = normalizeRouteGeometry(route.routeGeometry).length >= 2;
+
+  if (hasTrack && cueCount >= 5) {
+    return "Photo ready";
+  }
+
+  if (hasTrack && cueCount > 0) {
+    return "Needs more photos";
+  }
+
+  if (hasTrack) {
+    return "Track only";
+  }
+
+  return "Needs route line";
+}
+
+function formatSavedRouteMatchMeta(match, index) {
+  const route = match.route;
+  const cueCount = route.photos?.length || 0;
+  const distance = Number.isFinite(route.routeDistanceMeters)
+    ? formatDistanceKilometers(route.routeDistanceMeters)
+    : "";
+  const parts = [
+    index === 0 ? "Best saved match" : `Saved option ${index + 1}`,
+    getSavedRouteConfidenceLabel(match.score),
+    getSavedRouteReadinessLabel(route),
+    distance,
+    `${cueCount} photo cue${cueCount === 1 ? "" : "s"}`
+  ].filter(Boolean);
+
+  return parts.join(" | ");
+}
+
+function formatSavedRouteMatchReasons(match) {
+  const reasons = match.reasons?.length ? match.reasons : ["saved taxi route"];
+  return `Why: ${reasons.join(", ")}`;
+}
+
 function exportRoutes() {
   const blob = new Blob([JSON.stringify(routes, null, 2)], {
     type: "application/json"
@@ -3225,18 +3278,25 @@ function showPreparedRouteChoices(options, destination, locationContext, recorde
   const allOptionsNeedReview = options.length > 0 && trustedCount === 0;
   routeSummary.className = "route-summary route-choice-summary";
   routeSummary.innerHTML = `
-    <strong>${recordedMatches.length ? "Choose the best known route" : "Choose a harbour crossing"}</strong>
+    <strong>${recordedMatches.length ? "Saved Route Match Panel" : "Choose a harbour crossing"}</strong>
     ${recordedMatches.length ? `
       <div class="recorded-route-match-panel">
-        <strong>Recorded taxi routes found</strong>
-        <span>These use actual GPS tracks from previous drives. Prefer these when they match the passenger destination.</span>
+        <div class="saved-route-panel-header">
+          <div>
+            <span class="saved-route-panel-kicker">TaxiBo route intelligence</span>
+            <strong>Use saved taxi knowledge first</strong>
+          </div>
+          <span class="saved-route-panel-count">${recordedMatches.length} match${recordedMatches.length === 1 ? "" : "es"}</span>
+        </div>
+        <span>These choices come from actual recorded drives. They are safer than draft map routes in dense roads, tunnels, and flyovers.</span>
         <div class="recorded-route-match-list">
-          ${recordedMatches.map((match) => `
-            <button class="recorded-route-match-button" type="button" data-recorded-route-match="${escapeHtml(match.route.id)}">
-              <span class="route-type-recorded">Actual GPS track</span>
+          ${recordedMatches.map((match, index) => `
+            <button class="recorded-route-match-button ${index === 0 ? "is-best-match" : ""}" type="button" data-recorded-route-match="${escapeHtml(match.route.id)}">
+              <span class="saved-route-rank">${index === 0 ? "Best match" : `Option ${index + 1}`}</span>
               <strong>${escapeHtml(match.route.name || "Recorded route")}</strong>
-              <span>${escapeHtml(shortPlaceName(match.route.start))} to ${escapeHtml(shortPlaceName(match.route.destination))}</span>
-              <span>${escapeHtml(formatDistance(match.route.routeDistanceMeters)) || "distance not saved"} | ${match.route.photos.length} cue${match.route.photos.length === 1 ? "" : "s"}${match.reasons.length ? ` | ${escapeHtml(match.reasons.join(", "))}` : ""}</span>
+              <span class="saved-route-path">${escapeHtml(shortPlaceName(match.route.start))} -> ${escapeHtml(shortPlaceName(match.route.destination))}</span>
+              <span class="saved-route-meta">${escapeHtml(formatSavedRouteMatchMeta(match, index))}</span>
+              <span class="saved-route-reason">${escapeHtml(formatSavedRouteMatchReasons(match))}</span>
             </button>
           `).join("")}
         </div>
@@ -3252,6 +3312,12 @@ function showPreparedRouteChoices(options, destination, locationContext, recorde
       <div class="route-generation-warning">
         <strong>Generated routes need review</strong>
         <span>All map-generated options look suspicious. Use a saved route if available, or record the real taxi route before saving photo cues.</span>
+      </div>
+    ` : ""}
+    ${options.length ? `
+      <div class="generated-route-draft-header">
+        <strong>Generated draft routes</strong>
+        <span>Use these only when no saved taxi route fits. Review carefully in dense or flyover areas.</span>
       </div>
     ` : ""}
     <div class="route-choice-list">
