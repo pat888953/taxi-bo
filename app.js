@@ -11,6 +11,7 @@ const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
 const TAXIBO_PHONE_THEME_KEY = "taxiBoPhoneTheme";
+const TAXIBO_RECORDING_BACKUP_KEY = "taxiBoActiveRecordingBackup";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
 
@@ -231,6 +232,8 @@ let lastSpokenCueId = "";
 let pendingLiveCueSpeechTimeoutId = null;
 let liveDriveProgressRouteId = "";
 let liveDriveRouteProgress = null;
+let screenWakeLock = null;
+let screenWakeLockRequestInFlight = false;
 let captureCueId = "";
 let captureImageData = null;
 let pendingRouteChoices = [];
@@ -342,6 +345,64 @@ function setPhoneTheme(theme) {
   }
 }
 
+function shouldKeepScreenAwake() {
+  return Boolean(
+    liveDriveWatchId !== null ||
+    liveDriveSimulationId !== null ||
+    routeRecordingWatchId !== null ||
+    speedMonitoringWatchId !== null ||
+    activeRouteRecording ||
+    completedRouteRecording
+  );
+}
+
+async function requestScreenWakeLock(reason = "active drive") {
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible") {
+    return;
+  }
+
+  if (screenWakeLock || screenWakeLockRequestInFlight) {
+    return;
+  }
+
+  screenWakeLockRequestInFlight = true;
+
+  try {
+    screenWakeLock = await navigator.wakeLock.request("screen");
+    screenWakeLock.addEventListener("release", () => {
+      screenWakeLock = null;
+      if (shouldKeepScreenAwake() && document.visibilityState === "visible") {
+        window.setTimeout(() => requestScreenWakeLock(reason), 300);
+      }
+    });
+  } catch {
+    // Some browsers or OS battery modes deny wake lock. GPS recording still continues when the page stays open.
+  } finally {
+    screenWakeLockRequestInFlight = false;
+  }
+}
+
+async function releaseScreenWakeLock() {
+  const lock = screenWakeLock;
+  screenWakeLock = null;
+
+  if (lock) {
+    try {
+      await lock.release();
+    } catch {
+      // The lock may already have been released by the browser.
+    }
+  }
+}
+
+function updateScreenWakeLock(reason = "TaxiBo active") {
+  if (shouldKeepScreenAwake()) {
+    requestScreenWakeLock(reason);
+  } else {
+    releaseScreenWakeLock();
+  }
+}
+
 function maybeStartLiveDriveAfterGo() {
   if (!shouldAutoStartLiveDriveAfterGo()) {
     return;
@@ -376,6 +437,12 @@ phoneThemeButton?.addEventListener("click", () => {
 window.addEventListener("resize", () => {
   updateSpeedUnitDisplay();
   renderRouteRecorder();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    updateScreenWakeLock("TaxiBo resumed");
+  }
 });
 
 maintenanceDrawer?.addEventListener("toggle", () => {
@@ -807,6 +874,7 @@ recordedRouteVariant?.addEventListener("input", () => {
 });
 
 window.addEventListener("pagehide", () => {
+  backupRouteRecording();
   flushRouteRecording(true);
 });
 
@@ -1058,6 +1126,7 @@ async function loadRoutes() {
     updateDataFileStatus(error.message || "The route database is not available.", true);
     updatePhotoRouteStatus("Could not load routes from the database.", true);
     updateRouteLibraryStatus("Could not load routes from the database. The cloud may be slow or the phone connection may be weak.", true);
+    await recoverInterruptedRouteRecording();
   }
 }
 
@@ -4204,6 +4273,10 @@ async function recoverInterruptedRouteRecording() {
   }
 
   hasCheckedInterruptedRecording = true;
+  const localRecovered = recoverLocalRouteRecordingBackup();
+  if (localRecovered) {
+    return;
+  }
 
   try {
     const response = await fetch(`${ROUTE_RECORDING_API}/active`, {
@@ -4280,6 +4353,7 @@ async function startRouteRecordingOnly() {
   routeRecorderBadge.textContent = "Starting";
   routeRecorderState.textContent = "Requesting GPS permission for route recording...";
   setPhoneDriveScreen("recording");
+  updateScreenWakeLock("route recording");
 
   try {
     const firstPosition = await getCurrentPosition();
@@ -4298,6 +4372,7 @@ async function startRouteRecordingOnly() {
     );
     renderRouteRecorder();
     updateSpeedMonitoringToggle();
+    updateScreenWakeLock("route recording");
   } catch (error) {
     handleRouteRecordingError(error);
   }
@@ -4345,6 +4420,7 @@ function handleRouteRecordingError(error) {
   routeRecorderState.textContent = message;
   routeRecordButton.disabled = Boolean(completedRouteRecording);
   updateSpeedMonitoringToggle();
+  updateScreenWakeLock("route recording error");
 }
 
 function stopRouteRecordingOnly() {
@@ -4352,6 +4428,7 @@ function stopRouteRecordingOnly() {
   finishRouteRecording();
   setPhoneDriveScreen("recording");
   updateSpeedMonitoringToggle();
+  updateScreenWakeLock("route recording stopped");
 
   if (!liveDriveWatchId && !speedMonitoringWatchId) {
     liveDrivePosition = null;
@@ -4389,6 +4466,8 @@ async function beginRouteRecording(route, position) {
   };
   completedRouteRecording = null;
   renderRouteRecorder();
+  backupRouteRecording(activeRouteRecording);
+  updateScreenWakeLock("route recording started");
 
   try {
     await persistRouteRecording(activeRouteRecording, "start");
@@ -4444,6 +4523,7 @@ function appendRouteRecordingPoint(position) {
 
   recording.points.push(point);
   recording.syncError = "";
+  backupRouteRecording(recording);
   renderRouteRecorder();
   updateRecordedRouteLine();
   scheduleRecordingFlush();
@@ -4496,8 +4576,10 @@ async function flushRouteRecording(useBeacon = false) {
   try {
     await recordingFlushPromise;
     recording.syncError = "";
+    backupRouteRecording(recording);
   } catch (error) {
     recording.syncError = error.message || "Database sync is waiting.";
+    backupRouteRecording(recording);
   } finally {
     recordingFlushInFlight = false;
     recordingFlushPromise = null;
@@ -4527,6 +4609,8 @@ function finishRouteRecording() {
   }
 
   renderRouteRecorder();
+  backupRouteRecording(recording);
+  updateScreenWakeLock("route recording completed");
   const pendingCheckpoint = recordingFlushPromise
     ? recordingFlushPromise.catch(() => {})
     : Promise.resolve();
@@ -4757,6 +4841,7 @@ async function saveCompletedRecordingAsRoute() {
     await saveRoutes();
     completedRouteRecording = null;
     preparedRoute = null;
+    clearRouteRecordingBackup();
     destinationSearch.value = "";
     recordedRouteVariant.value = "";
     recordedRouteVariant.dataset.autoName = "true";
@@ -4767,6 +4852,7 @@ async function saveCompletedRecordingAsRoute() {
     renderRouteRecorder();
     setLiveDriveStatus(`Saved actual drive as "${routeName}".`);
     setPhoneDriveScreen("input");
+    updateScreenWakeLock("recorded route saved");
   } catch (error) {
     routes = routes.filter((route) => route.id !== routeId);
     routeRecorder.dataset.state = "error";
@@ -4793,11 +4879,13 @@ async function discardCompletedRecording() {
       await postRouteRecording("discard", { id: recording.id });
     }
     completedRouteRecording = null;
+    clearRouteRecordingBackup();
     recordedRouteVariant.value = "";
     recordedRouteVariant.dataset.autoName = "true";
     renderRouteRecorder();
     setLiveDriveStatus("Recorded drive discarded.");
     setPhoneDriveScreen("input");
+    updateScreenWakeLock("recorded route discarded");
   } catch (error) {
     routeRecorder.dataset.state = "error";
     routeRecorderState.textContent = error.message || "Could not discard the recording.";
@@ -5358,6 +5446,7 @@ async function startLiveDrive() {
   cruiseMonitorButton.disabled = true;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("live");
+  updateScreenWakeLock("live drive");
   scheduleLiveDriveWaitingMessage();
 
   try {
@@ -5389,6 +5478,7 @@ async function startCruiseMonitoring() {
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("cruise");
+  updateScreenWakeLock("cruise monitoring");
 
   try {
     await startSpeedMonitoring();
@@ -5396,11 +5486,87 @@ async function startCruiseMonitoring() {
       cruiseMonitorButton.disabled = false;
       liveDriveStopButton.disabled = true;
       setDriveControlMode("idle");
+      updateScreenWakeLock("cruise monitoring stopped");
     }
   } catch {
     cruiseMonitorButton.disabled = false;
     liveDriveStopButton.disabled = true;
     setDriveControlMode("idle");
+    updateScreenWakeLock("cruise monitoring stopped");
+  }
+}
+
+function backupRouteRecording(recording = activeRouteRecording || completedRouteRecording) {
+  if (!recording) {
+    localStorage.removeItem(TAXIBO_RECORDING_BACKUP_KEY);
+    return;
+  }
+
+  try {
+    localStorage.setItem(TAXIBO_RECORDING_BACKUP_KEY, JSON.stringify({
+      ...recordingPayload(recording),
+      status: activeRouteRecording ? "active" : "completed",
+      sourceRoute: recording.sourceRoute ? {
+        id: recording.sourceRoute.id || "",
+        name: recording.sourceRoute.name || "",
+        start: recording.sourceRoute.start || "",
+        destination: recording.sourceRoute.destination || ""
+      } : null,
+      serverStarted: Boolean(recording.serverStarted),
+      syncError: recording.syncError || ""
+    }));
+  } catch {
+    // Local backup is best effort. Server checkpointing remains the primary durable store.
+  }
+}
+
+function clearRouteRecordingBackup() {
+  localStorage.removeItem(TAXIBO_RECORDING_BACKUP_KEY);
+}
+
+function recoverLocalRouteRecordingBackup() {
+  const raw = localStorage.getItem(TAXIBO_RECORDING_BACKUP_KEY);
+
+  if (!raw) {
+    return false;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+
+    if (!saved?.id || !Array.isArray(saved.points) || saved.points.length < 1) {
+      clearRouteRecordingBackup();
+      return false;
+    }
+
+    const sourceRoute = routes.find((route) => route.id === saved.sourceRouteId) || saved.sourceRoute || null;
+    const startedAtMs = Date.parse(saved.startedAt) || saved.points[0].timestamp || Date.now();
+    const lastTimestamp = saved.points.at(-1)?.timestamp || Date.now();
+
+    completedRouteRecording = {
+      id: saved.id,
+      sourceRouteId: saved.sourceRouteId || "",
+      routeName: saved.routeName || "Recovered drive",
+      startLabel: saved.startLabel || "Recorded start",
+      destination: saved.destination || "Recorded destination",
+      startedAt: saved.startedAt || new Date(startedAtMs).toISOString(),
+      startedAtMs,
+      endedAt: saved.endedAt || new Date().toISOString(),
+      points: saved.points,
+      distanceMeters: Number(saved.distanceMeters) || 0,
+      durationSeconds: Math.max(Number(saved.durationSeconds) || 0, (lastTimestamp - startedAtMs) / 1000),
+      sourceRoute,
+      serverStarted: Boolean(saved.serverStarted),
+      syncError: saved.syncError || "",
+      recovered: true
+    };
+    applyDefaultRecordedRouteName(completedRouteRecording, true);
+    renderRouteRecorder();
+    updateScreenWakeLock("recovered route recording");
+    return true;
+  } catch {
+    clearRouteRecordingBackup();
+    return false;
   }
 }
 
@@ -5425,6 +5591,7 @@ function stopLiveDrive(updateStatus = true) {
   setDriveControlMode("idle");
   stopSpeedMonitoring(false);
   updateSpeedMonitoringToggle();
+  updateScreenWakeLock("live drive stopped");
 
   if (updateStatus) {
     liveDrivePosition = null;
@@ -5479,6 +5646,7 @@ function startLiveDriveSimulation() {
   liveDriveSimulateButton.disabled = true;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("simulate");
+  updateScreenWakeLock("brief route");
   updateSpeedMonitoringToggle();
   setLiveDriveStatus("Tablet simulation running. Moving along the saved route line and following it on the map...");
 
@@ -5499,6 +5667,7 @@ function startLiveDriveSimulation() {
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
       setDriveControlMode("idle");
+      updateScreenWakeLock("brief route ended");
       updateSpeedMonitoringToggle();
       return;
     }
@@ -5524,6 +5693,7 @@ function stopLiveDriveSimulation(clearPosition = true) {
   }
 
   updateSpeedMonitoringToggle();
+  updateScreenWakeLock("brief route stopped");
 }
 
 function createSimulatedPosition(point) {
