@@ -413,8 +413,13 @@ function maybeStartLiveDriveAfterGo() {
   }
 
   setLiveDriveStatus("Route is ready. Auto-starting live drive...");
-  window.setTimeout(() => {
-    startLiveDrive();
+  window.setTimeout(async () => {
+    try {
+      await ensureRouteImages(getActiveRoute());
+      startLiveDrive();
+    } catch (error) {
+      setLiveDriveStatus(error.message || "Could not auto-start this route.", true);
+    }
   }, 250);
 }
 
@@ -530,6 +535,11 @@ recordedRouteVoiceButton.addEventListener("click", () => {
 });
 
 routeRecordButton.addEventListener("click", () => {
+  if (activeRouteRecording && routeRecordingWatchId === null) {
+    setLiveDriveStatus("Drive is already recording this route. Use Stop to finish the drive.", true);
+    return;
+  }
+
   if (routeRecordingWatchId !== null || activeRouteRecording) {
     stopRouteRecordingOnly();
   } else {
@@ -574,6 +584,7 @@ destinationSelect.addEventListener("change", async () => {
   }
   displaySelectedRoute();
   setPhoneDriveScreen("cue");
+  maybeStartLiveDriveAfterGo();
 });
 
 function setRouteEntryMode(mode) {
@@ -4353,6 +4364,7 @@ async function startRouteRecordingOnly() {
   routeRecorderBadge.textContent = "Starting";
   routeRecorderState.textContent = "Requesting GPS permission for route recording...";
   setPhoneDriveScreen("recording");
+  setDriveControlMode("idle");
   updateScreenWakeLock("route recording");
 
   try {
@@ -4681,13 +4693,13 @@ function renderRouteRecorder() {
   if (!recording) {
     routeRecorder.dataset.state = "idle";
     routeRecorderBadge.textContent = "Ready";
-    routeRecorderState.textContent = "Route recording ready for dashcam matching";
+    routeRecorderState.textContent = "Road recording ready for dashcam matching";
     recordingElapsed.textContent = "00:00";
     recordingDistance.textContent = formatRecordingDistance(0);
     recordingPointCount.textContent = "0";
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
-    routeRecordButton.textContent = "Record route";
+    routeRecordButton.textContent = "Record road";
     routeRecordButton.disabled = false;
     return;
   }
@@ -4697,6 +4709,7 @@ function renderRouteRecorder() {
   recordingPointCount.textContent = String(recording.points.length);
 
   if (activeRouteRecording) {
+    const isDriveAutoRecording = Boolean(recording.sourceRouteId) && routeRecordingWatchId === null;
     routeRecorder.dataset.state = "recording";
     routeRecorderBadge.textContent = "REC";
     routeRecorderState.textContent = recording.syncError
@@ -4704,8 +4717,8 @@ function renderRouteRecorder() {
       : `Recording actual drive to ${shortPlaceName(recording.destination)}`;
     recordingCompletion.hidden = true;
     recordedRouteVoiceButton.disabled = true;
-    routeRecordButton.textContent = "Stop recording";
-    routeRecordButton.disabled = false;
+    routeRecordButton.textContent = isDriveAutoRecording ? "Auto rec" : "Stop road";
+    routeRecordButton.disabled = isDriveAutoRecording;
     return;
   }
 
@@ -4719,7 +4732,7 @@ function renderRouteRecorder() {
       : "Actual drive recorded. Save it as a reusable route variant or discard it.";
   recordingCompletion.hidden = false;
   recordedRouteVoiceButton.disabled = !recordedRouteRecognition;
-  routeRecordButton.textContent = "Record route";
+  routeRecordButton.textContent = "Record road";
   routeRecordButton.disabled = true;
 }
 
@@ -4852,6 +4865,7 @@ async function saveCompletedRecordingAsRoute() {
     renderRouteRecorder();
     setLiveDriveStatus(`Saved actual drive as "${routeName}".`);
     setPhoneDriveScreen("input");
+    setDriveControlMode("idle");
     updateScreenWakeLock("recorded route saved");
   } catch (error) {
     routes = routes.filter((route) => route.id !== routeId);
@@ -4885,6 +4899,7 @@ async function discardCompletedRecording() {
     renderRouteRecorder();
     setLiveDriveStatus("Recorded drive discarded.");
     setPhoneDriveScreen("input");
+    setDriveControlMode("idle");
     updateScreenWakeLock("recorded route discarded");
   } catch (error) {
     routeRecorder.dataset.state = "error";
@@ -5334,7 +5349,7 @@ function stopSpeedWarningTick() {
 }
 
 function setDriveControlMode(mode = "idle") {
-  const normalizedMode = ["idle", "live", "simulate", "cruise"].includes(mode) ? mode : "idle";
+  const normalizedMode = ["idle", "live", "simulate", "cruise", "stopped"].includes(mode) ? mode : "idle";
   const buttons = [
     liveDriveStartButton,
     cruiseMonitorButton,
@@ -5354,27 +5369,15 @@ function setDriveControlMode(mode = "idle") {
 
   if (normalizedMode === "live") {
     liveDriveStartButton.classList.add("is-drive-active");
-    liveDriveStopButton.classList.add("is-drive-standby");
-    cruiseMonitorButton.classList.add("is-drive-standby");
-    liveDriveSimulateButton.classList.add("is-drive-standby");
     liveDriveStartButton.setAttribute("aria-pressed", "true");
   } else if (normalizedMode === "cruise") {
     cruiseMonitorButton.classList.add("is-drive-active");
-    liveDriveStopButton.classList.add("is-drive-standby");
-    liveDriveStartButton.classList.add("is-drive-standby");
-    liveDriveSimulateButton.classList.add("is-drive-standby");
     cruiseMonitorButton.setAttribute("aria-pressed", "true");
   } else if (normalizedMode === "simulate") {
     liveDriveSimulateButton.classList.add("is-drive-active");
-    liveDriveStopButton.classList.add("is-drive-standby");
-    liveDriveStartButton.classList.add("is-drive-standby");
-    cruiseMonitorButton.classList.add("is-drive-standby");
     liveDriveSimulateButton.setAttribute("aria-pressed", "true");
-  } else {
+  } else if (normalizedMode === "stopped") {
     liveDriveStopButton.classList.add("is-drive-active");
-    liveDriveStartButton.classList.add("is-drive-standby");
-    cruiseMonitorButton.classList.add("is-drive-standby");
-    liveDriveSimulateButton.classList.add("is-drive-standby");
     liveDriveStopButton.setAttribute("aria-pressed", "true");
   }
 }
@@ -5444,6 +5447,7 @@ async function startLiveDrive() {
   setLiveDriveStatus("Requesting location permission. Allow location access to start live drive mode.");
   liveDriveStartButton.disabled = true;
   cruiseMonitorButton.disabled = true;
+  liveDriveSimulateButton.disabled = true;
   liveDriveStopButton.disabled = false;
   setDriveControlMode("live");
   updateScreenWakeLock("live drive");
@@ -5588,7 +5592,7 @@ function stopLiveDrive(updateStatus = true) {
   cruiseMonitorButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = true;
-  setDriveControlMode("idle");
+  setDriveControlMode(updateStatus ? "stopped" : "idle");
   stopSpeedMonitoring(false);
   updateSpeedMonitoringToggle();
   updateScreenWakeLock("live drive stopped");
@@ -5666,7 +5670,7 @@ function startLiveDriveSimulation() {
       cruiseMonitorButton.disabled = false;
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
-      setDriveControlMode("idle");
+      setDriveControlMode("stopped");
       updateScreenWakeLock("brief route ended");
       updateSpeedMonitoringToggle();
       return;
