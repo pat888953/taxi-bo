@@ -368,6 +368,14 @@ function shouldKeepScreenAwake() {
   );
 }
 
+function isManualRoadRecordingActive() {
+  return Boolean(activeRouteRecording && routeRecordingWatchId !== null);
+}
+
+function isLiveDriveAutoRecordingActive() {
+  return Boolean(activeRouteRecording && routeRecordingWatchId === null);
+}
+
 async function requestScreenWakeLock(reason = "active drive") {
   if (!("wakeLock" in navigator) || document.visibilityState !== "visible") {
     return;
@@ -548,7 +556,7 @@ recordedRouteVoiceButton.addEventListener("click", () => {
 });
 
 routeRecordButton.addEventListener("click", () => {
-  if (activeRouteRecording && routeRecordingWatchId === null) {
+  if (isLiveDriveAutoRecordingActive()) {
     setLiveDriveStatus("Drive is already recording this route. Use Stop to finish the drive.", true);
     return;
   }
@@ -5428,7 +5436,9 @@ async function startLiveDrive() {
     return;
   }
 
-  if (activeRouteRecording) {
+  const manualRoadRecordingActive = isManualRoadRecordingActive();
+
+  if (activeRouteRecording && !manualRoadRecordingActive) {
     setLiveDriveStatus("Stop or save the current route recording before starting live drive.", true);
     return;
   }
@@ -5466,7 +5476,9 @@ async function startLiveDrive() {
   try {
     const firstPosition = await getCurrentPosition();
     stopSpeedMonitoring(false);
-    await beginRouteRecording(route, firstPosition);
+    if (!manualRoadRecordingActive) {
+      await beginRouteRecording(route, firstPosition);
+    }
     handleLivePosition(firstPosition, route);
     liveDriveWatchId = navigator.geolocation.watchPosition(
       (position) => handleLivePosition(position, route),
@@ -5477,6 +5489,9 @@ async function startLiveDrive() {
         timeout: 12000
       }
     );
+    if (manualRoadRecordingActive) {
+      setLiveDriveStatus("Live drive running. Record road remains the only active recording.");
+    }
     updateSpeedMonitoringToggle();
   } catch (error) {
     handleLiveError(error);
@@ -5586,6 +5601,7 @@ function recoverLocalRouteRecordingBackup() {
 
 function stopLiveDrive(updateStatus = true) {
   const wasCruiseOnly = isCruiseMonitoringActive();
+  const manualRoadRecordingActive = isManualRoadRecordingActive();
   if (routeRecordingWatchId === null) {
     finishRouteRecording();
   }
@@ -5615,7 +5631,9 @@ function stopLiveDrive(updateStatus = true) {
     window.speechSynthesis?.cancel();
     updateSpeedAwareness(null);
     liveDriveUpcoming.innerHTML = "";
-    setLiveDriveStatus("Live drive stopped.");
+    setLiveDriveStatus(manualRoadRecordingActive
+      ? "Live drive stopped. Record road is still recording."
+      : "Live drive stopped.");
     setMapDriverMode(false);
     if (wasCruiseOnly || !completedRouteRecording) {
       setPhoneDriveScreen("input");
@@ -5741,7 +5759,9 @@ function handleLivePosition(position, route) {
   clearLiveDriveTimeout();
   liveDrivePosition = position;
   updateSpeedAwareness(position);
-  appendRouteRecordingPoint(position);
+  if (!isManualRoadRecordingActive()) {
+    appendRouteRecordingPoint(position);
+  }
   liveDriveStartButton.disabled = true;
   liveDriveStopButton.disabled = false;
   renderLiveDrive(route);
