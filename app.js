@@ -5362,7 +5362,7 @@ function stopSpeedWarningTick() {
 }
 
 function setDriveControlMode(mode = "idle") {
-  const normalizedMode = ["idle", "live", "simulate", "cruise", "stopped"].includes(mode) ? mode : "idle";
+  const normalizedMode = ["idle", "live", "simulate", "cruise"].includes(mode) ? mode : "idle";
   const buttons = [
     liveDriveStartButton,
     cruiseMonitorButton,
@@ -5389,9 +5389,6 @@ function setDriveControlMode(mode = "idle") {
   } else if (normalizedMode === "simulate") {
     liveDriveSimulateButton.classList.add("is-drive-active");
     liveDriveSimulateButton.setAttribute("aria-pressed", "true");
-  } else if (normalizedMode === "stopped") {
-    liveDriveStopButton.classList.add("is-drive-active");
-    liveDriveStopButton.setAttribute("aria-pressed", "true");
   }
 }
 
@@ -5605,7 +5602,7 @@ function stopLiveDrive(updateStatus = true) {
   cruiseMonitorButton.disabled = false;
   liveDriveSimulateButton.disabled = false;
   liveDriveStopButton.disabled = true;
-  setDriveControlMode(updateStatus ? "stopped" : "idle");
+  setDriveControlMode("idle");
   stopSpeedMonitoring(false);
   updateSpeedMonitoringToggle();
   updateScreenWakeLock("live drive stopped");
@@ -5683,7 +5680,7 @@ function startLiveDriveSimulation() {
       cruiseMonitorButton.disabled = false;
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
-      setDriveControlMode("stopped");
+      setDriveControlMode("idle");
       updateScreenWakeLock("brief route ended");
       updateSpeedMonitoringToggle();
       return;
