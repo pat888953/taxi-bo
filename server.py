@@ -1294,9 +1294,16 @@ def resolve_route_endpoints(payload):
     else:
         latitude = current_position.get("latitude")
         longitude = current_position.get("longitude")
+        accuracy = current_position.get("accuracy")
 
         if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
             raise ValueError("Enter a start address or allow current-location access.")
+
+        if looks_like_hong_kong_query(destination_text):
+            if not is_in_hong_kong_bounds(latitude, longitude):
+                raise ValueError("The current GPS point is outside Hong Kong, so TaxiBo ignored it. Try again for a fresh GPS fix or pick a saved start reference.")
+            if isinstance(accuracy, (int, float)) and accuracy > 250:
+                raise ValueError(f"The current GPS accuracy is about {round(accuracy)} m, so TaxiBo ignored it for route generation. Try again outdoors or pick a saved start reference.")
 
         start = {
             "latitude": float(latitude),
@@ -1655,6 +1662,7 @@ def normalize_geometry(geometry):
 def geocode_place(query):
     variants = build_query_variants(query)
     network_errors = []
+    prefer_hong_kong = looks_like_hong_kong_query(query)
 
     for variant in variants:
         for provider in (try_nominatim, try_photon):
@@ -1664,11 +1672,14 @@ def geocode_place(query):
                 network_errors.append(str(error.reason))
                 continue
 
-            if result:
+            if result and (not prefer_hong_kong or is_in_hong_kong_bounds(result["latitude"], result["longitude"])):
                 return result
 
     if network_errors:
         raise ValueError("Map lookup could not reach the internet. Check the connection, then try again.")
+
+    if prefer_hong_kong:
+        raise ValueError(f'Could not find "{query}" inside Hong Kong. Try adding the district or "Hong Kong".')
 
     raise ValueError(f'Could not find "{query}". Try adding city/state, for example "2 Shepherd Ln, Chapel Hill, NC".')
 
@@ -1677,6 +1688,15 @@ def build_query_variants(query):
     variants = [query]
     lower = query.lower()
 
+    if looks_like_hong_kong_query(query):
+        variants.extend([
+            f"{query}, Hong Kong",
+            f"{query}, New Territories, Hong Kong",
+            f"{query}, Kowloon, Hong Kong",
+            f"{query}, Hong Kong Island, Hong Kong",
+        ])
+        return dedupe_query_variants(variants)
+
     if "chapel hill" not in lower:
         variants.append(f"{query}, Chapel Hill, NC, USA")
 
@@ -1684,12 +1704,45 @@ def build_query_variants(query):
         variants.append(f"{query}, NC, USA")
         variants.append(f"{query}, USA")
 
+    return dedupe_query_variants(variants)
+
+
+def dedupe_query_variants(variants):
     deduped = []
     for variant in variants:
         if variant not in deduped:
             deduped.append(variant)
 
     return deduped
+
+
+def looks_like_hong_kong_query(query):
+    text = str(query or "").strip().lower()
+    if not text:
+        return False
+
+    if re.search(r"[\u3400-\u9fff]", text):
+        return True
+
+    return bool(re.search(
+        r"\b(hong kong|hk|kowloon|new territories|tsuen wan|sha tin|shatin|tai wai|"
+        r"wan chai|wanchai|central|causeway bay|kwai chung|tuen mun|yuen long|"
+        r"mong kok|kwun tong|wong tai sin|hung hom|mei foo|lai chi kok|tin shui wai)\b",
+        text,
+    ))
+
+
+def is_in_hong_kong_bounds(latitude, longitude):
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError):
+        return False
+
+    return (
+        HONG_KONG_ROUTE_BOUNDS["min_latitude"] <= latitude <= HONG_KONG_ROUTE_BOUNDS["max_latitude"]
+        and HONG_KONG_ROUTE_BOUNDS["min_longitude"] <= longitude <= HONG_KONG_ROUTE_BOUNDS["max_longitude"]
+    )
 
 
 def try_nominatim(query):

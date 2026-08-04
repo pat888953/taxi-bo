@@ -14,6 +14,13 @@ const TAXIBO_PHONE_THEME_KEY = "taxiBoPhoneTheme";
 const TAXIBO_RECORDING_BACKUP_KEY = "taxiBoActiveRecordingBackup";
 const GENERATED_CUE_NOTE = "Generated from the driving route. Replace with your own photo when ready.";
 const DEFAULT_MAP_CENTER = [40.7128, -74.0060];
+const HONG_KONG_BOUNDS = {
+  minLatitude: 22.13,
+  maxLatitude: 22.58,
+  minLongitude: 113.80,
+  maxLongitude: 114.45
+};
+const ROUTE_START_MAX_ACCURACY_METERS = 250;
 
 function createUuid() {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -3327,10 +3334,11 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
         throw new Error("Choose a saved route with a start point, or use a device/browser that supports current location.");
       }
 
-      const current = await getCurrentPosition();
+      const current = await getTrustedRouteStartPosition();
       currentPosition = {
         latitude: current.coords.latitude,
-        longitude: current.coords.longitude
+        longitude: current.coords.longitude,
+        accuracy: Number.isFinite(Number(current.coords.accuracy)) ? Number(current.coords.accuracy) : null
       };
       const accuracy = Number(current.coords.accuracy);
       locationContext = ` Start supplied by this device: ${current.coords.latitude.toFixed(5)}, ${current.coords.longitude.toFixed(5)}${Number.isFinite(accuracy) ? ` (accuracy about ${Math.round(accuracy)} m)` : ""}.`;
@@ -3765,6 +3773,64 @@ function getCurrentPosition() {
       maximumAge: 60000
     });
   });
+}
+
+function getFreshCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0
+    });
+  });
+}
+
+function isInHongKongBounds(latitude, longitude) {
+  return Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= HONG_KONG_BOUNDS.minLatitude &&
+    latitude <= HONG_KONG_BOUNDS.maxLatitude &&
+    longitude >= HONG_KONG_BOUNDS.minLongitude &&
+    longitude <= HONG_KONG_BOUNDS.maxLongitude;
+}
+
+function describeRejectedGpsPoint(position) {
+  const latitude = Number(position?.coords?.latitude);
+  const longitude = Number(position?.coords?.longitude);
+  const accuracy = Number(position?.coords?.accuracy);
+
+  if (!isInHongKongBounds(latitude, longitude)) {
+    return `Ignored GPS point outside Hong Kong: ${Number.isFinite(latitude) ? latitude.toFixed(5) : "--"}, ${Number.isFinite(longitude) ? longitude.toFixed(5) : "--"}.`;
+  }
+
+  if (Number.isFinite(accuracy) && accuracy > ROUTE_START_MAX_ACCURACY_METERS) {
+    return `Ignored weak GPS point: accuracy about ${Math.round(accuracy)} m.`;
+  }
+
+  return "Ignored unreliable GPS point.";
+}
+
+async function getTrustedRouteStartPosition() {
+  let lastRejectedReason = "";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    routeSummary.className = "route-summary";
+    routeSummary.innerHTML = `<strong>Checking taxi location.</strong><br>${attempt === 1 ? "Waiting for a reliable Hong Kong GPS point..." : `${escapeHtml(lastRejectedReason)} Retrying Hong Kong GPS fix...`}`;
+
+    const position = await getFreshCurrentPosition();
+    const latitude = Number(position.coords.latitude);
+    const longitude = Number(position.coords.longitude);
+    const accuracy = Number(position.coords.accuracy);
+
+    if (isInHongKongBounds(latitude, longitude) &&
+      (!Number.isFinite(accuracy) || accuracy <= ROUTE_START_MAX_ACCURACY_METERS)) {
+      return position;
+    }
+
+    lastRejectedReason = describeRejectedGpsPoint(position);
+  }
+
+  throw new Error(`${lastRejectedReason || "The taxi GPS point was not reliable."} TaxiBo did not use it for route generation. Try again outdoors, or pick a saved start reference.`);
 }
 
 async function deleteRoute(routeId) {
