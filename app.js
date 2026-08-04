@@ -328,6 +328,18 @@ function shouldAutoStartLiveDriveAfterGo() {
   return getGoStartMode() === "auto" && document.body.dataset.cueUiMode === "drive";
 }
 
+function setRouteReadyControlState() {
+  if (liveDriveWatchId !== null || liveDriveSimulationId !== null || isCruiseMonitoringActive()) {
+    return;
+  }
+
+  liveDriveStartButton.disabled = false;
+  cruiseMonitorButton.disabled = false;
+  liveDriveSimulateButton.disabled = false;
+  liveDriveStopButton.disabled = true;
+  setDriveControlMode("idle");
+}
+
 function getPhoneTheme() {
   return localStorage.getItem(TAXIBO_PHONE_THEME_KEY) === "night" ? "night" : "day";
 }
@@ -405,6 +417,7 @@ function updateScreenWakeLock(reason = "TaxiBo active") {
 
 function maybeStartLiveDriveAfterGo() {
   if (!shouldAutoStartLiveDriveAfterGo()) {
+    setRouteReadyControlState();
     return;
   }
 
