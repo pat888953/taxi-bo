@@ -1489,6 +1489,47 @@ body[data-cue-ui-mode="drive"] .layout {
   gap: 12px;
 }
 
+.dashcam-image-options {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.dashcam-image-options[hidden] {
+  display: none;
+}
+
+.dashcam-image-options strong,
+.dashcam-image-options span {
+  display: block;
+}
+
+.dashcam-image-options span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.dashcam-map-paste-zone {
+  padding: 13px;
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+.dashcam-map-paste-zone:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--focus);
+}
+
 .dashcam-video,
 .dashcam-preview {
   width: 100%;
