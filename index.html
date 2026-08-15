@@ -463,6 +463,22 @@
               <button id="dashcamSaveButton" class="secondary-button" type="button" disabled>Save dashcam cue</button>
             </div>
 
+            <div id="dashcamImageOptions" class="dashcam-image-options" hidden>
+              <div>
+                <strong>Choose the cue image</strong>
+                <span>Keep the dashcam frame, or replace it with your own Google Maps screenshot.</span>
+              </div>
+              <div class="finder-actions">
+                <button id="dashcamUseFrameButton" class="secondary-button" type="button">Use dashcam frame</button>
+                <button id="dashcamOpenMapsButton" class="secondary-button" type="button">Open Google Maps</button>
+                <label class="secondary-button file-button" for="dashcamMapImageInput">Choose screenshot</label>
+                <input id="dashcamMapImageInput" type="file" accept="image/*" hidden>
+              </div>
+              <div id="dashcamMapPasteZone" class="dashcam-map-paste-zone" tabindex="0">
+                Paste a Google Maps screenshot here with Ctrl+V
+              </div>
+            </div>
+
             <div id="dashcamStatus" class="form-state empty-state">Pick a recorded route, load a dashcam video, then pause at a junction.</div>
           </div>
 

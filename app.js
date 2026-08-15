@@ -177,6 +177,11 @@ const dashcamPreview = document.querySelector("#dashcamPreview");
 const dashcamCueTitle = document.querySelector("#dashcamCueTitle");
 const dashcamCueInstruction = document.querySelector("#dashcamCueInstruction");
 const dashcamSaveButton = document.querySelector("#dashcamSaveButton");
+const dashcamImageOptions = document.querySelector("#dashcamImageOptions");
+const dashcamUseFrameButton = document.querySelector("#dashcamUseFrameButton");
+const dashcamOpenMapsButton = document.querySelector("#dashcamOpenMapsButton");
+const dashcamMapImageInput = document.querySelector("#dashcamMapImageInput");
+const dashcamMapPasteZone = document.querySelector("#dashcamMapPasteZone");
 
 let routes = [];
 let map;
@@ -1057,6 +1062,37 @@ dashcamSaveButton?.addEventListener("click", () => {
   saveDashcamCuePhoto();
 });
 
+dashcamUseFrameButton?.addEventListener("click", () => {
+  useDashcamFrameForCue();
+});
+
+dashcamOpenMapsButton?.addEventListener("click", () => {
+  openDashcamCueInGoogleMaps();
+});
+
+dashcamMapImageInput?.addEventListener("change", async () => {
+  const file = dashcamMapImageInput.files?.[0];
+  if (file) {
+    await useDashcamReplacementImage(file);
+  }
+});
+
+dashcamMapPasteZone?.addEventListener("click", () => {
+  dashcamMapPasteZone.focus();
+});
+
+dashcamMapPasteZone?.addEventListener("paste", async (event) => {
+  const imageItem = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith("image/"));
+  const file = imageItem?.getAsFile();
+  if (!file) {
+    updateDashcamStatus("Clipboard did not contain an image. Copy the Google Maps screenshot first.", true);
+    return;
+  }
+
+  event.preventDefault();
+  await useDashcamReplacementImage(file);
+});
+
 photoForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -1862,6 +1898,7 @@ function loadDashcamVideoFile() {
   dashcamVideo.src = objectUrl;
   dashcamVideo.hidden = false;
   dashcamPreview.hidden = true;
+  resetDashcamImageOptions();
   dashcamSaveButton.disabled = true;
   updateDashcamStatus("Video loaded. Enter the video start time, play it, pause at the landmark, then capture the frame.");
 }
@@ -1927,12 +1964,15 @@ function captureDashcamCueFrame() {
     dashcamPreview.src = image;
     dashcamPreview.hidden = false;
     dashcamPreview.dataset.image = image;
+    dashcamPreview.dataset.capturedImage = image;
+    dashcamPreview.dataset.imageSource = "dashcam";
     dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
 
     if (outsideRouteSeconds > 0) {
       dashcamPreview.dataset.latitude = "";
       dashcamPreview.dataset.longitude = "";
       dashcamSaveButton.disabled = true;
+      dashcamImageOptions.hidden = true;
       const timingMessage = outsideRouteDirection === "before"
         ? `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} BEFORE the recorded route starts. Move the video forward.`
         : `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} AFTER the recorded route ends. Move the video backward.`;
@@ -1944,17 +1984,97 @@ function captureDashcamCueFrame() {
       dashcamPreview.dataset.latitude = "";
       dashcamPreview.dataset.longitude = "";
       dashcamSaveButton.disabled = true;
+      dashcamImageOptions.hidden = true;
       updateDashcamStatus(`Frame captured for preview. Its time is inside the route period, but the nearest saved GPS sample is ${formatDashcamDuration(deltaSeconds)} away. Saving is disabled because the GPS recording has a large time gap.`, true);
       return;
     }
 
     dashcamPreview.dataset.latitude = String(point.latitude);
     dashcamPreview.dataset.longitude = String(point.longitude);
+    dashcamImageOptions.hidden = false;
     dashcamSaveButton.disabled = false;
     updateDashcamStatus(`Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
   } catch (error) {
     dashcamSaveButton.disabled = true;
     updateDashcamStatus(error.message || "Could not capture this dashcam cue.", true);
+  }
+}
+
+function resetDashcamImageOptions() {
+  if (!dashcamPreview) {
+    return;
+  }
+
+  dashcamPreview.dataset.image = "";
+  dashcamPreview.dataset.capturedImage = "";
+  dashcamPreview.dataset.imageSource = "";
+  dashcamPreview.dataset.latitude = "";
+  dashcamPreview.dataset.longitude = "";
+  dashcamPreview.dataset.deltaSeconds = "";
+  if (dashcamImageOptions) {
+    dashcamImageOptions.hidden = true;
+  }
+  if (dashcamMapImageInput) {
+    dashcamMapImageInput.value = "";
+  }
+}
+
+function useDashcamFrameForCue() {
+  const image = dashcamPreview?.dataset.capturedImage;
+  const latitude = parseOptionalNumber(dashcamPreview?.dataset.latitude);
+  const longitude = parseOptionalNumber(dashcamPreview?.dataset.longitude);
+  if (!image || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    updateDashcamStatus("Capture a valid dashcam frame before choosing the cue image.", true);
+    return;
+  }
+
+  dashcamPreview.src = image;
+  dashcamPreview.dataset.image = image;
+  dashcamPreview.dataset.imageSource = "dashcam";
+  dashcamSaveButton.disabled = false;
+  updateDashcamStatus(`Using the dashcam frame for the cue at ${latitude.toFixed(6)}, ${longitude.toFixed(6)}.`);
+}
+
+function openDashcamCueInGoogleMaps() {
+  const latitude = parseOptionalNumber(dashcamPreview?.dataset.latitude);
+  const longitude = parseOptionalNumber(dashcamPreview?.dataset.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    updateDashcamStatus("Capture a valid route position before opening Google Maps.", true);
+    return;
+  }
+
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+  const mapsWindow = window.open(mapsUrl, "_blank");
+  if (mapsWindow) {
+    mapsWindow.opener = null;
+  } else {
+    updateDashcamStatus("The browser blocked the Google Maps tab. Allow pop-ups and try again.", true);
+  }
+}
+
+async function useDashcamReplacementImage(file) {
+  const latitude = parseOptionalNumber(dashcamPreview?.dataset.latitude);
+  const longitude = parseOptionalNumber(dashcamPreview?.dataset.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    updateDashcamStatus("Capture a valid route position before adding a map screenshot.", true);
+    return;
+  }
+
+  if (!file?.type?.startsWith("image/")) {
+    updateDashcamStatus("Choose or paste an image file.", true);
+    return;
+  }
+
+  try {
+    const image = await fileToDataUrl(file);
+    dashcamPreview.src = image;
+    dashcamPreview.hidden = false;
+    dashcamPreview.dataset.image = image;
+    dashcamPreview.dataset.imageSource = "map";
+    dashcamSaveButton.disabled = false;
+    updateDashcamStatus(`Google Maps screenshot selected for the cue at ${latitude.toFixed(6)}, ${longitude.toFixed(6)}. This preview will be saved.`);
+  } catch (error) {
+    updateDashcamStatus(error.message || "Could not read this screenshot.", true);
   }
 }
 
@@ -1972,12 +2092,15 @@ async function saveDashcamCuePhoto() {
   const nextStep = route.photos.reduce((maxStep, photo) => Math.max(maxStep, Number(photo.step) || 0), 0) + 1;
   const title = dashcamCueTitle.value.trim() || `Dashcam cue ${nextStep}`;
   const instruction = dashcamCueInstruction.value.trim();
+  const imageSource = dashcamPreview?.dataset.imageSource;
   const cue = normalizeImportedPhoto({
     id: createUuid(),
     step: nextStep,
     title,
     instruction,
-    notes: "Captured from dashcam video and matched to the recorded GPS route.",
+    notes: imageSource === "map"
+      ? "Google Maps screenshot selected by the user and placed at a dashcam-matched GPS position."
+      : "Captured from dashcam video and matched to the recorded GPS route.",
     image,
     latitude,
     longitude
@@ -1997,7 +2120,7 @@ async function saveDashcamCuePhoto() {
     dashcamCueTitle.value = "";
     dashcamCueInstruction.value = "";
     dashcamPreview.hidden = true;
-    dashcamPreview.dataset.image = "";
+    resetDashcamImageOptions();
     updateDashcamStatus(`Saved "${cue.title}" as step ${cue.step} on the recorded route line.`);
   } catch (error) {
     route.photos = route.photos.filter((photo) => photo.id !== cue.id);
