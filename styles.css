@@ -1555,6 +1555,27 @@ body[data-cue-ui-mode="drive"] .layout {
   font-weight: 800;
 }
 
+.field-help {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.field-help.is-valid {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+
+.field-help.is-error {
+  color: #a12c2c;
+  font-weight: 700;
+}
+
+#dashcamStartTime:invalid {
+  border-color: #c85c5c;
+  background: #fff8f8;
+}
+
 .voice-input-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

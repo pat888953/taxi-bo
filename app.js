@@ -169,6 +169,7 @@ const dashcamRouteSelect = document.querySelector("#dashcamRouteSelect");
 const dashcamVideoInput = document.querySelector("#dashcamVideoInput");
 const dashcamVideo = document.querySelector("#dashcamVideo");
 const dashcamStartTime = document.querySelector("#dashcamStartTime");
+const dashcamStartTimeHelp = document.querySelector("#dashcamStartTimeHelp");
 const dashcamTimeZone = document.querySelector("#dashcamTimeZone");
 const dashcamCaptureButton = document.querySelector("#dashcamCaptureButton");
 const dashcamStatus = document.querySelector("#dashcamStatus");
@@ -1028,6 +1029,7 @@ snapCueToRouteButton?.addEventListener("click", () => {
 
 dashcamRouteSelect?.addEventListener("change", () => {
   updateDashcamStatus();
+  updateDashcamTimeGuidance();
 });
 
 dashcamVideoInput?.addEventListener("change", () => {
@@ -1036,6 +1038,15 @@ dashcamVideoInput?.addEventListener("change", () => {
 
 dashcamTimeZone?.addEventListener("change", () => {
   updateDashcamStatus();
+  updateDashcamTimeGuidance();
+});
+
+dashcamStartTime?.addEventListener("input", () => {
+  updateDashcamTimeGuidance();
+});
+
+dashcamVideo?.addEventListener("loadedmetadata", () => {
+  updateDashcamTimeGuidance();
 });
 
 dashcamCaptureButton?.addEventListener("click", () => {
@@ -1712,12 +1723,6 @@ function updateDashcamStatus(message = "", isError = false) {
     return;
   }
 
-  const firstPoint = route.recordedTrackPoints?.[0];
-  const firstTime = firstPoint ? new Date(firstPoint.timestamp) : null;
-  if (dashcamStartTime && firstTime && !Number.isNaN(firstTime.valueOf()) && !dashcamStartTime.value) {
-    dashcamStartTime.value = formatDateTimeForZone(firstTime, getDashcamTimeZone());
-  }
-
   dashcamStatus.textContent = `Ready for "${route.name}". Video time will be read as ${getDashcamTimeZoneLabel()}. Pause at a junction, then capture a cue frame.`;
 }
 
@@ -1747,6 +1752,67 @@ function getDateTimeParts(date, timeZone) {
 function formatDateTimeForZone(date, timeZone) {
   const parts = getDateTimeParts(date, timeZone);
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function formatDashcamDuration(seconds) {
+  const wholeSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(wholeSeconds / 3600);
+  const minutes = Math.floor((wholeSeconds % 3600) / 60);
+  const remainder = wholeSeconds % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function updateDashcamTimeGuidance() {
+  if (!dashcamStartTime || !dashcamStartTimeHelp) {
+    return;
+  }
+
+  const route = getDashcamRoute();
+  const points = route?.recordedTrackPoints || [];
+  const videoStartMs = parseDateTimeInZone(dashcamStartTime.value, getDashcamTimeZone());
+  const durationSeconds = Number(dashcamVideo?.duration);
+  const defaultMessage = "Enter the exact date and time shown at the start of the first video file.";
+
+  dashcamStartTimeHelp.className = "field-help";
+  dashcamStartTime.setCustomValidity("");
+
+  if (!dashcamStartTime.value) {
+    dashcamStartTimeHelp.textContent = defaultMessage;
+    return;
+  }
+
+  if (!Number.isFinite(videoStartMs)) {
+    dashcamStartTimeHelp.textContent = "Enter a complete video date and time, including AM or PM.";
+    dashcamStartTimeHelp.classList.add("is-error");
+    dashcamStartTime.setCustomValidity("Enter a valid video start date and time.");
+    return;
+  }
+
+  if (points.length < 2 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    dashcamStartTimeHelp.textContent = `${defaultMessage} The selected timezone is ${getDashcamTimeZoneLabel()}.`;
+    return;
+  }
+
+  const routeStartMs = points[0].timestamp;
+  const routeEndMs = points.at(-1).timestamp;
+  const videoEndMs = videoStartMs + durationSeconds * 1000;
+  const overlapsRoute = videoStartMs <= routeEndMs && videoEndMs >= routeStartMs;
+
+  if (!overlapsRoute) {
+    const message = "This video's date and time do not overlap the selected route. Check the first video file and recording timezone.";
+    dashcamStartTimeHelp.textContent = message;
+    dashcamStartTimeHelp.classList.add("is-error");
+    dashcamStartTime.setCustomValidity(message);
+    return;
+  }
+
+  const routeOffsetSeconds = (routeStartMs - videoStartMs) / 1000;
+  dashcamStartTimeHelp.textContent = routeOffsetSeconds >= 0
+    ? `Time looks valid. The recorded route begins about ${formatDashcamDuration(routeOffsetSeconds)} into the video.`
+    : `Time looks valid. The video begins about ${formatDashcamDuration(-routeOffsetSeconds)} after the route starts.`;
+  dashcamStartTimeHelp.classList.add("is-valid");
 }
 
 function parseDateTimeInZone(value, timeZone) {
@@ -1843,6 +1909,9 @@ function captureDashcamCueFrame() {
     }
 
     const { point, deltaSeconds } = getDashcamMatchedPoint();
+    if (deltaSeconds > 300) {
+      throw new Error(`This frame is ${formatDashcamDuration(deltaSeconds)} from the recorded route. Check the video start date, time, and recording timezone.`);
+    }
     const canvas = document.createElement("canvas");
     canvas.width = dashcamVideo.videoWidth;
     canvas.height = dashcamVideo.videoHeight;

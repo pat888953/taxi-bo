@@ -426,12 +426,13 @@
 
             <div class="dashcam-time-fields">
               <label class="field">
-                <span>Video start time</span>
-                <input id="dashcamStartTime" type="datetime-local" step="1">
+                <span>Video start date and time</span>
+                <input id="dashcamStartTime" type="datetime-local" step="1" aria-describedby="dashcamStartTimeHelp">
+                <small id="dashcamStartTimeHelp" class="field-help">Enter the exact date and time shown at the start of the first video file.</small>
               </label>
 
               <label class="field">
-                <span>Video location</span>
+                <span>Video recording timezone</span>
                 <select id="dashcamTimeZone">
                   <option value="Asia/Hong_Kong" selected>🇭🇰 Hong Kong (UTC+8)</option>
                   <option value="Asia/Shanghai">🇨🇳 Shanghai</option>
@@ -441,6 +442,7 @@
                   <option value="America/New_York">🇺🇸 New York</option>
                   <option value="UTC">🌐 UTC</option>
                 </select>
+                <small class="field-help">Choose where the video was recorded—not where this browser is located.</small>
               </label>
             </div>
 
