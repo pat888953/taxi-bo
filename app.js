@@ -169,6 +169,7 @@ const dashcamRouteSelect = document.querySelector("#dashcamRouteSelect");
 const dashcamVideoInput = document.querySelector("#dashcamVideoInput");
 const dashcamVideo = document.querySelector("#dashcamVideo");
 const dashcamStartTime = document.querySelector("#dashcamStartTime");
+const dashcamTimeZone = document.querySelector("#dashcamTimeZone");
 const dashcamCaptureButton = document.querySelector("#dashcamCaptureButton");
 const dashcamStatus = document.querySelector("#dashcamStatus");
 const dashcamPreview = document.querySelector("#dashcamPreview");
@@ -1033,6 +1034,10 @@ dashcamVideoInput?.addEventListener("change", () => {
   loadDashcamVideoFile();
 });
 
+dashcamTimeZone?.addEventListener("change", () => {
+  updateDashcamStatus();
+});
+
 dashcamCaptureButton?.addEventListener("click", () => {
   captureDashcamCueFrame();
 });
@@ -1710,15 +1715,70 @@ function updateDashcamStatus(message = "", isError = false) {
   const firstPoint = route.recordedTrackPoints?.[0];
   const firstTime = firstPoint ? new Date(firstPoint.timestamp) : null;
   if (dashcamStartTime && firstTime && !Number.isNaN(firstTime.valueOf()) && !dashcamStartTime.value) {
-    dashcamStartTime.value = formatDateTimeLocal(firstTime);
+    dashcamStartTime.value = formatDateTimeForZone(firstTime, getDashcamTimeZone());
   }
 
-  dashcamStatus.textContent = `Ready for "${route.name}". Set the dashcam video start time, pause at a junction, then capture a cue frame.`;
+  dashcamStatus.textContent = `Ready for "${route.name}". Video time will be read as ${getDashcamTimeZoneLabel()}. Pause at a junction, then capture a cue frame.`;
 }
 
-function formatDateTimeLocal(date) {
-  const offsetMs = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+function getDashcamTimeZone() {
+  return dashcamTimeZone?.value || "Asia/Hong_Kong";
+}
+
+function getDashcamTimeZoneLabel() {
+  return dashcamTimeZone?.selectedOptions?.[0]?.textContent?.trim() || "Hong Kong (UTC+8)";
+}
+
+function getDateTimeParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function formatDateTimeForZone(date, timeZone) {
+  const parts = getDateTimeParts(date, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function parseDateTimeInZone(value, timeZone) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    return NaN;
+  }
+
+  const [, year, month, day, hour, minute, second = "0"] = match;
+  const desiredWallTime = Date.UTC(+year, +month - 1, +day, +hour, +minute, +second);
+  let timestamp = desiredWallTime;
+
+  // Intl supplies the selected location's daylight-saving offset. Iterating
+  // converts the timezone-free form value into one absolute Unix timestamp.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = getDateTimeParts(new Date(timestamp), timeZone);
+    const displayedWallTime = Date.UTC(
+      +parts.year,
+      +parts.month - 1,
+      +parts.day,
+      +parts.hour,
+      +parts.minute,
+      +parts.second
+    );
+    const correction = desiredWallTime - displayedWallTime;
+    timestamp += correction;
+    if (correction === 0) {
+      break;
+    }
+  }
+
+  return timestamp;
 }
 
 function loadDashcamVideoFile() {
@@ -1743,7 +1803,7 @@ function loadDashcamVideoFile() {
 function getDashcamMatchedPoint() {
   const route = getDashcamRoute();
   const points = route?.recordedTrackPoints || [];
-  const videoStartMs = Date.parse(dashcamStartTime?.value || "");
+  const videoStartMs = parseDateTimeInZone(dashcamStartTime?.value, getDashcamTimeZone());
 
   if (!route || points.length < 2) {
     throw new Error("Pick a recorded route with timestamped GPS points.");

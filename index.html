@@ -424,10 +424,25 @@
               <input id="dashcamVideoInput" type="file" accept="video/*">
             </label>
 
-            <label class="field">
-              <span>Video start time</span>
-              <input id="dashcamStartTime" type="datetime-local">
-            </label>
+            <div class="split-fields">
+              <label class="field">
+                <span>Video start time</span>
+                <input id="dashcamStartTime" type="datetime-local" step="1">
+              </label>
+
+              <label class="field">
+                <span>Video location</span>
+                <select id="dashcamTimeZone">
+                  <option value="Asia/Hong_Kong" selected>🇭🇰 Hong Kong (UTC+8)</option>
+                  <option value="Asia/Shanghai">🇨🇳 Shanghai</option>
+                  <option value="Asia/Tokyo">🇯🇵 Tokyo</option>
+                  <option value="Europe/London">🇬🇧 London</option>
+                  <option value="America/Los_Angeles">🇺🇸 Los Angeles</option>
+                  <option value="America/New_York">🇺🇸 New York</option>
+                  <option value="UTC">🌐 UTC</option>
+                </select>
+              </label>
+            </div>
 
             <div class="split-fields">
               <label class="field">
