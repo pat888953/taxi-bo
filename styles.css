@@ -1464,6 +1464,19 @@ body[data-cue-ui-mode="drive"] .layout {
   gap: 14px;
 }
 
+.dashcam-time-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.dashcam-time-fields .field,
+.dashcam-time-fields input,
+.dashcam-time-fields select {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .dashcam-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.42fr) minmax(0, 0.58fr);
