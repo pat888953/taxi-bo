@@ -1884,6 +1884,8 @@ function getDashcamMatchedPoint() {
   }
 
   const targetTimestamp = videoStartMs + dashcamVideo.currentTime * 1000;
+  const routeStartTimestamp = points[0].timestamp;
+  const routeEndTimestamp = points.at(-1).timestamp;
   let nearest = points[0];
   let nearestDelta = Math.abs(points[0].timestamp - targetTimestamp);
 
@@ -1898,7 +1900,13 @@ function getDashcamMatchedPoint() {
   return {
     point: nearest,
     targetTimestamp,
-    deltaSeconds: nearestDelta / 1000
+    deltaSeconds: nearestDelta / 1000,
+    outsideRouteSeconds: targetTimestamp < routeStartTimestamp
+      ? (routeStartTimestamp - targetTimestamp) / 1000
+      : targetTimestamp > routeEndTimestamp
+        ? (targetTimestamp - routeEndTimestamp) / 1000
+        : 0,
+    outsideRouteDirection: targetTimestamp < routeStartTimestamp ? "before" : "after"
   };
 }
 
@@ -1908,7 +1916,7 @@ function captureDashcamCueFrame() {
       throw new Error("Load the dashcam video and wait until the preview appears.");
     }
 
-    const { point, deltaSeconds } = getDashcamMatchedPoint();
+    const { point, deltaSeconds, outsideRouteSeconds, outsideRouteDirection } = getDashcamMatchedPoint();
     const canvas = document.createElement("canvas");
     canvas.width = dashcamVideo.videoWidth;
     canvas.height = dashcamVideo.videoHeight;
@@ -1921,18 +1929,29 @@ function captureDashcamCueFrame() {
     dashcamPreview.dataset.image = image;
     dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
 
+    if (outsideRouteSeconds > 0) {
+      dashcamPreview.dataset.latitude = "";
+      dashcamPreview.dataset.longitude = "";
+      dashcamSaveButton.disabled = true;
+      const timingMessage = outsideRouteDirection === "before"
+        ? `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} BEFORE the recorded route starts. Move the video forward.`
+        : `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} AFTER the recorded route ends. Move the video backward.`;
+      updateDashcamStatus(`Frame captured for preview at video ${formatDashcamDuration(dashcamVideo.currentTime)}. ${timingMessage} Saving is disabled until the frame is inside the route time.`, true);
+      return;
+    }
+
     if (deltaSeconds > 300) {
       dashcamPreview.dataset.latitude = "";
       dashcamPreview.dataset.longitude = "";
       dashcamSaveButton.disabled = true;
-      updateDashcamStatus(`Frame captured for preview, but it is ${formatDashcamDuration(deltaSeconds)} from the recorded route. Saving is disabled. Check the video start date, time, and recording timezone.`, true);
+      updateDashcamStatus(`Frame captured for preview. Its time is inside the route period, but the nearest saved GPS sample is ${formatDashcamDuration(deltaSeconds)} away. Saving is disabled because the GPS recording has a large time gap.`, true);
       return;
     }
 
     dashcamPreview.dataset.latitude = String(point.latitude);
     dashcamPreview.dataset.longitude = String(point.longitude);
     dashcamSaveButton.disabled = false;
-    updateDashcamStatus(`Captured frame and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
+    updateDashcamStatus(`Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
   } catch (error) {
     dashcamSaveButton.disabled = true;
     updateDashcamStatus(error.message || "Could not capture this dashcam cue.", true);
