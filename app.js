@@ -1909,9 +1909,6 @@ function captureDashcamCueFrame() {
     }
 
     const { point, deltaSeconds } = getDashcamMatchedPoint();
-    if (deltaSeconds > 300) {
-      throw new Error(`This frame is ${formatDashcamDuration(deltaSeconds)} from the recorded route. Check the video start date, time, and recording timezone.`);
-    }
     const canvas = document.createElement("canvas");
     canvas.width = dashcamVideo.videoWidth;
     canvas.height = dashcamVideo.videoHeight;
@@ -1922,9 +1919,18 @@ function captureDashcamCueFrame() {
     dashcamPreview.src = image;
     dashcamPreview.hidden = false;
     dashcamPreview.dataset.image = image;
+    dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
+
+    if (deltaSeconds > 300) {
+      dashcamPreview.dataset.latitude = "";
+      dashcamPreview.dataset.longitude = "";
+      dashcamSaveButton.disabled = true;
+      updateDashcamStatus(`Frame captured for preview, but it is ${formatDashcamDuration(deltaSeconds)} from the recorded route. Saving is disabled. Check the video start date, time, and recording timezone.`, true);
+      return;
+    }
+
     dashcamPreview.dataset.latitude = String(point.latitude);
     dashcamPreview.dataset.longitude = String(point.longitude);
-    dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
     dashcamSaveButton.disabled = false;
     updateDashcamStatus(`Captured frame and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
   } catch (error) {
