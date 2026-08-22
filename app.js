@@ -1934,8 +1934,26 @@ function getDashcamMatchedPoint() {
     }
   });
 
+  let matchedPoint = nearest;
+  if (targetTimestamp >= routeStartTimestamp && targetTimestamp <= routeEndTimestamp) {
+    const nextIndex = points.findIndex((point) => point.timestamp >= targetTimestamp);
+    const nextPoint = points[Math.max(0, nextIndex)];
+    const previousPoint = points[Math.max(0, nextIndex - 1)];
+    const sampleDuration = nextPoint.timestamp - previousPoint.timestamp;
+
+    if (sampleDuration > 0) {
+      const progress = (targetTimestamp - previousPoint.timestamp) / sampleDuration;
+      matchedPoint = {
+        ...nearest,
+        latitude: previousPoint.latitude + (nextPoint.latitude - previousPoint.latitude) * progress,
+        longitude: previousPoint.longitude + (nextPoint.longitude - previousPoint.longitude) * progress,
+        timestamp: targetTimestamp
+      };
+    }
+  }
+
   return {
-    point: nearest,
+    point: matchedPoint,
     targetTimestamp,
     deltaSeconds: nearestDelta / 1000,
     outsideRouteSeconds: targetTimestamp < routeStartTimestamp
@@ -1947,8 +1965,30 @@ function getDashcamMatchedPoint() {
   };
 }
 
+function syncDashcamMatchToCueEditor(route, point, captureMessage) {
+  if (!route || !point) {
+    return;
+  }
+
+  const routeOptionExists = Array.from(photoRouteSelect.options)
+    .some((option) => option.value === route.id);
+  if (routeOptionExists) {
+    photoRouteSelect.value = route.id;
+    updatePhotoRouteStatus();
+  }
+
+  photoLatitudeInput.value = point.latitude.toFixed(6);
+  photoLongitudeInput.value = point.longitude.toFixed(6);
+  setMapPickMarker([point.latitude, point.longitude]);
+  setCueCoordinateMessage(captureMessage);
+  setCueSnapButtonMode("dashcam");
+  drawRouteMap(route);
+}
+
 function captureDashcamCueFrame() {
   try {
+    setCueSnapButtonMode("route");
+
     if (!dashcamVideo || dashcamVideo.hidden || !dashcamVideo.videoWidth) {
       throw new Error("Load the dashcam video and wait until the preview appears.");
     }
@@ -1993,7 +2033,9 @@ function captureDashcamCueFrame() {
     dashcamPreview.dataset.longitude = String(point.longitude);
     dashcamImageOptions.hidden = false;
     dashcamSaveButton.disabled = false;
-    updateDashcamStatus(`Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`);
+    const captureMessage = `Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`;
+    updateDashcamStatus(captureMessage);
+    syncDashcamMatchToCueEditor(getDashcamRoute(), point, captureMessage);
   } catch (error) {
     dashcamSaveButton.disabled = true;
     updateDashcamStatus(error.message || "Could not capture this dashcam cue.", true);
@@ -4373,6 +4415,8 @@ function updatePhotoFormState() {
 }
 
 function updateCueCoordinateStatus(photo = getSelectedCue()) {
+  setCueSnapButtonMode("route");
+
   if (!photo || !Number.isFinite(photo.latitude) || !Number.isFinite(photo.longitude)) {
     cueCoordinateStatus.className = "cue-coordinate-status empty-state";
     cueCoordinateStatus.textContent = "Pick a generated cue to load its coordinates.";
@@ -4384,6 +4428,21 @@ function updateCueCoordinateStatus(photo = getSelectedCue()) {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
   cueCoordinateStatus.className = "cue-coordinate-status";
   cueCoordinateStatus.innerHTML = `Coordinates: ${latitude}, ${longitude} <a href="${mapsUrl}" target="_blank" rel="noopener">Open in Google Maps</a>`;
+}
+
+function setCueSnapButtonMode(mode = "route") {
+  if (!snapCueToRouteButton) {
+    return;
+  }
+
+  const dashcamMatched = mode === "dashcam";
+  snapCueToRouteButton.disabled = dashcamMatched;
+  snapCueToRouteButton.textContent = dashcamMatched
+    ? "GPS matched — no snap needed"
+    : "Put cue on route line";
+  snapCueToRouteButton.title = dashcamMatched
+    ? "The dashcam timestamp already supplied this cue's position on the recorded route."
+    : "";
 }
 
 function setCueCoordinateMessage(message, isError = false) {
