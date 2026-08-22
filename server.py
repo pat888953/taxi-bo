@@ -117,7 +117,9 @@ def initialize_db(mode=None):
               start_longitude REAL,
               destination_latitude REAL,
               destination_longitude REAL,
+              route_type TEXT NOT NULL DEFAULT 'standard',
               route_geometry TEXT NOT NULL DEFAULT '[]',
+              route_sections TEXT NOT NULL DEFAULT '[]',
               recorded_track_points TEXT NOT NULL DEFAULT '[]',
               route_distance_meters REAL,
               route_duration_seconds REAL,
@@ -252,7 +254,9 @@ def ensure_route_columns(db):
         "via": "TEXT NOT NULL DEFAULT ''",
         "destination_latitude": "REAL",
         "destination_longitude": "REAL",
+        "route_type": "TEXT NOT NULL DEFAULT 'standard'",
         "route_geometry": "TEXT NOT NULL DEFAULT '[]'",
+        "route_sections": "TEXT NOT NULL DEFAULT '[]'",
         "recorded_track_points": "TEXT NOT NULL DEFAULT '[]'",
         "route_distance_meters": "REAL",
         "route_duration_seconds": "REAL",
@@ -297,7 +301,8 @@ def fetch_routes(include_images=True, route_id=None):
             SELECT
               id, name, variant, start, via, destination, time_window, traffic_pattern, notes,
               start_latitude, start_longitude, destination_latitude, destination_longitude,
-              route_geometry, recorded_track_points, route_distance_meters, route_duration_seconds
+              route_type, route_geometry, route_sections, recorded_track_points,
+              route_distance_meters, route_duration_seconds
             FROM routes
             {route_filter}
             ORDER BY position ASC, updated_at DESC
@@ -346,7 +351,9 @@ def fetch_routes(include_images=True, route_id=None):
             "startLongitude": route["start_longitude"],
             "destinationLatitude": route["destination_latitude"],
             "destinationLongitude": route["destination_longitude"],
+            "routeType": route["route_type"],
             "routeGeometry": json.loads(route["route_geometry"] or "[]"),
+            "routeSections": json.loads(route["route_sections"] or "[]"),
             "recordedTrackPoints": json.loads(route["recorded_track_points"] or "[]"),
             "routeDistanceMeters": route["route_distance_meters"],
             "routeDurationSeconds": route["route_duration_seconds"],
@@ -377,9 +384,10 @@ def replace_routes(routes):
                   id, name, variant, start, via, destination, time_window,
                   traffic_pattern, notes, start_latitude, start_longitude,
                   destination_latitude, destination_longitude, route_geometry, recorded_track_points,
-                  route_distance_meters, route_duration_seconds, position, updated_at
+                  route_type, route_sections, route_distance_meters, route_duration_seconds,
+                  position, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     route.get("id", ""),
@@ -397,6 +405,8 @@ def replace_routes(routes):
                     route.get("destinationLongitude"),
                     json.dumps(route.get("routeGeometry") or []),
                     json.dumps(route.get("recordedTrackPoints") or []),
+                    route.get("routeType", "standard"),
+                    json.dumps(route.get("routeSections") or []),
                     route.get("routeDistanceMeters"),
                     route.get("routeDurationSeconds"),
                     position,
@@ -1365,6 +1375,9 @@ def generate_cues(payload):
 
 def prepare_route(payload):
     generated = generate_route(payload)
+    hybrid = build_best_hybrid_route(generated)
+    if hybrid:
+        generated = hybrid
     matched_cues = match_saved_photo_cues(generated["cues"])
     generated["cues"] = matched_cues
     generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
@@ -1381,12 +1394,12 @@ def prepare_route_options(payload):
         generated = format_generated_route(start, destination, start_label, road_route)
         generated["viaLabel"] = via["label"]
         label = f'Via {via["label"]}'
-        return {"options": [match_prepared_route(generated, "via-road", label)]}
+        return add_hybrid_route_option([match_prepared_route(generated, "via-road", label)])
 
     if not requires_harbour_crossing(start, destination):
         road_route = fetch_road_route(start, destination)
         generated = format_generated_route(start, destination, start_label, road_route)
-        return {"options": [match_prepared_route(generated, "fastest", "Fastest route")]}
+        return add_hybrid_route_option([match_prepared_route(generated, "fastest", "Fastest route")])
 
     options = []
     for option_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
@@ -1402,7 +1415,7 @@ def prepare_route_options(payload):
         generated = format_generated_route(start, destination, start_label, road_route)
         options.append(match_prepared_route(generated, "fastest", "Fastest route"))
 
-    return {"options": options}
+    return add_hybrid_route_option(options)
 
 
 def match_prepared_route(generated, option_id, label):
@@ -1416,6 +1429,199 @@ def match_prepared_route(generated, option_id, label):
         warning.get("severity") in {"high", "medium"} for warning in generated.get("routeWarnings", [])
     )
     return generated
+
+
+def add_hybrid_route_option(options):
+    best_hybrid = None
+
+    for generated in options:
+        hybrid = build_best_hybrid_route(generated)
+        if hybrid and (
+            best_hybrid is None
+            or hybrid.get("hybridCoverage", 0) > best_hybrid.get("hybridCoverage", 0)
+        ):
+            best_hybrid = hybrid
+
+    if not best_hybrid:
+        return {"options": options}
+
+    coverage_percent = round(best_hybrid["hybridCoverage"] * 100)
+    prepared_hybrid = match_prepared_route(
+        best_hybrid,
+        "hybrid-recorded-segment",
+        f"Hybrid Route — {coverage_percent}% recorded",
+    )
+    return {"options": [prepared_hybrid, *options]}
+
+
+def build_best_hybrid_route(generated):
+    generated_geometry = normalize_geometry(generated.get("geometry"))
+    if len(generated_geometry) < 2:
+        return None
+
+    best = None
+    for route in fetch_routes(include_images=False):
+        if not is_recorded_route_record(route):
+            continue
+
+        candidate = build_hybrid_route_candidate(generated, route)
+        if candidate and (
+            best is None
+            or candidate.get("recordedSegmentDistance", 0) > best.get("recordedSegmentDistance", 0)
+        ):
+            best = candidate
+
+    return best
+
+
+def is_recorded_route_record(route):
+    route_type = str(route.get("routeType") or "").lower()
+    name = str(route.get("name") or "").lower()
+    notes = str(route.get("notes") or "").lower()
+    return route_type == "recorded" or "recorded" in name or "actual drive recorded" in notes
+
+
+def recorded_route_geometry(route):
+    geometry = normalize_geometry(route.get("routeGeometry"))
+    if len(geometry) >= 2:
+        return geometry
+
+    points = route.get("recordedTrackPoints") or []
+    return normalize_geometry([
+        [point.get("latitude"), point.get("longitude")]
+        for point in points
+        if isinstance(point, dict)
+    ])
+
+
+def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=55):
+    generated_geometry = normalize_geometry(generated.get("geometry"))
+    recorded_geometry = recorded_route_geometry(recorded_route)
+    if len(generated_geometry) < 2 or len(recorded_geometry) < 2:
+        return None
+
+    recorded_stride = max(1, len(recorded_geometry) // 350)
+    generated_stride = max(1, len(generated_geometry) // 500)
+    generated_samples = list(range(0, len(generated_geometry), generated_stride))
+    if generated_samples[-1] != len(generated_geometry) - 1:
+        generated_samples.append(len(generated_geometry) - 1)
+
+    matches = []
+    for recorded_index in range(0, len(recorded_geometry), recorded_stride):
+        recorded_point = recorded_geometry[recorded_index]
+        nearest_index = None
+        nearest_distance = None
+        for generated_index in generated_samples:
+            generated_point = generated_geometry[generated_index]
+            distance = haversine_distance(
+                recorded_point[0], recorded_point[1], generated_point[0], generated_point[1]
+            )
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_index = generated_index
+                nearest_distance = distance
+
+        if nearest_distance is not None and nearest_distance <= match_radius_meters:
+            matches.append((recorded_index, nearest_index, nearest_distance))
+
+    if len(matches) < 2:
+        return None
+
+    runs = []
+    current = [matches[0]]
+    maximum_generated_jump = max(12, len(generated_geometry) // 5)
+    for match in matches[1:]:
+        previous = current[-1]
+        recorded_continues = match[0] - previous[0] <= recorded_stride * 3
+        generated_continues = 0 <= match[1] - previous[1] <= maximum_generated_jump
+        if recorded_continues and generated_continues:
+            current.append(match)
+        else:
+            runs.append(current)
+            current = [match]
+    runs.append(current)
+
+    best_run = max(
+        runs,
+        key=lambda run: sum_geometry_distance(recorded_geometry[run[0][0]:run[-1][0] + 1])
+        if len(run) >= 2 else 0,
+    )
+    if len(best_run) < 2:
+        return None
+
+    recorded_start_index, generated_start_index, entry_gap = best_run[0]
+    recorded_end_index, generated_end_index, exit_gap = best_run[-1]
+    if generated_end_index <= generated_start_index or recorded_end_index <= recorded_start_index:
+        return None
+
+    recorded_segment = recorded_geometry[recorded_start_index:recorded_end_index + 1]
+    recorded_distance = sum_geometry_distance(recorded_segment)
+    if recorded_distance < 300:
+        return None
+
+    sections = []
+    generated_start_section = generated_geometry[:generated_start_index + 1]
+    generated_end_section = generated_geometry[generated_end_index:]
+    if len(generated_start_section) >= 2:
+        sections.append({"source": "generated", "role": "start-connector", "geometry": generated_start_section})
+    sections.append({
+        "source": "recorded",
+        "role": "proven-segment",
+        "recordingId": recorded_route.get("id", ""),
+        "recordingName": recorded_route.get("name", "Recorded route"),
+        "geometry": recorded_segment,
+    })
+    if len(generated_end_section) >= 2:
+        sections.append({"source": "generated", "role": "end-connector", "geometry": generated_end_section})
+
+    hybrid_geometry = combine_route_sections(sections)
+    hybrid_distance = sum_geometry_distance(hybrid_geometry)
+    if hybrid_distance <= 0:
+        return None
+
+    coverage = min(1.0, recorded_distance / hybrid_distance)
+    if coverage < 0.12:
+        return None
+
+    original_distance = generated.get("distance")
+    original_duration = generated.get("duration")
+    duration = original_duration
+    if isinstance(original_distance, (int, float)) and original_distance > 0 and isinstance(original_duration, (int, float)):
+        duration = original_duration * hybrid_distance / original_distance
+
+    warnings = analyze_route_sanity(hybrid_geometry, hybrid_distance)
+    if entry_gap > 35 or exit_gap > 35:
+        warnings.append({
+            "code": "hybrid-connector-review",
+            "severity": "medium",
+            "title": "Hybrid connection needs review",
+            "message": "A generated connector joins the recorded segment more than 35 metres from its GPS line.",
+        })
+
+    return {
+        **generated,
+        "routeType": "hybrid",
+        "geometry": hybrid_geometry,
+        "routeSections": sections,
+        "distance": hybrid_distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(hybrid_geometry),
+        "routeWarnings": warnings,
+        "hybridCoverage": coverage,
+        "recordedSegmentDistance": recorded_distance,
+        "sourceRecordedRouteId": recorded_route.get("id", ""),
+        "sourceRecordedRouteName": recorded_route.get("name", "Recorded route"),
+        "hybridEntryGapMeters": round(entry_gap, 1),
+        "hybridExitGapMeters": round(exit_gap, 1),
+    }
+
+
+def combine_route_sections(sections):
+    combined = []
+    for section in sections:
+        for point in normalize_geometry(section.get("geometry")):
+            if not combined or point != combined[-1]:
+                combined.append(point)
+    return combined
 
 
 def requires_harbour_crossing(start, destination):

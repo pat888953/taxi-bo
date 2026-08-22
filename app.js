@@ -59,6 +59,8 @@ const savedRouteModeRadio = document.querySelector("#savedRouteModeRadio");
 const phoneRouteSourceLabel = document.querySelector("#phoneRouteSourceLabel");
 const phoneRouteSourceButton = document.querySelector("#phoneRouteSourceButton");
 const phoneGoStartModeButton = document.querySelector("#phoneGoStartModeButton");
+const testStartEntryGroup = document.querySelector("#testStartEntryGroup");
+const testStartSearch = document.querySelector("#testStartSearch");
 const destinationEntryGroup = document.querySelector("#destinationEntryGroup");
 const viaRoadEntryGroup = document.querySelector("#viaRoadEntryGroup");
 const savedRouteEntryGroup = document.querySelector("#savedRouteEntryGroup");
@@ -285,6 +287,10 @@ function setCueUiMode(mode) {
   document.body.dataset.cueUiMode = nextMode;
   localStorage.setItem(TAXIBO_CUE_UI_MODE_KEY, nextMode);
   updateSpeedUnitDisplay();
+
+  if (testStartEntryGroup) {
+    testStartEntryGroup.hidden = nextMode !== "testing";
+  }
 
   cueModeButtons.forEach((button) => {
     const isActive = button.dataset.cueMode === nextMode;
@@ -2376,7 +2382,7 @@ function renderRouteList() {
     const searchable = `${route.name} ${route.variant} ${route.start} ${route.via || ""} ${route.destination} ${route.notes}`.toLowerCase();
     return matchesType && (!query || searchable.includes(query));
   }).sort((first, second) => {
-    const priority = { recorded: 0, prepared: 1, standard: 2 };
+    const priority = { recorded: 0, hybrid: 1, prepared: 2, standard: 3 };
     return priority[getRouteLibraryType(first)] - priority[getRouteLibraryType(second)];
   });
 
@@ -2392,7 +2398,7 @@ function renderRouteList() {
 
     const photoCount = route.photos.length;
     const pointCount = normalizeRouteGeometry(route.routeGeometry).length;
-    const typeLabel = routeType === "recorded" ? "Recorded drive" : routeType === "prepared" ? "Prepared route" : "Saved route";
+    const typeLabel = routeType === "recorded" ? "Recorded drive" : routeType === "hybrid" ? "Hybrid Route" : routeType === "prepared" ? "Prepared route" : "Saved route";
 
     article.innerHTML = `
       <div class="route-item-copy">
@@ -2451,10 +2457,17 @@ function renderRouteList() {
 }
 
 function getRouteLibraryType(route) {
+  const explicitType = String(route.routeType || "").toLowerCase();
   const name = String(route.name || "").toLowerCase();
   const notes = String(route.notes || "").toLowerCase();
   const variant = String(route.variant || "").toLowerCase();
 
+  if (explicitType === "hybrid") {
+    return "hybrid";
+  }
+  if (explicitType === "recorded") {
+    return "recorded";
+  }
   if (name.includes("recorded") || notes.includes("actual drive recorded")) {
     return "recorded";
   }
@@ -2759,13 +2772,34 @@ async function drawRouteMap(route) {
   });
 
   const savedGeometry = normalizeRouteGeometry(route.routeGeometry);
-  const isRecordedRoute = getRouteLibraryType(route) === "recorded";
-  const usesRecordedTrack = isRecordedRoute && savedGeometry.length >= 2;
+  const routeType = getRouteLibraryType(route);
+  const hybridSections = routeType === "hybrid" ? normalizeRouteSections(route.routeSections) : [];
+  const isRecordedRoute = routeType === "recorded";
+  const usesRecordedTrack = (isRecordedRoute || routeType === "hybrid") && savedGeometry.length >= 2;
   const routedLatLngs = usesRecordedTrack
     ? savedGeometry
     : await getRouteGeometry(latLngs);
 
   if (renderVersion !== mapRenderVersion) {
+    return;
+  }
+
+  if (hybridSections.length) {
+    const recordedDistance = hybridSections
+      .filter((section) => section.source === "recorded")
+      .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
+    const totalDistance = hybridSections
+      .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
+    const coverage = totalDistance > 0 ? Math.round(recordedDistance / totalDistance * 100) : 0;
+    routeMapState.textContent = `Showing a Hybrid Route with ${coverage}% proven recorded road in green and generated connectors in orange.`;
+    const sectionLines = hybridSections.map((section) => L.polyline(section.geometry, {
+      color: section.source === "recorded" ? "#17734b" : "#d97706",
+      weight: section.source === "recorded" ? 7 : 5,
+      opacity: section.source === "recorded" ? 0.95 : 0.82,
+      dashArray: section.source === "recorded" ? null : "10 7"
+    }));
+    routeLine = L.featureGroup(sectionLines).addTo(map);
+    map.fitBounds(routeLine.getBounds(), { padding: [32, 32] });
     return;
   }
 
@@ -3125,6 +3159,31 @@ function normalizeRouteGeometry(geometry) {
     .filter(Boolean);
 }
 
+function normalizeRouteSections(sections) {
+  if (!Array.isArray(sections)) {
+    return [];
+  }
+
+  return sections
+    .map((section) => ({
+      source: section?.source === "recorded" ? "recorded" : "generated",
+      role: String(section?.role || "").trim(),
+      recordingId: String(section?.recordingId || "").trim(),
+      recordingName: String(section?.recordingName || "").trim(),
+      geometry: normalizeRouteGeometry(section?.geometry)
+    }))
+    .filter((section) => section.geometry.length >= 2);
+}
+
+function calculateGeometryDistance(geometry) {
+  return normalizeRouteGeometry(geometry).reduce((total, point, index, points) => {
+    if (!index) {
+      return total;
+    }
+    return total + haversineDistance(points[index - 1], point);
+  }, 0);
+}
+
 function getFilteredRoutes() {
   if (routeEntryMode === "saved") {
     return routes;
@@ -3334,11 +3393,13 @@ function normalizeImportedRoute(route) {
     timeWindow: String(route.timeWindow ?? "").trim(),
     trafficPattern: String(route.trafficPattern ?? "").trim(),
     notes: String(route.notes ?? "").trim(),
+    routeType: String(route.routeType ?? "standard").trim().toLowerCase() || "standard",
     startLatitude: parseOptionalNumber(route.startLatitude),
     startLongitude: parseOptionalNumber(route.startLongitude),
     destinationLatitude: parseOptionalNumber(route.destinationLatitude),
     destinationLongitude: parseOptionalNumber(route.destinationLongitude),
     routeGeometry: normalizeRouteGeometry(route.routeGeometry),
+    routeSections: normalizeRouteSections(route.routeSections),
     recordedTrackPoints: normalizeRecordedTrackPoints(route.recordedTrackPoints),
     routeDistanceMeters: parseOptionalNumber(route.routeDistanceMeters),
     routeDurationSeconds: parseOptionalNumber(route.routeDurationSeconds),
@@ -3615,15 +3676,18 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     : null;
   const typedDestination = destinationSearch.value.trim();
   const viaRoad = routeEntryMode === "destination" ? viaRoadSearch.value.trim() : "";
+  const testingStart = document.body.dataset.cueUiMode === "testing"
+    ? testStartSearch?.value.trim() || ""
+    : "";
   // A route-name search may remain in the text box after the driver picks a
   // saved route. In that case the database endpoints must win over the search
   // text, otherwise the app incorrectly falls back to the device location.
   const destination = selectedRoute?.destination || typedDestination || "";
   const acceptedPickup = String(acceptedTripContext?.pickup || "").trim();
-  const hasSavedStartCoordinates = !acceptedPickup &&
+  const hasSavedStartCoordinates = !testingStart && !acceptedPickup &&
     Number.isFinite(selectedRoute?.startLatitude) &&
     Number.isFinite(selectedRoute?.startLongitude);
-  const start = acceptedPickup || (hasSavedStartCoordinates ? "" : selectedRoute?.start || "");
+  const start = testingStart || acceptedPickup || (hasSavedStartCoordinates ? "" : selectedRoute?.start || "");
   let currentPosition = hasSavedStartCoordinates ? {
     latitude: selectedRoute.startLatitude,
     longitude: selectedRoute.startLongitude
@@ -3702,6 +3766,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
 
 function showPreparedRouteChoices(options, destination, locationContext, recordedMatches = [], generationError = "") {
   pendingRouteChoices = options;
+  const hasHybridOption = options.some((option) => option.routeType === "hybrid");
   const trustedCount = options.filter((option) => option.routeTrusted !== false).length;
   const allOptionsNeedReview = options.length > 0 && trustedCount === 0;
   routeSummary.className = "route-summary route-choice-summary";
@@ -3744,8 +3809,8 @@ function showPreparedRouteChoices(options, destination, locationContext, recorde
     ` : ""}
     ${options.length ? `
       <div class="generated-route-draft-header">
-        <strong>Generated draft routes</strong>
-        <span>Use these only when no saved taxi route fits. Review carefully in dense or flyover areas.</span>
+        <strong>${hasHybridOption ? "Hybrid and generated routes" : "Generated draft routes"}</strong>
+        <span>${hasHybridOption ? "Hybrid Routes preserve proven recorded road segments and use generated connectors only for the missing sections." : "Use these only when no saved taxi route fits. Review carefully in dense or flyover areas."}</span>
       </div>
     ` : ""}
     <div class="route-choice-list">
@@ -3817,6 +3882,8 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
   const matchedCueCount = Number(generatedRoute.matchedCueCount || 0);
   const cueCount = Number(generatedRoute.cueCount || generatedRoute.cues?.length || 0);
   const optionLabel = generatedRoute.optionLabel || "Prepared";
+  const isHybridRoute = generatedRoute.routeType === "hybrid";
+  const hybridCoveragePercent = Math.round(Number(generatedRoute.hybridCoverage || 0) * 100);
   const warningHtml = formatRouteWarnings(generatedRoute.routeWarnings);
   const trustWarningHtml = generatedRoute.routeTrusted === false
     ? `<div class="route-generation-warning"><strong>Do not save cue photos from this route yet</strong><span>This map route needs driver review. Prefer a recorded route or record the actual taxi path first.</span></div>`
@@ -3824,16 +3891,18 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
 
   preparedRoute = normalizeImportedRoute({
     id: `prepared-${Date.now()}`,
-    name: `Prepared: ${shortPlaceName(generatedRoute.destinationLabel || destination)}`,
+    name: `${isHybridRoute ? "Hybrid" : "Prepared"}: ${shortPlaceName(generatedRoute.destinationLabel || destination)}`,
     variant: optionLabel,
     start: generatedRoute.startLabel || "Current location",
     destination: generatedRoute.destinationLabel || destination,
-    notes: `${optionLabel}. ${matchedCueCount} of ${cueCount} cues matched saved photos.`,
+    notes: `${optionLabel}. ${isHybridRoute ? `${hybridCoveragePercent}% proven recorded road. ` : ""}${matchedCueCount} of ${cueCount} cues matched saved photos.`,
+    routeType: isHybridRoute ? "hybrid" : "prepared",
     startLatitude: generatedRoute.start?.latitude,
     startLongitude: generatedRoute.start?.longitude,
     destinationLatitude: generatedRoute.destination?.latitude,
     destinationLongitude: generatedRoute.destination?.longitude,
     routeGeometry: generatedRoute.geometry,
+    routeSections: generatedRoute.routeSections,
     routeDistanceMeters: generatedRoute.distance,
     routeDurationSeconds: generatedRoute.duration,
     photos: createPreparedCues(generatedRoute.cues || [])
@@ -3845,6 +3914,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
   routeSummary.innerHTML = `
     <strong>${escapeHtml(optionLabel)}</strong><br>
     Destination: ${escapeHtml(preparedRoute.destination)}<br>
+    ${isHybridRoute ? `Hybrid composition: ${hybridCoveragePercent}% proven recorded road with generated start/end connectors.<br>` : ""}
     Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
     ${trustWarningHtml}
     ${warningHtml}
