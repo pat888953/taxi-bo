@@ -78,6 +78,35 @@ class HybridRouteTests(unittest.TestCase):
         finally:
             server.DB_PATH = original_path
 
+    def test_hde_issue_log_deduplicates_and_tracks_status(self):
+        original_path = server.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                server.DB_PATH = Path(directory) / "issues.db"
+                server.initialize_db("local")
+                payload = {
+                    "title": "Wrong tunnel approach",
+                    "issueType": "recording-needed",
+                    "severity": "high",
+                    "start": "A",
+                    "destination": "B",
+                    "via": "Hung Hom Tunnel southbound",
+                    "message": "Router used the station loop.",
+                    "recordingNeeded": True,
+                }
+
+                first = server.log_hybrid_engine_issue(payload=payload)
+                second = server.log_hybrid_engine_issue(payload=payload)
+                issues = server.fetch_hybrid_engine_issues()
+
+                self.assertEqual(first["id"], second["id"])
+                self.assertEqual(len(issues), 1)
+                self.assertEqual(issues[0]["occurrenceCount"], 2)
+                resolved = server.update_hybrid_engine_issue_status({"id": first["id"], "status": "resolved"})
+                self.assertEqual(resolved["status"], "resolved")
+        finally:
+            server.DB_PATH = original_path
+
     def test_builds_hybrid_from_continuous_recorded_overlap(self):
         generated_geometry = [[22.3, 114 + index * 0.0002] for index in range(101)]
         recorded_geometry = [[22.30008, 114.004 + index * 0.0002] for index in range(61)]

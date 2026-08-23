@@ -205,6 +205,32 @@ def initialize_db(mode=None):
             CREATE INDEX IF NOT EXISTS idx_proven_corridors_source
               ON proven_corridors(source_route_id);
 
+            CREATE TABLE IF NOT EXISTS hybrid_engine_issues (
+              id TEXT PRIMARY KEY,
+              fingerprint TEXT NOT NULL UNIQUE,
+              title TEXT NOT NULL,
+              issue_type TEXT NOT NULL DEFAULT 'route-review',
+              severity TEXT NOT NULL DEFAULT 'medium',
+              status TEXT NOT NULL DEFAULT 'open',
+              start_label TEXT NOT NULL DEFAULT '',
+              destination_label TEXT NOT NULL DEFAULT '',
+              via_label TEXT NOT NULL DEFAULT '',
+              latitude REAL,
+              longitude REAL,
+              message TEXT NOT NULL DEFAULT '',
+              engine_state TEXT NOT NULL DEFAULT 'draft',
+              confidence REAL NOT NULL DEFAULT 0,
+              recording_needed INTEGER NOT NULL DEFAULT 0,
+              occurrence_count INTEGER NOT NULL DEFAULT 1,
+              route_snapshot TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              resolved_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_hybrid_engine_issues_status
+              ON hybrid_engine_issues(status, severity, updated_at DESC);
+
             CREATE TABLE IF NOT EXISTS incoming_orders (
               id TEXT PRIMARY KEY,
               pickup TEXT NOT NULL DEFAULT '',
@@ -1438,6 +1464,20 @@ def resolve_via_route(payload, start, destination):
     if start_latitude < HONG_KONG_HARBOUR_DIVIDE < destination_latitude:
         return [dict(point) for point in HUNG_HOM_NORTHBOUND_ANCHORS], "Hung Hom Tunnel northbound"
     if start_latitude > HONG_KONG_HARBOUR_DIVIDE > destination_latitude:
+        try:
+            log_hybrid_engine_issue(payload={
+                "title": "Hung Hom Tunnel southbound recording needed",
+                "issueType": "recording-needed",
+                "severity": "high",
+                "start": start.get("label", "Kowloon start"),
+                "destination": destination.get("label", "Hong Kong destination"),
+                "via": "Hung Hom Tunnel southbound",
+                "message": "This direction is blocked until a correct Kowloon-to-Hong Kong drive is recorded and verified.",
+                "engineState": "blocked",
+                "recordingNeeded": True,
+            })
+        except Exception:
+            pass
         raise ValueError(
             "Hung Hom Tunnel southbound is not calibrated yet. Record one correct Kowloon-to-Hong Kong drive before using this tunnel direction."
         )
@@ -1620,6 +1660,12 @@ def prepare_route(payload):
     generated["cues"] = matched_cues
     generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
     generated["cueCount"] = len(matched_cues)
+    apply_hybrid_engine_assessment(generated)
+    if generated["hybridEngine"]["recordingNeeded"] or generated.get("routeWarnings"):
+        try:
+            log_hybrid_engine_issue(generated)
+        except Exception:
+            pass
     return generated
 
 
@@ -1668,6 +1714,11 @@ def match_prepared_route(generated, option_id, label):
     generated["optionId"] = option_id
     generated["optionLabel"] = label
     apply_hybrid_engine_assessment(generated)
+    if generated["hybridEngine"]["recordingNeeded"] or generated.get("routeWarnings"):
+        try:
+            log_hybrid_engine_issue(generated)
+        except Exception:
+            pass
     return generated
 
 
@@ -1784,6 +1835,137 @@ def fetch_hybrid_engine_status(refresh=False):
         "states": ["proven", "hybrid", "draft", "blocked"],
         "corridors": corridors,
     }
+
+
+def hybrid_issue_fingerprint(parts):
+    normalized = "|".join(re.sub(r"\s+", " ", str(part or "").strip().lower()) for part in parts)
+    return str(uuid4()) if not normalized.strip("|") else normalized[:500]
+
+
+def log_hybrid_engine_issue(route=None, payload=None):
+    route = route or {}
+    payload = payload or {}
+    engine = route.get("hybridEngine") or {}
+    warnings = route.get("routeWarnings") or []
+    state = str(payload.get("engineState") or engine.get("state") or "draft")
+    severity = str(payload.get("severity") or (
+        "high" if state == "blocked" or any(w.get("severity") == "high" for w in warnings)
+        else "medium"
+    ))
+    issue_type = str(payload.get("issueType") or (
+        "recording-needed" if payload.get("recordingNeeded", engine.get("recordingNeeded"))
+        else "route-review"
+    ))
+    start_label = str(payload.get("start") or route.get("startLabel") or "").strip()
+    destination_label = str(payload.get("destination") or route.get("destinationLabel") or "").strip()
+    via_label = str(payload.get("via") or route.get("viaLabel") or "").strip()
+    title = str(payload.get("title") or (
+        warnings[0].get("title") if warnings else "Route recording needed"
+    )).strip()
+    message = str(payload.get("message") or (
+        "; ".join(w.get("message", "") for w in warnings if w.get("message"))
+        or "No proven corridor covers enough of this route. Record and verify the real drive."
+    )).strip()
+    recording_needed = bool(payload.get("recordingNeeded", engine.get("recordingNeeded", False)))
+    confidence = float(payload.get("confidence", engine.get("confidence", 0)) or 0)
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+    warning_codes = ",".join(sorted(str(w.get("code") or "") for w in warnings))
+    fingerprint = hybrid_issue_fingerprint([
+        issue_type, start_label, destination_label, via_label, state, warning_codes,
+    ])
+    snapshot = {
+        "routeType": route.get("routeType"), "optionLabel": route.get("optionLabel"),
+        "distance": route.get("distance"), "duration": route.get("duration"),
+        "hybridCoverage": route.get("hybridCoverage"), "warnings": warnings,
+        "start": route.get("start"), "destination": route.get("destination"),
+    }
+
+    with connect_db() as db:
+        existing = db.execute(
+            "SELECT id, occurrence_count FROM hybrid_engine_issues WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone()
+        if existing:
+            issue_id = existing["id"]
+            db.execute(
+                """
+                UPDATE hybrid_engine_issues SET title = ?, severity = ?, status = 'open',
+                  message = ?, confidence = ?, recording_needed = ?,
+                  occurrence_count = ?, route_snapshot = ?, updated_at = CURRENT_TIMESTAMP,
+                  resolved_at = NULL WHERE id = ?
+                """,
+                (title, severity, message, confidence, int(recording_needed),
+                 int(existing["occurrence_count"] or 0) + 1, json.dumps(snapshot), issue_id),
+            )
+        else:
+            issue_id = str(uuid4())
+            db.execute(
+                """
+                INSERT INTO hybrid_engine_issues (
+                  id, fingerprint, title, issue_type, severity, start_label,
+                  destination_label, via_label, latitude, longitude, message,
+                  engine_state, confidence, recording_needed, route_snapshot
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (issue_id, fingerprint, title, issue_type, severity, start_label,
+                 destination_label, via_label, latitude, longitude, message, state,
+                 confidence, int(recording_needed), json.dumps(snapshot)),
+            )
+    return fetch_hybrid_engine_issue(issue_id)
+
+
+def fetch_hybrid_engine_issue(issue_id):
+    issues = fetch_hybrid_engine_issues()
+    return next((issue for issue in issues if issue["id"] == issue_id), None)
+
+
+def fetch_hybrid_engine_issues():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, title, issue_type, severity, status, start_label,
+              destination_label, via_label, latitude, longitude, message,
+              engine_state, confidence, recording_needed, occurrence_count,
+              route_snapshot, created_at, updated_at, resolved_at
+            FROM hybrid_engine_issues
+            ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'recording' THEN 1 ELSE 2 END,
+              CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+              updated_at DESC
+            """
+        ).fetchall()
+    return [{
+        "id": row["id"], "title": row["title"], "issueType": row["issue_type"],
+        "severity": row["severity"], "status": row["status"],
+        "start": row["start_label"], "destination": row["destination_label"],
+        "via": row["via_label"], "latitude": row["latitude"], "longitude": row["longitude"],
+        "message": row["message"], "engineState": row["engine_state"],
+        "confidence": row["confidence"], "recordingNeeded": bool(row["recording_needed"]),
+        "occurrenceCount": row["occurrence_count"],
+        "routeSnapshot": json.loads(row["route_snapshot"] or "{}"),
+        "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+        "resolvedAt": row["resolved_at"],
+    } for row in rows]
+
+
+def update_hybrid_engine_issue_status(payload):
+    issue_id = str(payload.get("id") or "").strip()
+    status = str(payload.get("status") or "").strip().lower()
+    if not issue_id or status not in {"open", "recording", "resolved"}:
+        raise ValueError("Issue id and a valid status are required.")
+    with connect_db() as db:
+        db.execute(
+            """
+            UPDATE hybrid_engine_issues SET status = ?, updated_at = CURRENT_TIMESTAMP,
+              resolved_at = CASE WHEN ? = 'resolved' THEN CURRENT_TIMESTAMP ELSE NULL END
+            WHERE id = ?
+            """,
+            (status, status, issue_id),
+        )
+    issue = fetch_hybrid_engine_issue(issue_id)
+    if not issue:
+        raise ValueError("HDE issue was not found.")
+    return issue
 
 
 def add_hybrid_route_option(options):
@@ -2940,6 +3122,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "status": fetch_hybrid_engine_status(refresh=refresh)})
             return
 
+        if path == "/api/hybrid-engine/issues":
+            self.send_json({"ok": True, "issues": fetch_hybrid_engine_issues()})
+            return
+
         if path.startswith("/api/routes/"):
             route_id = unquote(path[len("/api/routes/"):]).strip()
             if not route_id or "/" in route_id:
@@ -3072,7 +3258,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def handle_post(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
             self.send_error(404, "Not found")
             return
 
@@ -3126,6 +3312,14 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/speed-warnings/delete":
                 self.send_json({"ok": True, "warning": delete_speed_warning(payload)})
+                return
+
+            if path == "/api/hybrid-engine/issues":
+                self.send_json({"ok": True, "issue": log_hybrid_engine_issue(payload=payload)})
+                return
+
+            if path == "/api/hybrid-engine/issues/status":
+                self.send_json({"ok": True, "issue": update_hybrid_engine_issue_status(payload)})
                 return
 
             if path == "/api/location-cues":

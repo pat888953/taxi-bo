@@ -10,6 +10,22 @@ const syncCloudToLocalButton = document.querySelector("#syncCloudToLocalButton")
 const downloadLocalBackupButton = document.querySelector("#downloadLocalBackupButton");
 const testCloudConnectionButton = document.querySelector("#testCloudConnectionButton");
 const syncStatus = document.querySelector("#syncStatus");
+const hdeRefreshButton = document.querySelector("#hdeRefreshButton");
+const hdeState = document.querySelector("#hdeState");
+const hdeCorridorCount = document.querySelector("#hdeCorridorCount");
+const hdeOpenCount = document.querySelector("#hdeOpenCount");
+const hdeRecordingCount = document.querySelector("#hdeRecordingCount");
+const hdeHighCount = document.querySelector("#hdeHighCount");
+const hdeIssueForm = document.querySelector("#hdeIssueForm");
+const hdeIssueStart = document.querySelector("#hdeIssueStart");
+const hdeIssueDestination = document.querySelector("#hdeIssueDestination");
+const hdeIssueVia = document.querySelector("#hdeIssueVia");
+const hdeIssueType = document.querySelector("#hdeIssueType");
+const hdeIssueMessage = document.querySelector("#hdeIssueMessage");
+const hdeIssueFilter = document.querySelector("#hdeIssueFilter");
+const hdeIssueList = document.querySelector("#hdeIssueList");
+
+let hdeIssues = [];
 
 function getStorageMode() {
   return localStorage.getItem(TAXIBO_STORAGE_MODE_KEY) === "local" ? "local" : "cloud";
@@ -294,6 +310,125 @@ async function checkDatabaseHealth() {
   }
 }
 
+function hdeHeaders(extra = {}) {
+  return { ...extra, "X-TaxiBo-Storage-Mode": getStorageMode() };
+}
+
+async function loadHybridEngine(refresh = false) {
+  hdeRefreshButton.disabled = true;
+  hdeState.textContent = "Reading Hybrid Drive Engine...";
+  try {
+    const [statusResponse, issueResponse] = await Promise.all([
+      fetch(`/api/hybrid-engine/status${refresh ? "?refresh=1" : ""}`, { cache: "no-store", headers: hdeHeaders() }),
+      fetch("/api/hybrid-engine/issues", { cache: "no-store", headers: hdeHeaders() }),
+    ]);
+    const [statusResult, issueResult] = await Promise.all([statusResponse.json(), issueResponse.json()]);
+    if (!statusResponse.ok || !statusResult.ok) throw new Error(statusResult.error || "Could not load HDE status.");
+    if (!issueResponse.ok || !issueResult.ok) throw new Error(issueResult.error || "Could not load HDE issues.");
+
+    hdeIssues = issueResult.issues || [];
+    const active = hdeIssues.filter((issue) => issue.status !== "resolved");
+    hdeCorridorCount.textContent = statusResult.status.corridorCount || 0;
+    hdeOpenCount.textContent = active.length;
+    hdeRecordingCount.textContent = active.filter((issue) => issue.recordingNeeded).length;
+    hdeHighCount.textContent = active.filter((issue) => issue.severity === "high").length;
+    hdeState.textContent = `Engine v${statusResult.status.version} · ${statusResult.status.corridorCount} proven corridors · ${active.length} active issues.`;
+    renderHdeIssues();
+  } catch (error) {
+    hdeState.className = "form-state";
+    hdeState.textContent = error.message || "Could not load Hybrid Drive Engine.";
+  } finally {
+    hdeRefreshButton.disabled = false;
+  }
+}
+
+function filteredHdeIssues() {
+  const filter = hdeIssueFilter.value;
+  if (filter === "all") return hdeIssues;
+  if (filter === "recording-needed") return hdeIssues.filter((issue) => issue.recordingNeeded && issue.status !== "resolved");
+  if (filter === "high") return hdeIssues.filter((issue) => issue.severity === "high" && issue.status !== "resolved");
+  return hdeIssues.filter((issue) => issue.status !== "resolved");
+}
+
+function hdeReportText(issue) {
+  const location = Number.isFinite(Number(issue.latitude))
+    ? `${Number(issue.latitude).toFixed(6)}, ${Number(issue.longitude).toFixed(6)}`
+    : "Not captured";
+  return [
+    "TaxiBo Hybrid Drive Engine issue",
+    `Issue ID: ${issue.id}`,
+    `Status: ${issue.status} · Severity: ${issue.severity}`,
+    `Type: ${issue.issueType}`,
+    `Start: ${issue.start || "Not supplied"}`,
+    `Destination: ${issue.destination || "Not supplied"}`,
+    `Via/problem location: ${issue.via || location}`,
+    `Engine state: ${issue.engineState} · Confidence: ${Math.round(Number(issue.confidence || 0) * 100)}%`,
+    `Recording needed: ${issue.recordingNeeded ? "Yes" : "No"}`,
+    `Problem: ${issue.message}`,
+    "Please reproduce this route, inspect recorded-corridor matches, and recommend or implement the safest correction.",
+  ].join("\n");
+}
+
+function escapeSettingsHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
+}
+
+function renderHdeIssues() {
+  const issues = filteredHdeIssues();
+  if (!issues.length) {
+    hdeIssueList.innerHTML = `<div class="form-state empty-state">No issues match this filter.</div>`;
+    return;
+  }
+  hdeIssueList.innerHTML = issues.map((issue) => `
+    <article class="hde-issue-card is-${escapeSettingsHtml(issue.severity)}">
+      <div class="hde-issue-card-head"><span>${escapeSettingsHtml(issue.severity)} · ${escapeSettingsHtml(issue.status)}</span><strong>${escapeSettingsHtml(issue.title)}</strong></div>
+      <p>${escapeSettingsHtml(issue.start || "Unknown start")} → ${escapeSettingsHtml(issue.destination || "Unknown destination")}${issue.via ? ` · via ${escapeSettingsHtml(issue.via)}` : ""}</p>
+      <p>${escapeSettingsHtml(issue.message)}</p>
+      <small>${issue.recordingNeeded ? "Recording needed" : "Route review"} · ${Math.round(Number(issue.confidence || 0) * 100)}% confidence · seen ${issue.occurrenceCount || 1} time${issue.occurrenceCount === 1 ? "" : "s"}</small>
+      <div class="hde-issue-actions">
+        <button class="secondary-button small-button" type="button" data-hde-copy="${issue.id}">Copy for Codex</button>
+        ${issue.status !== "recording" && issue.status !== "resolved" ? `<button class="secondary-button small-button" type="button" data-hde-status="recording" data-hde-id="${issue.id}">Recording planned</button>` : ""}
+        ${issue.status !== "resolved" ? `<button class="secondary-button small-button" type="button" data-hde-status="resolved" data-hde-id="${issue.id}">Resolve</button>` : `<button class="secondary-button small-button" type="button" data-hde-status="open" data-hde-id="${issue.id}">Reopen</button>`}
+      </div>
+    </article>
+  `).join("");
+
+  hdeIssueList.querySelectorAll("[data-hde-copy]").forEach((button) => button.addEventListener("click", async () => {
+    const issue = hdeIssues.find((item) => item.id === button.dataset.hdeCopy);
+    await navigator.clipboard.writeText(hdeReportText(issue));
+    hdeState.textContent = "Issue report copied. Paste it directly into Codex.";
+  }));
+  hdeIssueList.querySelectorAll("[data-hde-status]").forEach((button) => button.addEventListener("click", () => updateHdeIssueStatus(button.dataset.hdeId, button.dataset.hdeStatus)));
+}
+
+async function updateHdeIssueStatus(id, status) {
+  const response = await fetch("/api/hybrid-engine/issues/status", {
+    method: "POST", headers: hdeHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id, status }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.error || "Could not update issue.");
+  await loadHybridEngine();
+}
+
+async function submitHdeIssue(event) {
+  event.preventDefault();
+  const payload = {
+    title: hdeIssueType.options[hdeIssueType.selectedIndex].text,
+    issueType: hdeIssueType.value,
+    severity: hdeIssueType.value === "route-loop" || hdeIssueType.value === "wrong-level" ? "high" : "medium",
+    start: hdeIssueStart.value.trim(), destination: hdeIssueDestination.value.trim(), via: hdeIssueVia.value.trim(),
+    message: hdeIssueMessage.value.trim(), recordingNeeded: hdeIssueType.value === "recording-needed",
+  };
+  const response = await fetch("/api/hybrid-engine/issues", {
+    method: "POST", headers: hdeHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.error || "Could not add HDE issue.");
+  hdeIssueForm.reset();
+  await loadHybridEngine();
+}
+
 inHouseMaintenanceSwitch.addEventListener("change", async () => {
   setStorageMode(inHouseMaintenanceSwitch.checked ? "local" : "cloud");
   renderSettings();
@@ -315,7 +450,14 @@ downloadLocalBackupButton.addEventListener("click", () => {
 testCloudConnectionButton.addEventListener("click", testCloudConnection);
 syncLocalToCloudButton.addEventListener("click", syncLocalToCloud);
 syncCloudToLocalButton.addEventListener("click", syncCloudToLocal);
+hdeRefreshButton.addEventListener("click", () => loadHybridEngine(true));
+hdeIssueFilter.addEventListener("change", renderHdeIssues);
+hdeIssueForm.addEventListener("submit", (event) => submitHdeIssue(event).catch((error) => {
+  hdeState.className = "form-state";
+  hdeState.textContent = error.message || "Could not add HDE issue.";
+}));
 
 cloudTargetUrl.value = localStorage.getItem(TAXIBO_CLOUD_TARGET_KEY) || "https://taxi-bo.onrender.com";
 renderSettings();
 checkDatabaseHealth();
+loadHybridEngine();

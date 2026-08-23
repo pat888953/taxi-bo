@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.svg">
-  <link rel="stylesheet" href="styles.css?v=155">
+  <link rel="stylesheet" href="styles.css?v=157">
 </head>
 <body>
   <div class="page-shell settings-shell">
@@ -54,6 +54,43 @@
             <p>TaxiBo reads and writes directly to PostgreSQL/Neon, suitable for live shared driving use.</p>
           </article>
         </div>
+      </section>
+
+      <section class="panel hde-control-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Hybrid Drive Engine</p>
+            <h2>Route accuracy control center</h2>
+          </div>
+          <button id="hdeRefreshButton" class="secondary-button small-button" type="button">Refresh engine</button>
+        </div>
+
+        <div id="hdeState" class="form-state empty-state">Loading proven corridors and route issues...</div>
+        <div class="hde-metric-grid">
+          <article><span>Proven corridors</span><strong id="hdeCorridorCount">—</strong></article>
+          <article><span>Open issues</span><strong id="hdeOpenCount">—</strong></article>
+          <article><span>Recording needed</span><strong id="hdeRecordingCount">—</strong></article>
+          <article><span>High severity</span><strong id="hdeHighCount">—</strong></article>
+        </div>
+
+        <form id="hdeIssueForm" class="hde-issue-form">
+          <div class="split-fields">
+            <label class="field"><span>Start</span><input id="hdeIssueStart" type="text" placeholder="Chuk Yuen South Estate"></label>
+            <label class="field"><span>Destination</span><input id="hdeIssueDestination" type="text" placeholder="Pacific Place"></label>
+          </div>
+          <div class="split-fields">
+            <label class="field"><span>Via or problem location</span><input id="hdeIssueVia" type="text" placeholder="Hung Hom Tunnel southbound"></label>
+            <label class="field"><span>Issue</span><select id="hdeIssueType"><option value="recording-needed">Recording needed</option><option value="wrong-route">Wrong route</option><option value="wrong-level">Wrong road level / flyover</option><option value="route-loop">Route loop</option><option value="cue-problem">Drive Cue problem</option></select></label>
+          </div>
+          <label class="field"><span>What happened?</span><textarea id="hdeIssueMessage" rows="2" placeholder="Describe the wrong turn, road level, tunnel approach, or missing recorded section." required></textarea></label>
+          <button class="primary-button" type="submit">Add HDE issue</button>
+        </form>
+
+        <div class="hde-log-header">
+          <strong>Problem route and recording log</strong>
+          <select id="hdeIssueFilter" aria-label="Filter HDE issues"><option value="active">Active</option><option value="recording-needed">Recording needed</option><option value="high">High severity</option><option value="all">All</option></select>
+        </div>
+        <div id="hdeIssueList" class="hde-issue-list"></div>
       </section>
 
       <section class="panel settings-sync-panel">
@@ -103,7 +140,7 @@
     </main>
   </div>
 
-  <script src="settings.js?v=95"></script>
+  <script src="settings.js?v=96"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

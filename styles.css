@@ -3948,6 +3948,20 @@ input[type="range"]:focus {
   margin-top: 4px;
 }
 
+.hde-control-panel { display: grid; gap: 16px; }
+.hde-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.hde-metric-grid article { display: grid; gap: 5px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); }
+.hde-metric-grid span, .hde-issue-card small { color: var(--muted); font-weight: 800; }
+.hde-metric-grid strong { color: var(--accent-dark); font-size: 1.8rem; }
+.hde-issue-form { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: #fbfcfb; }
+.hde-log-header, .hde-issue-card-head, .hde-issue-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.hde-log-header select { width: auto; min-width: 160px; }
+.hde-issue-list { display: grid; gap: 10px; }
+.hde-issue-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-left: 5px solid var(--amber); border-radius: var(--radius); background: var(--surface); }
+.hde-issue-card.is-high { border-left-color: #b83b35; }
+.hde-issue-card p { margin: 0; line-height: 1.45; }
+.hde-issue-card-head span { color: var(--muted); font-size: 0.78rem; font-weight: 900; text-transform: uppercase; }
+
 @media (max-width: 820px) {
   .academy-hero,
   .academy-question {
@@ -3968,6 +3982,10 @@ input[type="range"]:focus {
 
   .settings-sync-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hde-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .academy-repair-card {
