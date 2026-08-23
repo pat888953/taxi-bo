@@ -41,7 +41,9 @@ function storageHeaders(extra = {}) {
 loadAcademy();
 
 academySubmitButton.addEventListener("click", submitAnswer);
-academyNextButton.addEventListener("click", loadQuestion);
+academyNextButton.addEventListener("click", () => {
+  loadQuestion({ excludeQuestionId: currentQuestion?.id });
+});
 academyPhotoWrap.addEventListener("click", openCurrentQuestionInCueMaintenance);
 academyPhotoWrap.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") {
@@ -56,11 +58,17 @@ async function loadAcademy() {
   await Promise.all([loadQuestion(), loadStats(), loadRepairs()]);
 }
 
-async function loadQuestion() {
+async function loadQuestion({ excludeQuestionId = "" } = {}) {
+  const questionUrl = new URL(ACADEMY_QUESTION_API, window.location.href);
+  if (excludeQuestionId) {
+    questionUrl.searchParams.set("exclude", excludeQuestionId);
+  }
+
   currentQuestion = null;
   selectedAnswer = "";
   answered = false;
   academySubmitButton.disabled = true;
+  academyNextButton.disabled = true;
   academyFeedback.textContent = "";
   academyFeedback.className = "academy-feedback";
   academyQuestion.hidden = true;
@@ -68,7 +76,7 @@ async function loadQuestion() {
   academyState.className = "form-state empty-state";
 
   try {
-    const response = await fetch(ACADEMY_QUESTION_API, {
+    const response = await fetch(questionUrl, {
       cache: "no-store",
       headers: storageHeaders(),
     });
@@ -100,6 +108,9 @@ function renderQuestion(question) {
   // would reveal the correct answer before the driver makes a choice.
   academyQuestionTitle.textContent = "Street-photo question";
   academyRouteBadge.textContent = `Step ${question.step || "?"}`;
+  const hasNextQuestion = Number(question.questionCount || 0) > 1;
+  academyNextButton.disabled = !hasNextQuestion;
+  academyNextButton.textContent = hasNextQuestion ? "Next question" : "Only question";
   academyState.textContent = "Choose the best answer, then submit.";
   academyState.className = "form-state empty-state";
   academyPhoto.src = question.image;

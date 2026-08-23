@@ -7,6 +7,7 @@ const ACCEPTED_TRIP_API = "/api/accepted-trip";
 const ROUTE_RECORDING_API = "/api/route-recording";
 const SPEED_WARNINGS_API = "/api/speed-warnings";
 const PHOTO_STOPS_API = "/api/photo-stops";
+const LOCATION_CUES_API = "/api/location-cues";
 const TAXIBO_STORAGE_MODE_KEY = "taxiBoStorageMode";
 const TAXIBO_CUE_UI_MODE_KEY = "taxiBoCueUiMode";
 const TAXIBO_GO_START_MODE_KEY = "taxiBoGoStartMode";
@@ -184,8 +185,27 @@ const dashcamUseFrameButton = document.querySelector("#dashcamUseFrameButton");
 const dashcamOpenMapsButton = document.querySelector("#dashcamOpenMapsButton");
 const dashcamMapImageInput = document.querySelector("#dashcamMapImageInput");
 const dashcamMapPasteZone = document.querySelector("#dashcamMapPasteZone");
+const locationCueForm = document.querySelector("#locationCueForm");
+const locationCueStatus = document.querySelector("#locationCueStatus");
+const locationCueTitle = document.querySelector("#locationCueTitle");
+const locationCueInstruction = document.querySelector("#locationCueInstruction");
+const locationCueLatitude = document.querySelector("#locationCueLatitude");
+const locationCueLongitude = document.querySelector("#locationCueLongitude");
+const locationCueRadius = document.querySelector("#locationCueRadius");
+const locationCueDirection = document.querySelector("#locationCueDirection");
+const locationCueHeadingGroup = document.querySelector("#locationCueHeadingGroup");
+const locationCueHeading = document.querySelector("#locationCueHeading");
+const locationCuePasteZone = document.querySelector("#locationCuePasteZone");
+const locationCuePreview = document.querySelector("#locationCuePreview");
+const locationCueFile = document.querySelector("#locationCueFile");
+const locationCueNotes = document.querySelector("#locationCueNotes");
+const clearLocationCuePhotoButton = document.querySelector("#clearLocationCuePhotoButton");
+const refreshLocationCuesButton = document.querySelector("#refreshLocationCuesButton");
+const locationCueList = document.querySelector("#locationCueList");
 
 let routes = [];
+let locationCues = [];
+let pendingLocationCueImage = "";
 let map;
 let mapMarkers = [];
 let routeLine;
@@ -509,6 +529,7 @@ setupDestinationVoiceInput();
 setupViaRoadVoiceInput();
 setupRecordedRouteVoiceInput();
 loadRoutes();
+loadLocationCues();
 loadSpeedWarnings();
 startAcceptedTripPolling();
 renderRouteRecorder();
@@ -782,6 +803,39 @@ photoFileInput.addEventListener("change", async () => {
 
 clearPhotoButton.addEventListener("click", () => {
   clearSelectedPhoto();
+});
+
+locationCueDirection?.addEventListener("change", updateLocationCueDirectionUi);
+
+locationCuePasteZone?.addEventListener("paste", async (event) => {
+  const item = Array.from(event.clipboardData?.items || []).find((entry) => entry.type.startsWith("image/"));
+  if (!item) {
+    setLocationCueStatus("Clipboard did not contain an image. Copy a screenshot first.", true);
+    return;
+  }
+
+  event.preventDefault();
+  const file = item.getAsFile();
+  if (file) {
+    await useLocationCueImage(file, "Pasted screenshot ready to save.");
+  }
+});
+
+locationCuePasteZone?.addEventListener("click", () => locationCuePasteZone.focus());
+
+locationCueFile?.addEventListener("change", async () => {
+  const file = locationCueFile.files?.[0];
+  if (file) {
+    await useLocationCueImage(file, `Selected file: ${file.name}`);
+  }
+});
+
+clearLocationCuePhotoButton?.addEventListener("click", clearLocationCueImage);
+refreshLocationCuesButton?.addEventListener("click", loadLocationCues);
+
+locationCueForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveLocationCue();
 });
 
 if (simulationSlider) {
@@ -4525,6 +4579,166 @@ function getSelectedCue() {
   const step = Number(photoStepSelect.value);
   return route?.photos.find((photo) => photo.step === step) || null;
 }
+
+function setLocationCueStatus(message, isError = false) {
+  if (!locationCueStatus) {
+    return;
+  }
+  locationCueStatus.className = isError ? "form-state" : "form-state empty-state";
+  locationCueStatus.textContent = message;
+}
+
+function updateLocationCueDirectionUi() {
+  const usesHeading = locationCueDirection?.value === "heading";
+  if (locationCueHeadingGroup) {
+    locationCueHeadingGroup.hidden = !usesHeading;
+  }
+  if (locationCueHeading) {
+    locationCueHeading.required = usesHeading;
+    locationCueHeading.disabled = !usesHeading;
+  }
+}
+
+async function useLocationCueImage(file, message) {
+  if (!file?.type?.startsWith("image/")) {
+    setLocationCueStatus("Choose an image file for the Location Cue.", true);
+    return;
+  }
+  pendingLocationCueImage = await fileToDataUrl(file);
+  locationCuePasteZone.innerHTML = "";
+  locationCuePreview.src = pendingLocationCueImage;
+  locationCuePreview.hidden = false;
+  locationCuePasteZone.append(locationCuePreview);
+  locationCuePasteZone.classList.add("has-photo");
+  setLocationCueStatus(message);
+}
+
+function clearLocationCueImage() {
+  pendingLocationCueImage = "";
+  locationCuePreview.src = "";
+  locationCuePreview.hidden = true;
+  locationCuePasteZone.classList.remove("has-photo");
+  locationCuePasteZone.innerHTML = `
+    <div class="photo-paste-copy">
+      <strong>Add the landmark image</strong>
+      <span>Paste a screenshot, or choose a picture from your device.</span>
+    </div>
+  `;
+  locationCueFile.value = "";
+}
+
+async function loadLocationCues() {
+  if (!locationCueList) {
+    return;
+  }
+  try {
+    const response = await fetch(LOCATION_CUES_API, {
+      headers: storageHeaders({ Accept: "application/json", "Cache-Control": "no-store" }),
+      cache: "no-store"
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok || !Array.isArray(result.cues)) {
+      throw new Error(result.error || "Could not load Location Cues.");
+    }
+    locationCues = result.cues;
+    renderLocationCues();
+    setLocationCueStatus(`${locationCues.length} reusable Location Cue${locationCues.length === 1 ? "" : "s"} available.`);
+  } catch (error) {
+    locationCues = [];
+    renderLocationCues();
+    setLocationCueStatus(error.message || "Could not load Location Cues.", true);
+  }
+}
+
+function renderLocationCues() {
+  if (!locationCueList) {
+    return;
+  }
+  if (!locationCues.length) {
+    locationCueList.innerHTML = `<div class="form-state empty-state">No reusable Location Cues saved yet.</div>`;
+    return;
+  }
+
+  locationCueList.innerHTML = locationCues.map((cue) => `
+    <article class="location-cue-card">
+      <img src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title)}">
+      <div class="location-cue-card-copy">
+        <strong>${escapeHtml(cue.title)}</strong>
+        <span>${escapeHtml(cue.instruction || "No driver instruction")}</span>
+        <span>${Number(cue.latitude).toFixed(6)}, ${Number(cue.longitude).toFixed(6)} · ${Math.round(Number(cue.activationRadiusMeters || 100))} m · ${cue.directionMode === "heading" ? `${Math.round(Number(cue.headingDegrees))}° heading` : "both directions"}</span>
+      </div>
+      <button class="secondary-button small-button delete-location-cue" type="button" data-location-cue-id="${escapeHtml(cue.id)}">Delete</button>
+    </article>
+  `).join("");
+
+  locationCueList.querySelectorAll(".delete-location-cue").forEach((button) => {
+    button.addEventListener("click", () => deleteLocationCue(button.dataset.locationCueId));
+  });
+}
+
+async function saveLocationCue() {
+  if (!pendingLocationCueImage) {
+    setLocationCueStatus("Add a photo or screenshot before saving the Location Cue.", true);
+    return;
+  }
+
+  const payload = {
+    title: locationCueTitle.value.trim(),
+    instruction: locationCueInstruction.value.trim(),
+    notes: locationCueNotes.value.trim(),
+    image: pendingLocationCueImage,
+    latitude: Number(locationCueLatitude.value),
+    longitude: Number(locationCueLongitude.value),
+    activationRadiusMeters: Number(locationCueRadius.value),
+    directionMode: locationCueDirection.value,
+    headingDegrees: locationCueDirection.value === "heading" ? Number(locationCueHeading.value) : null,
+    confidence: 1
+  };
+
+  setLocationCueStatus("Saving reusable Location Cue...");
+  try {
+    const response = await fetch(LOCATION_CUES_API, {
+      method: "POST",
+      headers: storageHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not save Location Cue.");
+    }
+    locationCueForm.reset();
+    locationCueRadius.value = "100";
+    clearLocationCueImage();
+    updateLocationCueDirectionUi();
+    await loadLocationCues();
+    setLocationCueStatus(`Saved Location Cue "${result.cue.title}". Nearby routes can now reuse it.`);
+  } catch (error) {
+    setLocationCueStatus(error.message || "Could not save Location Cue.", true);
+  }
+}
+
+async function deleteLocationCue(cueId) {
+  const cue = locationCues.find((item) => item.id === cueId);
+  if (!cue || !confirm(`Delete reusable Location Cue "${cue.title}"?`)) {
+    return;
+  }
+  try {
+    const response = await fetch(`${LOCATION_CUES_API}/delete`, {
+      method: "POST",
+      headers: storageHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ id: cueId })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not delete Location Cue.");
+    }
+    await loadLocationCues();
+  } catch (error) {
+    setLocationCueStatus(error.message || "Could not delete Location Cue.", true);
+  }
+}
+
+updateLocationCueDirectionUi();
 
 async function usePhotoFile(file, successMessage) {
   pendingPhotoDataUrl = await fileToDataUrl(file);

@@ -146,6 +146,26 @@ def initialize_db(mode=None):
             CREATE INDEX IF NOT EXISTS idx_photo_stops_route_step
               ON photo_stops(route_id, step);
 
+            CREATE TABLE IF NOT EXISTS location_cues (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              instruction TEXT NOT NULL DEFAULT '',
+              notes TEXT NOT NULL DEFAULT '',
+              image TEXT NOT NULL,
+              latitude REAL NOT NULL,
+              longitude REAL NOT NULL,
+              activation_radius_meters REAL NOT NULL DEFAULT 100,
+              direction_mode TEXT NOT NULL DEFAULT 'any',
+              heading_degrees REAL,
+              confidence REAL NOT NULL DEFAULT 1,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_location_cues_location
+              ON location_cues(latitude, longitude);
+
             CREATE TABLE IF NOT EXISTS incoming_orders (
               id TEXT PRIMARY KEY,
               pickup TEXT NOT NULL DEFAULT '',
@@ -526,8 +546,19 @@ def is_placeholder_photo(image):
     )
 
 
-def fetch_academy_question():
+def fetch_academy_question(excluded_question_id=""):
+    excluded_question_id = str(excluded_question_id or "").strip()
+
     with connect_db() as db:
+        question_count = db.execute(
+            """
+            SELECT COUNT(*) AS question_count
+            FROM photo_stops
+            WHERE image IS NOT NULL
+              AND image != ''
+            """
+        ).fetchone()["question_count"]
+
         question_row = db.execute(
             """
             SELECT
@@ -539,9 +570,12 @@ def fetch_academy_question():
             JOIN routes ON routes.id = photo_stops.route_id
             WHERE photo_stops.image IS NOT NULL
               AND photo_stops.image != ''
-            ORDER BY RANDOM()
+            ORDER BY
+              CASE WHEN photo_stops.id = ? THEN 1 ELSE 0 END,
+              RANDOM()
             LIMIT 1
-            """
+            """,
+            (excluded_question_id,),
         ).fetchone()
 
         if not question_row:
@@ -595,6 +629,7 @@ def fetch_academy_question():
             "start": question_row["start"],
             "destination": question_row["destination"],
             "step": question_row["step"],
+            "questionCount": int(question_count or 0),
             # Cue titles frequently describe the correct maneuver. Keep the
             # quiz heading neutral so API clients cannot accidentally reveal it.
             "title": "Street-photo question",
@@ -1378,7 +1413,7 @@ def prepare_route(payload):
     hybrid = build_best_hybrid_route(generated)
     if hybrid:
         generated = hybrid
-    matched_cues = match_saved_photo_cues(generated["cues"])
+    matched_cues = match_saved_photo_cues(generated["cues"], geometry=generated.get("geometry"))
     generated["cues"] = matched_cues
     generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
     generated["cueCount"] = len(matched_cues)
@@ -1419,7 +1454,7 @@ def prepare_route_options(payload):
 
 
 def match_prepared_route(generated, option_id, label):
-    matched_cues = match_saved_photo_cues(generated["cues"])
+    matched_cues = match_saved_photo_cues(generated["cues"], geometry=generated.get("geometry"))
     generated["cues"] = matched_cues
     generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
     generated["cueCount"] = len(matched_cues)
@@ -1615,6 +1650,107 @@ def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=
     }
 
 
+def fetch_location_cues(include_images=True):
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, title, instruction, notes, image, latitude, longitude,
+                   activation_radius_meters, direction_mode, heading_degrees,
+                   confidence, usage_count, created_at, updated_at
+            FROM location_cues
+            ORDER BY updated_at DESC, created_at DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "instruction": row["instruction"],
+            "notes": row["notes"],
+            "image": row["image"] if include_images else "",
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "activationRadiusMeters": row["activation_radius_meters"],
+            "directionMode": row["direction_mode"],
+            "headingDegrees": row["heading_degrees"],
+            "confidence": row["confidence"],
+            "usageCount": row["usage_count"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def create_location_cue(payload):
+    title = str(payload.get("title") or "").strip()
+    instruction = str(payload.get("instruction") or "").strip()
+    notes = str(payload.get("notes") or "").strip()
+    image = str(payload.get("image") or "").strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+    radius = optional_float(payload.get("activationRadiusMeters"))
+    direction_mode = str(payload.get("directionMode") or "any").strip().lower()
+    heading = optional_float(payload.get("headingDegrees"))
+    confidence = optional_float(payload.get("confidence"))
+
+    if not title:
+        raise ValueError("Location Cue name is required.")
+    if not image:
+        raise ValueError("Location Cue image is required.")
+    if latitude is None or not -90 <= latitude <= 90:
+        raise ValueError("Enter a valid Location Cue latitude.")
+    if longitude is None or not -180 <= longitude <= 180:
+        raise ValueError("Enter a valid Location Cue longitude.")
+    radius = 100 if radius is None else radius
+    if not 20 <= radius <= 1000:
+        raise ValueError("Activation radius must be between 20 and 1000 metres.")
+    if direction_mode not in {"any", "heading"}:
+        raise ValueError("Location Cue direction must be any direction or a heading.")
+    if direction_mode == "heading" and (heading is None or not 0 <= heading < 360):
+        raise ValueError("Enter a heading from 0 up to 359 degrees.")
+    if direction_mode == "any":
+        heading = None
+    confidence = 1 if confidence is None else confidence
+    if not 0 <= confidence <= 1:
+        raise ValueError("Location Cue confidence must be between 0 and 1.")
+
+    cue_id = str(uuid4())
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO location_cues (
+              id, title, instruction, notes, image, latitude, longitude,
+              activation_radius_meters, direction_mode, heading_degrees,
+              confidence, usage_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+            """,
+            (
+                cue_id, title, instruction, notes, image, latitude, longitude,
+                radius, direction_mode, heading, confidence,
+            ),
+        )
+
+    return next(cue for cue in fetch_location_cues() if cue["id"] == cue_id)
+
+
+def delete_location_cue(payload):
+    cue_id = str(payload.get("id") or "").strip()
+    if not cue_id:
+        raise ValueError("Location Cue id is required.")
+
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT id, title FROM location_cues WHERE id = ?", (cue_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Location Cue was not found.")
+        db.execute("DELETE FROM location_cues WHERE id = ?", (cue_id,))
+
+    return {"id": row["id"], "title": row["title"]}
+
+
 def combine_route_sections(sections):
     combined = []
     for section in sections:
@@ -1730,8 +1866,24 @@ def count_route_revisits(geometry):
     return revisits
 
 
-def match_saved_photo_cues(cues, radius_meters=80):
+def match_saved_photo_cues(cues, radius_meters=80, geometry=None):
     saved_cues = fetch_located_photo_stops()
+    saved_cues.extend({
+        "id": cue["id"],
+        "route_id": "",
+        "route_name": "Reusable Location Cue",
+        "step": 0,
+        "title": cue["title"],
+        "instruction": cue["instruction"],
+        "notes": cue["notes"],
+        "image": cue["image"],
+        "latitude": cue["latitude"],
+        "longitude": cue["longitude"],
+        "activation_radius_meters": cue["activationRadiusMeters"],
+        "direction_mode": cue["directionMode"],
+        "heading_degrees": cue["headingDegrees"],
+        "cue_type": "location",
+    } for cue in fetch_location_cues())
     matched = []
 
     for cue in cues:
@@ -1741,6 +1893,9 @@ def match_saved_photo_cues(cues, radius_meters=80):
 
         if isinstance(cue_latitude, (int, float)) and isinstance(cue_longitude, (int, float)):
             for saved in saved_cues:
+                effective_radius = saved.get("activation_radius_meters") or radius_meters
+                if not location_cue_direction_matches(saved, cue):
+                    continue
                 distance = haversine_distance(
                     cue_latitude,
                     cue_longitude,
@@ -1748,7 +1903,7 @@ def match_saved_photo_cues(cues, radius_meters=80):
                     saved["longitude"],
                 )
 
-                if distance <= radius_meters and (best is None or distance < best["distance"]):
+                if distance <= effective_radius and (best is None or distance < best["distance"]):
                     best = {
                         "distance": distance,
                         "photo": saved,
@@ -1768,6 +1923,8 @@ def match_saved_photo_cues(cues, radius_meters=80):
                     "sourceRouteId": photo["route_id"],
                     "sourceRouteName": photo["route_name"],
                     "sourcePhotoId": photo["id"],
+                    "sourceCueType": photo.get("cue_type", "route"),
+                    "sourceLocationCueId": photo["id"] if photo.get("cue_type") == "location" else "",
                 }
             )
         else:
@@ -1779,7 +1936,102 @@ def match_saved_photo_cues(cues, radius_meters=80):
                 }
             )
 
-    return matched
+    return merge_location_cues_along_geometry(matched, geometry)
+
+
+def merge_location_cues_along_geometry(cues, geometry):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return cues
+
+    existing_ids = {
+        cue.get("sourceLocationCueId") for cue in cues if cue.get("sourceLocationCueId")
+    }
+    additions = []
+
+    for location_cue in fetch_location_cues():
+        if location_cue["id"] in existing_ids:
+            continue
+
+        nearest_index = None
+        nearest_distance = None
+        for index, point in enumerate(geometry):
+            distance = haversine_distance(
+                location_cue["latitude"], location_cue["longitude"], point[0], point[1]
+            )
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_index = index
+                nearest_distance = distance
+
+        if nearest_distance is None or nearest_distance > location_cue["activationRadiusMeters"]:
+            continue
+
+        approach_index = max(0, nearest_index - 1)
+        approach_heading = initial_bearing(geometry[approach_index], geometry[nearest_index]) \
+            if nearest_index > 0 else None
+        direction_probe = {"approachHeading": approach_heading}
+        direction_saved = {
+            "direction_mode": location_cue["directionMode"],
+            "heading_degrees": location_cue["headingDegrees"],
+        }
+        if not location_cue_direction_matches(direction_saved, direction_probe):
+            continue
+
+        additions.append({
+            "id": f'location-cue-{location_cue["id"]}',
+            "title": location_cue["title"],
+            "instruction": location_cue["instruction"],
+            "notes": location_cue["notes"],
+            "image": location_cue["image"],
+            "latitude": location_cue["latitude"],
+            "longitude": location_cue["longitude"],
+            "matchedPhoto": True,
+            "matchDistanceMeters": round(nearest_distance, 1),
+            "sourceRouteId": "",
+            "sourceRouteName": "Reusable Location Cue",
+            "sourcePhotoId": location_cue["id"],
+            "sourceCueType": "location",
+            "sourceLocationCueId": location_cue["id"],
+            "routeGeometryIndex": nearest_index,
+        })
+
+    combined = [*cues, *additions]
+    for cue in combined:
+        if "routeGeometryIndex" in cue:
+            continue
+        cue["routeGeometryIndex"] = nearest_geometry_index(
+            geometry, cue.get("latitude"), cue.get("longitude")
+        )
+
+    combined.sort(key=lambda cue: cue.get("routeGeometryIndex", len(geometry)))
+    for step, cue in enumerate(combined, start=1):
+        cue["step"] = step
+        cue.pop("routeGeometryIndex", None)
+    return combined
+
+
+def nearest_geometry_index(geometry, latitude, longitude):
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return len(geometry)
+    return min(
+        range(len(geometry)),
+        key=lambda index: haversine_distance(
+            latitude, longitude, geometry[index][0], geometry[index][1]
+        ),
+    )
+
+
+def location_cue_direction_matches(saved, generated_cue, tolerance_degrees=50):
+    if saved.get("direction_mode") != "heading":
+        return True
+
+    expected = saved.get("heading_degrees")
+    actual = generated_cue.get("approachHeading")
+    if not isinstance(expected, (int, float)) or not isinstance(actual, (int, float)):
+        return False
+
+    difference = abs((actual - expected + 180) % 360 - 180)
+    return difference <= tolerance_degrees
 
 
 def fetch_located_photo_stops():
@@ -1829,6 +2081,18 @@ def haversine_distance(first_latitude, first_longitude, second_latitude, second_
     )
 
     return earth_radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def initial_bearing(first_point, second_point):
+    first_latitude = math.radians(first_point[0])
+    second_latitude = math.radians(second_point[0])
+    delta_longitude = math.radians(second_point[1] - first_point[1])
+    y = math.sin(delta_longitude) * math.cos(second_latitude)
+    x = (
+        math.cos(first_latitude) * math.sin(second_latitude)
+        - math.sin(first_latitude) * math.cos(second_latitude) * math.cos(delta_longitude)
+    )
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
 def normalize_point(point, label):
@@ -2095,6 +2359,7 @@ def build_turn_cue(step, maneuver, step_number):
     road_name = str(step.get("name") or "").strip()
     title = format_cue_title(maneuver_type, modifier, road_name)
     instruction = format_cue_instruction(maneuver_type, modifier, road_name)
+    approach_heading = maneuver.get("bearing_before")
 
     return {
         "id": f"generated-cue-{step_number}",
@@ -2104,6 +2369,7 @@ def build_turn_cue(step, maneuver, step_number):
         "notes": "Generated from the driving route. Replace with your own photo when ready.",
         "latitude": latitude,
         "longitude": longitude,
+        "approachHeading": approach_heading if isinstance(approach_heading, (int, float)) else None,
         "image": "",
     }
 
@@ -2166,6 +2432,7 @@ def generate_geometry_cues(geometry):
                 "notes": "Estimated from saved route geometry. Replace with your own junction photo when ready.",
                 "latitude": current_point[0],
                 "longitude": current_point[1],
+                "approachHeading": initial_bearing(previous_point, current_point),
                 "image": "",
             }
         )
@@ -2288,6 +2555,12 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             self.send_json(fetch_routes(include_images=include_images))
             return
 
+        if path == "/api/location-cues":
+            query = parse_qs(urlparse(self.path).query)
+            include_images = query.get("images", ["1"])[0] != "0"
+            self.send_json({"ok": True, "cues": fetch_location_cues(include_images=include_images)})
+            return
+
         if path.startswith("/api/routes/"):
             route_id = unquote(path[len("/api/routes/"):]).strip()
             if not route_id or "/" in route_id:
@@ -2318,7 +2591,9 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/academy/question":
-            self.send_json({"ok": True, **fetch_academy_question()})
+            query = parse_qs(urlparse(self.path).query)
+            excluded_question_id = query.get("exclude", [""])[0]
+            self.send_json({"ok": True, **fetch_academy_question(excluded_question_id)})
             return
 
         if path == "/api/academy/stats":
@@ -2409,7 +2684,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def handle_post(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/academy/attempt"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt"}:
             self.send_error(404, "Not found")
             return
 
@@ -2463,6 +2738,14 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/speed-warnings/delete":
                 self.send_json({"ok": True, "warning": delete_speed_warning(payload)})
+                return
+
+            if path == "/api/location-cues":
+                self.send_json({"ok": True, "cue": create_location_cue(payload)})
+                return
+
+            if path == "/api/location-cues/delete":
+                self.send_json({"ok": True, "cue": delete_location_cue(payload)})
                 return
 
             if path == "/api/academy/attempt":

@@ -17,7 +17,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   >
-  <link rel="stylesheet" href="styles.css?v=153">
+  <link rel="stylesheet" href="styles.css?v=154">
 </head>
 <body>
   <div class="page-shell">
@@ -281,6 +281,87 @@
             <button id="routeCancelEditButton" type="button" class="secondary-button" hidden>Cancel edit</button>
           </div>
         </form>
+      </section>
+
+      <section class="panel location-cue-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Location Cues</p>
+            <h2>Create a reusable cue without a route</h2>
+          </div>
+        </div>
+
+        <div id="locationCueStatus" class="form-state empty-state">Add a permanent landmark cue that any nearby route can reuse.</div>
+        <form id="locationCueForm" class="stack" autocomplete="off">
+          <div class="split-fields">
+            <label class="field">
+              <span>Cue name</span>
+              <input id="locationCueTitle" type="text" placeholder="Blue sign before the tunnel" required>
+            </label>
+            <label class="field">
+              <span>Driver instruction</span>
+              <input id="locationCueInstruction" type="text" placeholder="Keep right after the sign">
+            </label>
+          </div>
+
+          <div class="split-fields">
+            <label class="field">
+              <span>Latitude</span>
+              <input id="locationCueLatitude" type="number" step="any" placeholder="22.281167" required>
+            </label>
+            <label class="field">
+              <span>Longitude</span>
+              <input id="locationCueLongitude" type="number" step="any" placeholder="114.157139" required>
+            </label>
+          </div>
+
+          <div class="split-fields">
+            <label class="field">
+              <span>Activation radius (metres)</span>
+              <input id="locationCueRadius" type="number" min="20" max="1000" step="10" value="100" required>
+            </label>
+            <label class="field">
+              <span>Travel direction</span>
+              <select id="locationCueDirection">
+                <option value="any">Both directions</option>
+                <option value="heading">Specific heading</option>
+              </select>
+            </label>
+          </div>
+
+          <label id="locationCueHeadingGroup" class="field" hidden>
+            <span>Approach heading (0–359°)</span>
+            <input id="locationCueHeading" type="number" min="0" max="359" step="1" placeholder="90">
+          </label>
+
+          <label class="field">
+            <span>Photo or Google Maps screenshot</span>
+            <div id="locationCuePasteZone" class="photo-paste-zone" contenteditable="true" spellcheck="false" aria-label="Paste or choose a Location Cue image" data-placeholder="Paste a screenshot here, or choose an image file below.">
+              <div class="photo-paste-copy">
+                <strong>Add the landmark image</strong>
+                <span>Paste a screenshot, or choose a picture from your device.</span>
+              </div>
+              <img id="locationCuePreview" class="photo-preview" alt="Location Cue preview" hidden>
+            </div>
+            <div class="file-row">
+              <input id="locationCueFile" type="file" accept="image/*">
+              <button id="clearLocationCuePhotoButton" class="secondary-button small-button" type="button">Clear photo</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Notes <small>(optional)</small></span>
+            <textarea id="locationCueNotes" rows="2" placeholder="Visible from the left lane before the flyover."></textarea>
+          </label>
+
+          <button class="primary-button" type="submit">Save Location Cue</button>
+        </form>
+
+        <div class="location-cue-library-header">
+          <strong>Reusable cue library</strong>
+          <button id="refreshLocationCuesButton" class="secondary-button small-button" type="button">Refresh</button>
+        </div>
+        <div id="locationCueList" class="location-cue-list"></div>
       </section>
 
       <section class="panel junction-photo-panel">
@@ -614,7 +695,7 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="app.js?v=153"></script>
+  <script src="app.js?v=154"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

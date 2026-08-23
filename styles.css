@@ -1746,6 +1746,66 @@ body[data-cue-ui-mode="drive"] .layout {
   opacity: 0.48;
 }
 
+.location-cue-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.location-cue-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.location-cue-card {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.location-cue-card img {
+  width: 104px;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.location-cue-card-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.location-cue-card-copy span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+@media (max-width: 680px) {
+  .location-cue-card {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .location-cue-card img {
+    width: 82px;
+    height: 64px;
+  }
+
+  .location-cue-card > button {
+    grid-column: 1 / -1;
+  }
+}
+
 .cue-coordinate-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
