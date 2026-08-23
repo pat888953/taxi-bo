@@ -3484,6 +3484,47 @@ input[type="range"]:focus {
   margin-top: 14px;
 }
 
+.hybrid-engine-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf2ef;
+  color: var(--accent-dark);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.hybrid-engine-badge.is-proven,
+.hybrid-engine-badge.is-hybrid {
+  background: #dff3e7;
+  color: #105c3f;
+}
+
+.hybrid-engine-badge.is-draft {
+  background: #fff0ce;
+  color: #7a4a00;
+}
+
+.hybrid-engine-badge.is-blocked {
+  background: #f9dddd;
+  color: #8d2020;
+}
+
+.hybrid-engine-summary {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.hybrid-engine-summary span {
+  color: var(--muted);
+}
+
 .academy-question[hidden] {
   display: none;
 }

@@ -3872,6 +3872,7 @@ function showPreparedRouteChoices(options, destination, locationContext, recorde
       ${options.map((option, index) => `
         <button class="route-choice-button ${option.routeTrusted === false ? "needs-review" : ""}" type="button" data-route-choice="${index}">
           <strong>${escapeHtml(option.optionLabel || `Route ${index + 1}`)}</strong>
+          ${formatHybridEngineBadge(option.hybridEngine)}
           ${option.routeTrusted === false ? `<span class="route-untrusted-label">Review before use</span>` : ""}
           ${formatRouteWarningBadge(option.routeWarnings)}
           <span>${escapeHtml(formatDistance(option.distance))} · ${escapeHtml(formatRouteDuration(option.duration))} · ${Number(option.cueCount || option.cues?.length || 0)} cues</span>
@@ -3943,6 +3944,10 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
   const trustWarningHtml = generatedRoute.routeTrusted === false
     ? `<div class="route-generation-warning"><strong>Do not save cue photos from this route yet</strong><span>This map route needs driver review. Prefer a recorded route or record the actual taxi path first.</span></div>`
     : "";
+  const engine = generatedRoute.hybridEngine || {};
+  const engineSummary = engine.state
+    ? `<div class="hybrid-engine-summary is-${escapeHtml(engine.state)}"><strong>Hybrid Drive Engine: ${escapeHtml(engine.state)}</strong><span>${Math.round(Number(engine.confidence || 0) * 100)}% confidence · ${Number(engine.provenCorridorCount || 0)} proven corridor · ${Number(engine.generatedConnectorCount || 0)} generated connector${engine.recordingNeeded ? " · recording recommended" : ""}</span></div>`
+    : "";
 
   preparedRoute = normalizeImportedRoute({
     id: `prepared-${Date.now()}`,
@@ -3972,6 +3977,7 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     ${isHybridRoute ? `Hybrid composition: ${hybridCoveragePercent}% proven recorded road with generated start/end connectors.<br>` : ""}
     Matched ${matchedCueCount} saved photo cue${matchedCueCount === 1 ? "" : "s"} from SQLite across ${cueCount} generated turn cue${cueCount === 1 ? "" : "s"}. ${escapeHtml(formatRouteContext(preparedRoute))}${escapeHtml(locationContext)}
     ${trustWarningHtml}
+    ${engineSummary}
     ${warningHtml}
   `;
   setPhoneDriveScreen("cue");
@@ -4553,6 +4559,20 @@ function updateCueCoordinateStatus(photo = getSelectedCue()) {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
   cueCoordinateStatus.className = "cue-coordinate-status";
   cueCoordinateStatus.innerHTML = `Coordinates: ${latitude}, ${longitude} <a href="${mapsUrl}" target="_blank" rel="noopener">Open in Google Maps</a>`;
+}
+
+function formatHybridEngineBadge(engine) {
+  if (!engine?.state) {
+    return "";
+  }
+  const labels = {
+    proven: "Proven route",
+    hybrid: "Hybrid route",
+    draft: "Draft · recording recommended",
+    blocked: "Blocked · recording required"
+  };
+  const confidence = Math.round(Number(engine.confidence || 0) * 100);
+  return `<span class="hybrid-engine-badge is-${escapeHtml(engine.state)}">${escapeHtml(labels[engine.state] || engine.state)} · ${confidence}% confidence</span>`;
 }
 
 function setCueSnapButtonMode(mode = "route") {

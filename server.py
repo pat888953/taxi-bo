@@ -33,6 +33,28 @@ HONG_KONG_TUNNEL_OPTIONS = (
     ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
     ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
 )
+HUNG_HOM_NORTHBOUND_ANCHORS = (
+    {
+        "latitude": 22.2826209,
+        "longitude": 114.1813300,
+        "label": "Hung Hom Tunnel northbound — Hong Kong entrance",
+    },
+    {
+        "latitude": 22.3032138,
+        "longitude": 114.1805407,
+        "label": "Hung Hom Tunnel northbound — Kowloon exit",
+    },
+)
+HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR = (
+    [22.2826209, 114.1813300],
+    [22.2841137, 114.1831091],
+    [22.2843151, 114.1831714],
+    [22.3010198, 114.1803874],
+    [22.3012854, 114.1802959],
+    [22.3032138, 114.1805407],
+)
+HUNG_HOM_NORTHBOUND_RECORDING_ID = "8dffe164-c5af-459e-b2f5-f3c4cd17ab82"
+HUNG_HOM_NORTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel northbound corridor"
 HONG_KONG_HARBOUR_DIVIDE = 22.295
 HONG_KONG_ROUTE_BOUNDS = {
     "min_latitude": 21.9,
@@ -165,6 +187,23 @@ def initialize_db(mode=None):
 
             CREATE INDEX IF NOT EXISTS idx_location_cues_location
               ON location_cues(latitude, longitude);
+
+            CREATE TABLE IF NOT EXISTS proven_corridors (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              direction TEXT NOT NULL DEFAULT 'unknown',
+              source_route_id TEXT NOT NULL,
+              geometry TEXT NOT NULL DEFAULT '[]',
+              distance_meters REAL NOT NULL DEFAULT 0,
+              confidence REAL NOT NULL DEFAULT 0.8,
+              verification_count INTEGER NOT NULL DEFAULT 1,
+              status TEXT NOT NULL DEFAULT 'proven',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_proven_corridors_source
+              ON proven_corridors(source_route_id);
 
             CREATE TABLE IF NOT EXISTS incoming_orders (
               id TEXT PRIMARY KEY,
@@ -1361,18 +1400,132 @@ def normalize_ocr_line(line):
 
 def generate_route(payload):
     start, destination, start_label = resolve_route_endpoints(payload)
-    via = resolve_via_road(payload)
-    road_route = fetch_road_route(start, destination, [via] if via else None)
+    via_points, via_label = resolve_via_route(payload, start, destination)
+    if via_label == "Hung Hom Tunnel northbound":
+        return build_hung_hom_northbound_route(start, destination, start_label)
+    road_route = fetch_road_route(start, destination, via_points or None)
 
     generated = format_generated_route(start, destination, start_label, road_route)
-    if via:
-        generated["viaLabel"] = via["label"]
+    if via_label:
+        generated["viaLabel"] = via_label
+    reject_unsafe_tunnel_route(generated, via_label)
     return generated
 
 
 def resolve_via_road(payload):
     via_text = str(payload.get("viaRoad") or "").strip()
     return geocode_place(via_text) if via_text else None
+
+
+def is_hung_hom_tunnel_request(value):
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    return normalized in {
+        "hung hom", "hung hom tunnel", "cross harbour tunnel", "cross harbor tunnel"
+    }
+
+
+def resolve_via_route(payload, start, destination):
+    via_text = str(payload.get("viaRoad") or "").strip()
+    if not via_text:
+        return [], ""
+
+    if not is_hung_hom_tunnel_request(via_text):
+        via = geocode_place(via_text)
+        return [via], via["label"]
+
+    start_latitude = float(start["latitude"])
+    destination_latitude = float(destination["latitude"])
+    if start_latitude < HONG_KONG_HARBOUR_DIVIDE < destination_latitude:
+        return [dict(point) for point in HUNG_HOM_NORTHBOUND_ANCHORS], "Hung Hom Tunnel northbound"
+    if start_latitude > HONG_KONG_HARBOUR_DIVIDE > destination_latitude:
+        raise ValueError(
+            "Hung Hom Tunnel southbound is not calibrated yet. Record one correct Kowloon-to-Hong Kong drive before using this tunnel direction."
+        )
+
+    raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
+
+
+def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False):
+    if not via_label:
+        return
+    unsafe = [
+        warning for warning in route.get("routeWarnings", [])
+        if warning.get("code") == "repeated-harbour-crossing"
+        or (warning.get("code") == "route-loop" and not allow_connector_loops)
+    ]
+    if unsafe:
+        reasons = "; ".join(warning.get("title", "Unsafe route") for warning in unsafe)
+        raise ValueError(f"TaxiBo rejected the generated tunnel route: {reasons}.")
+
+
+def build_hung_hom_northbound_route(start, destination, start_label):
+    corridor = [list(point) for point in HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR]
+    recorded_routes = fetch_routes(include_images=False, route_id=HUNG_HOM_NORTHBOUND_RECORDING_ID)
+    if recorded_routes:
+        recorded_geometry = recorded_route_geometry(recorded_routes[0])
+        if len(recorded_geometry) > 240:
+            corridor = recorded_geometry[190:241]
+    entry = {"latitude": corridor[0][0], "longitude": corridor[0][1]}
+    exit_point = {"latitude": corridor[-1][0], "longitude": corridor[-1][1]}
+    start_connector = fetch_road_route(start, entry)
+    end_connector = fetch_road_route(exit_point, destination)
+    sections = []
+    if len(start_connector.get("geometry", [])) >= 2:
+        sections.append({
+            "source": "generated", "role": "start-connector",
+            "geometry": start_connector["geometry"],
+        })
+    sections.append({
+        "source": "recorded", "role": "proven-segment",
+        "recordingId": HUNG_HOM_NORTHBOUND_RECORDING_ID,
+        "recordingName": HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+        "geometry": corridor,
+    })
+    if len(end_connector.get("geometry", [])) >= 2:
+        sections.append({
+            "source": "generated", "role": "end-connector",
+            "geometry": end_connector["geometry"],
+        })
+
+    geometry = combine_route_sections(sections)
+    distance = sum_geometry_distance(geometry)
+    recorded_distance = sum_geometry_distance(corridor)
+    connector_duration = float(start_connector.get("duration") or 0) + float(end_connector.get("duration") or 0)
+    duration = connector_duration + 180
+    warnings = analyze_route_sanity(geometry, distance)
+    warnings = [
+        {
+            **warning,
+            "code": "connector-loop-review",
+            "severity": "medium",
+            "title": "Connector contains a road ramp",
+            "message": "The tunnel crossing is proven, but review the generated approach connector before driving.",
+        }
+        if warning.get("code") == "route-loop" else warning
+        for warning in warnings
+    ]
+    route = {
+        "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
+        "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
+        "startLabel": start_label,
+        "destinationLabel": destination.get("label", "Destination"),
+        "viaLabel": "Hung Hom Tunnel northbound",
+        "routeType": "hybrid",
+        "geometry": geometry,
+        "routeSections": sections,
+        "distance": distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(geometry),
+        "routeWarnings": warnings,
+        "hybridCoverage": min(1.0, recorded_distance / distance) if distance else 0,
+        "recordedSegmentDistance": recorded_distance,
+        "sourceRecordedRouteId": HUNG_HOM_NORTHBOUND_RECORDING_ID,
+        "sourceRecordedRouteName": HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+        "hybridEntryGapMeters": 0,
+        "hybridExitGapMeters": 0,
+    }
+    reject_unsafe_tunnel_route(route, route["viaLabel"], allow_connector_loops=True)
+    return route
 
 
 def resolve_route_endpoints(payload):
@@ -1472,13 +1625,17 @@ def prepare_route(payload):
 
 def prepare_route_options(payload):
     start, destination, start_label = resolve_route_endpoints(payload)
-    via = resolve_via_road(payload)
+    via_points, via_label = resolve_via_route(payload, start, destination)
 
-    if via:
-        road_route = fetch_road_route(start, destination, [via])
-        generated = format_generated_route(start, destination, start_label, road_route)
-        generated["viaLabel"] = via["label"]
-        label = f'Via {via["label"]}'
+    if via_points:
+        if via_label == "Hung Hom Tunnel northbound":
+            generated = build_hung_hom_northbound_route(start, destination, start_label)
+        else:
+            road_route = fetch_road_route(start, destination, via_points)
+            generated = format_generated_route(start, destination, start_label, road_route)
+            generated["viaLabel"] = via_label
+            reject_unsafe_tunnel_route(generated, via_label)
+        label = f"Via {via_label}"
         return add_hybrid_route_option([match_prepared_route(generated, "via-road", label)])
 
     if not requires_harbour_crossing(start, destination):
@@ -1510,10 +1667,123 @@ def match_prepared_route(generated, option_id, label):
     generated["cueCount"] = len(matched_cues)
     generated["optionId"] = option_id
     generated["optionLabel"] = label
-    generated["routeTrusted"] = not any(
-        warning.get("severity") in {"high", "medium"} for warning in generated.get("routeWarnings", [])
-    )
+    apply_hybrid_engine_assessment(generated)
     return generated
+
+
+def apply_hybrid_engine_assessment(route):
+    warnings = route.get("routeWarnings") or []
+    high_warnings = [warning for warning in warnings if warning.get("severity") == "high"]
+    medium_warnings = [warning for warning in warnings if warning.get("severity") == "medium"]
+    route_type = str(route.get("routeType") or "generated").lower()
+    coverage = max(0.0, min(1.0, float(route.get("hybridCoverage") or 0)))
+
+    if high_warnings:
+        state = "blocked"
+        confidence = 0
+    elif route_type == "recorded" or coverage >= 0.85:
+        state = "proven"
+        confidence = max(0.9, coverage)
+    elif route_type == "hybrid" and coverage > 0:
+        state = "hybrid"
+        confidence = min(0.89, 0.55 + coverage * 0.4 - len(medium_warnings) * 0.08)
+    else:
+        state = "draft"
+        confidence = max(0.15, 0.45 - len(medium_warnings) * 0.1)
+
+    route["hybridEngine"] = {
+        "state": state,
+        "confidence": round(max(0, confidence), 2),
+        "provenCoverage": round(coverage, 4),
+        "recordingNeeded": state in {"draft", "blocked"},
+        "generatedConnectorCount": sum(
+            1 for section in route.get("routeSections") or [] if section.get("source") == "generated"
+        ),
+        "provenCorridorCount": sum(
+            1 for section in route.get("routeSections") or [] if section.get("source") == "recorded"
+        ),
+        "reasons": [warning.get("title", "Route warning") for warning in warnings],
+    }
+    route["routeTrusted"] = state in {"proven", "hybrid"} and not medium_warnings
+    return route
+
+
+def infer_corridor_direction(geometry):
+    if len(geometry) < 2:
+        return "unknown"
+    latitude_change = geometry[-1][0] - geometry[0][0]
+    longitude_change = geometry[-1][1] - geometry[0][1]
+    if abs(latitude_change) >= abs(longitude_change):
+        return "northbound" if latitude_change > 0 else "southbound"
+    return "eastbound" if longitude_change > 0 else "westbound"
+
+
+def refresh_proven_corridors():
+    recorded_routes = [
+        route for route in fetch_routes(include_images=False) if is_recorded_route_record(route)
+    ]
+    with connect_db() as db:
+        for route in recorded_routes:
+            geometry = recorded_route_geometry(route)
+            if len(geometry) < 2:
+                continue
+            corridor_id = f'route-{route["id"]}'
+            db.execute(
+                "DELETE FROM proven_corridors WHERE id = ?",
+                (corridor_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO proven_corridors (
+                  id, name, direction, source_route_id, geometry,
+                  distance_meters, confidence, verification_count, status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proven', CURRENT_TIMESTAMP)
+                """,
+                (
+                    corridor_id,
+                    route.get("name") or "Recorded corridor",
+                    infer_corridor_direction(geometry),
+                    route["id"],
+                    json.dumps(geometry),
+                    sum_geometry_distance(geometry),
+                    1.0,
+                    1,
+                ),
+            )
+    return fetch_proven_corridors()
+
+
+def fetch_proven_corridors():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, name, direction, source_route_id, geometry, distance_meters,
+              confidence, verification_count, status, updated_at
+            FROM proven_corridors ORDER BY confidence DESC, updated_at DESC
+            """
+        ).fetchall()
+    return [{
+        "id": row["id"], "name": row["name"], "direction": row["direction"],
+        "sourceRouteId": row["source_route_id"], "geometry": json.loads(row["geometry"] or "[]"),
+        "distanceMeters": row["distance_meters"], "confidence": row["confidence"],
+        "verificationCount": row["verification_count"], "status": row["status"],
+        "updatedAt": row["updated_at"],
+    } for row in rows]
+
+
+def fetch_hybrid_engine_status(refresh=False):
+    corridors = refresh_proven_corridors() if refresh else fetch_proven_corridors()
+    directions = {}
+    for corridor in corridors:
+        directions[corridor["direction"]] = directions.get(corridor["direction"], 0) + 1
+    return {
+        "engine": "Hybrid Drive Engine",
+        "version": 1,
+        "corridorCount": len(corridors),
+        "directions": directions,
+        "states": ["proven", "hybrid", "draft", "blocked"],
+        "corridors": corridors,
+    }
 
 
 def add_hybrid_route_option(options):
@@ -2662,6 +2932,12 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             include_images = query.get("images", ["1"])[0] != "0"
             self.send_json({"ok": True, "cues": fetch_location_cues(include_images=include_images)})
+            return
+
+        if path == "/api/hybrid-engine/status":
+            query = parse_qs(urlparse(self.path).query)
+            refresh = query.get("refresh", ["0"])[0] == "1"
+            self.send_json({"ok": True, "status": fetch_hybrid_engine_status(refresh=refresh)})
             return
 
         if path.startswith("/api/routes/"):
