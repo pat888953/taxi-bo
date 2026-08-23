@@ -275,6 +275,7 @@ let captureImageData = null;
 let pendingRouteChoices = [];
 let routeEntryMode = "destination";
 let pendingCueEditLink = parseCueEditLink();
+let pendingLocationCueLink = new URLSearchParams(window.location.search).get("locationCue") || "";
 
 function getTaxiBoStorageMode() {
   return localStorage.getItem(TAXIBO_STORAGE_MODE_KEY) === "local" ? "local" : "cloud";
@@ -4660,7 +4661,7 @@ function renderLocationCues() {
   }
 
   locationCueList.innerHTML = locationCues.map((cue) => `
-    <article class="location-cue-card">
+    <article class="location-cue-card" data-location-cue-card-id="${escapeHtml(cue.id)}">
       <img src="${escapeHtml(cue.image)}" alt="${escapeHtml(cue.title)}">
       <div class="location-cue-card-copy">
         <strong>${escapeHtml(cue.title)}</strong>
@@ -4674,6 +4675,21 @@ function renderLocationCues() {
   locationCueList.querySelectorAll(".delete-location-cue").forEach((button) => {
     button.addEventListener("click", () => deleteLocationCue(button.dataset.locationCueId));
   });
+
+  if (pendingLocationCueLink) {
+    const requestedId = pendingLocationCueLink;
+    pendingLocationCueLink = "";
+    setCueUiMode("maintenance");
+    const card = locationCueList.querySelector(`[data-location-cue-card-id="${CSS.escape(requestedId)}"]`);
+    if (card) {
+      card.classList.add("is-academy-target");
+      setLocationCueStatus("Opened this reusable Location Cue from TaxiBo Academy.");
+      window.requestAnimationFrame(() => card.scrollIntoView({ behavior: "smooth", block: "center" }));
+    } else {
+      setLocationCueStatus("Could not find the Location Cue opened from TaxiBo Academy.", true);
+    }
+    window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash || ""}`);
+  }
 }
 
 async function saveLocationCue() {

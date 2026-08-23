@@ -88,6 +88,35 @@ class LocationCueTests(unittest.TestCase):
         self.assertEqual(matched[0]["sourceLocationCueId"], cue["id"])
         self.assertEqual(matched[0]["step"], 1)
 
+    def test_academy_uses_location_cue_without_a_route(self):
+        cue = self.create_cue()
+
+        result = server.fetch_academy_question()
+
+        self.assertTrue(result["available"])
+        question = result["question"]
+        self.assertEqual(question["id"], cue["id"])
+        self.assertEqual(question["cueType"], "location")
+        self.assertEqual(question["routeId"], "")
+        self.assertIn("Keep right", question["choices"])
+
+    def test_academy_records_location_attempt_and_separate_stats(self):
+        cue = self.create_cue()
+
+        attempt = server.record_academy_attempt({
+            "questionId": cue["id"],
+            "cueType": "location",
+            "selectedAnswer": "Keep right",
+        })
+        stats = server.fetch_academy_stats()
+
+        self.assertTrue(attempt["correct"])
+        self.assertEqual(attempt["cueType"], "location")
+        self.assertEqual(stats["locationQuestions"], 1)
+        self.assertEqual(stats["routeQuestions"], 0)
+        self.assertEqual(stats["locationAttempts"], 1)
+        self.assertEqual(stats["recent"][0]["cueType"], "location")
+
 
 if __name__ == "__main__":
     unittest.main()

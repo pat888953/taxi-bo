@@ -240,6 +240,8 @@ def initialize_db(mode=None):
               id TEXT PRIMARY KEY,
               photo_stop_id TEXT NOT NULL,
               route_id TEXT NOT NULL DEFAULT '',
+              cue_type TEXT NOT NULL DEFAULT 'route',
+              location_cue_id TEXT NOT NULL DEFAULT '',
               selected_answer TEXT NOT NULL,
               correct_answer TEXT NOT NULL,
               is_correct INTEGER NOT NULL DEFAULT 0,
@@ -252,6 +254,7 @@ def initialize_db(mode=None):
         )
         ensure_route_columns(db)
         ensure_incoming_order_columns(db)
+        ensure_academy_attempt_columns(db)
 
 
 def ensure_route_columns(db):
@@ -310,6 +313,27 @@ def ensure_incoming_order_columns(db):
     for name, definition in columns.items():
         if name not in existing:
             db.execute(f"ALTER TABLE incoming_orders ADD COLUMN {name} {definition}")
+
+
+def ensure_academy_attempt_columns(db):
+    if db.postgres:
+        rows = db.execute(
+            """
+            SELECT column_name AS name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'academy_attempts'
+            """
+        ).fetchall()
+    else:
+        rows = db.execute("PRAGMA table_info(academy_attempts)").fetchall()
+
+    existing = {row["name"] for row in rows}
+    columns = {
+        "cue_type": "TEXT NOT NULL DEFAULT 'route'",
+        "location_cue_id": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE academy_attempts ADD COLUMN {name} {definition}")
 
 
 def fetch_routes(include_images=True, route_id=None):
@@ -550,57 +574,40 @@ def fetch_academy_question(excluded_question_id=""):
     excluded_question_id = str(excluded_question_id or "").strip()
 
     with connect_db() as db:
-        question_count = db.execute(
+        route_rows = db.execute(
             """
-            SELECT COUNT(*) AS question_count
-            FROM photo_stops
-            WHERE image IS NOT NULL
-              AND image != ''
-            """
-        ).fetchone()["question_count"]
-
-        question_row = db.execute(
-            """
-            SELECT
-              photo_stops.id, photo_stops.route_id, photo_stops.step,
+            SELECT photo_stops.id, photo_stops.route_id, photo_stops.step,
               photo_stops.title, photo_stops.instruction, photo_stops.notes,
-              photo_stops.image, routes.name AS route_name,
-              routes.start, routes.destination
-            FROM photo_stops
-            JOIN routes ON routes.id = photo_stops.route_id
-            WHERE photo_stops.image IS NOT NULL
-              AND photo_stops.image != ''
-            ORDER BY
-              CASE WHEN photo_stops.id = ? THEN 1 ELSE 0 END,
-              RANDOM()
-            LIMIT 1
-            """,
-            (excluded_question_id,),
-        ).fetchone()
-
-        if not question_row:
-            return {
-                "available": False,
-                "message": "Add route cue photos first, then TaxiBo Academy can build practice questions from them.",
-            }
-
-        distractor_rows = db.execute(
+              photo_stops.image, routes.name AS route_name, routes.start, routes.destination
+            FROM photo_stops JOIN routes ON routes.id = photo_stops.route_id
+            WHERE photo_stops.image IS NOT NULL AND photo_stops.image != ''
             """
-            SELECT id, title, instruction, notes
-            FROM photo_stops
-            WHERE id != ?
-              AND image IS NOT NULL
-              AND image != ''
-            ORDER BY RANDOM()
-            LIMIT 8
-            """,
-            (question_row["id"],),
         ).fetchall()
+        location_rows = db.execute(
+            """
+            SELECT id, title, instruction, notes, image, latitude, longitude,
+              direction_mode, heading_degrees
+            FROM location_cues WHERE image IS NOT NULL AND image != ''
+            """
+        ).fetchall()
+
+    candidates = [{**dict(row), "cue_type": "route"} for row in route_rows]
+    candidates.extend({**dict(row), "cue_type": "location"} for row in location_rows)
+    if not candidates:
+        return {
+            "available": False,
+            "message": "Add a Route Cue or Location Cue photo first, then TaxiBo Academy can build practice questions.",
+        }
+
+    eligible = [item for item in candidates if item["id"] != excluded_question_id] or candidates
+    question_row = random.choice(eligible)
+    distractor_rows = [item for item in candidates if item["id"] != question_row["id"]]
+    random.shuffle(distractor_rows)
 
     correct_answer = academy_answer_for_photo(question_row)
     choices = [correct_answer]
 
-    for row in distractor_rows:
+    for row in distractor_rows[:8]:
         answer = academy_answer_for_photo(row)
         if answer and answer not in choices:
             choices.append(answer)
@@ -619,17 +626,25 @@ def fetch_academy_question(excluded_question_id=""):
             choices.append(choice)
 
     random.shuffle(choices)
+    is_location = question_row["cue_type"] == "location"
+    direction = "Both directions"
+    if is_location and question_row.get("direction_mode") == "heading":
+        direction = f'{round(float(question_row.get("heading_degrees") or 0))}° heading'
 
     return {
         "available": True,
         "question": {
             "id": question_row["id"],
-            "routeId": question_row["route_id"],
-            "routeName": question_row["route_name"],
-            "start": question_row["start"],
-            "destination": question_row["destination"],
-            "step": question_row["step"],
-            "questionCount": int(question_count or 0),
+            "cueType": question_row["cue_type"],
+            "routeId": "" if is_location else question_row["route_id"],
+            "routeName": "Location Cue" if is_location else question_row["route_name"],
+            "start": "" if is_location else question_row["start"],
+            "destination": "" if is_location else question_row["destination"],
+            "step": None if is_location else question_row["step"],
+            "latitude": question_row.get("latitude") if is_location else None,
+            "longitude": question_row.get("longitude") if is_location else None,
+            "direction": direction if is_location else "",
+            "questionCount": len(candidates),
             # Cue titles frequently describe the correct maneuver. Keep the
             # quiz heading neutral so API clients cannot accidentally reveal it.
             "title": "Street-photo question",
@@ -687,6 +702,7 @@ def fetch_academy_repairs():
 
 def record_academy_attempt(payload):
     photo_stop_id = str(payload.get("questionId", "")).strip()
+    cue_type = str(payload.get("cueType", "route")).strip().lower()
     selected_answer = str(payload.get("selectedAnswer", "")).strip()
 
     if not photo_stop_id:
@@ -695,14 +711,19 @@ def record_academy_attempt(payload):
         raise ValueError("Select an answer before submitting.")
 
     with connect_db() as db:
-        photo = db.execute(
-            """
-            SELECT id, route_id, title, instruction, notes
-            FROM photo_stops
-            WHERE id = ?
-            """,
-            (photo_stop_id,),
-        ).fetchone()
+        if cue_type == "location":
+            photo = db.execute(
+                "SELECT id, title, instruction, notes FROM location_cues WHERE id = ?",
+                (photo_stop_id,),
+            ).fetchone()
+            route_id = ""
+        else:
+            cue_type = "route"
+            photo = db.execute(
+                "SELECT id, route_id, title, instruction, notes FROM photo_stops WHERE id = ?",
+                (photo_stop_id,),
+            ).fetchone()
+            route_id = photo["route_id"] if photo else ""
 
         if not photo:
             raise ValueError("Academy question was not found.")
@@ -714,14 +735,17 @@ def record_academy_attempt(payload):
         db.execute(
             """
             INSERT INTO academy_attempts (
-              id, photo_stop_id, route_id, selected_answer, correct_answer, is_correct
+              id, photo_stop_id, route_id, cue_type, location_cue_id,
+              selected_answer, correct_answer, is_correct
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 attempt_id,
                 photo_stop_id,
-                photo["route_id"],
+                route_id,
+                cue_type,
+                photo_stop_id if cue_type == "location" else "",
                 selected_answer,
                 correct_answer,
                 is_correct,
@@ -731,6 +755,7 @@ def record_academy_attempt(payload):
     return {
         "id": attempt_id,
         "questionId": photo_stop_id,
+        "cueType": cue_type,
         "correct": bool(is_correct),
         "correctAnswer": correct_answer,
     }
@@ -746,7 +771,7 @@ def fetch_academy_stats():
             FROM academy_attempts
             """
         ).fetchone()
-        question_total = db.execute(
+        route_total = db.execute(
             """
             SELECT COUNT(*) AS total_questions
             FROM photo_stops
@@ -754,6 +779,15 @@ def fetch_academy_stats():
               AND image != ''
             """
         ).fetchone()
+        location_total = db.execute(
+            "SELECT COUNT(*) AS total_questions FROM location_cues WHERE image IS NOT NULL AND image != ''"
+        ).fetchone()
+        type_rows = db.execute(
+            """
+            SELECT cue_type, COUNT(*) AS attempts, COALESCE(SUM(is_correct), 0) AS correct
+            FROM academy_attempts GROUP BY cue_type
+            """
+        ).fetchall()
         recent_rows = db.execute(
             """
             SELECT
@@ -762,11 +796,17 @@ def fetch_academy_stats():
               academy_attempts.correct_answer,
               academy_attempts.is_correct,
               academy_attempts.created_at,
-              photo_stops.title,
+              academy_attempts.cue_type,
+              COALESCE(location_cues.title, photo_stops.title) AS title,
               routes.name AS route_name,
-              routes.destination
+              routes.destination,
+              location_cues.latitude,
+              location_cues.longitude
             FROM academy_attempts
-            LEFT JOIN photo_stops ON photo_stops.id = academy_attempts.photo_stop_id
+            LEFT JOIN photo_stops ON academy_attempts.cue_type = 'route'
+              AND photo_stops.id = academy_attempts.photo_stop_id
+            LEFT JOIN location_cues ON academy_attempts.cue_type = 'location'
+              AND location_cues.id = academy_attempts.location_cue_id
             LEFT JOIN routes ON routes.id = academy_attempts.route_id
             ORDER BY academy_attempts.created_at DESC
             LIMIT 6
@@ -775,18 +815,28 @@ def fetch_academy_stats():
 
     total_attempts = int(totals["total_attempts"] or 0)
     correct_attempts = int(totals["correct_attempts"] or 0)
+    type_stats = {row["cue_type"]: dict(row) for row in type_rows}
+    route_questions = int(route_total["total_questions"] or 0)
+    location_questions = int(location_total["total_questions"] or 0)
 
     return {
-        "totalQuestions": int(question_total["total_questions"] or 0),
+        "totalQuestions": route_questions + location_questions,
+        "routeQuestions": route_questions,
+        "locationQuestions": location_questions,
         "totalAttempts": total_attempts,
         "correctAttempts": correct_attempts,
         "accuracy": round((correct_attempts / total_attempts) * 100) if total_attempts else 0,
+        "routeAttempts": int(type_stats.get("route", {}).get("attempts", 0)),
+        "locationAttempts": int(type_stats.get("location", {}).get("attempts", 0)),
         "recent": [
             {
                 "questionId": row["photo_stop_id"],
+                "cueType": row["cue_type"],
                 "title": row["title"] or "Deleted cue photo",
-                "routeName": row["route_name"] or "Unknown route",
+                "routeName": row["route_name"] or ("Location Cue" if row["cue_type"] == "location" else "Unknown route"),
                 "destination": row["destination"] or "",
+                "latitude": row["latitude"],
+                "longitude": row["longitude"],
                 "selectedAnswer": row["selected_answer"],
                 "correctAnswer": row["correct_answer"],
                 "correct": bool(row["is_correct"]),

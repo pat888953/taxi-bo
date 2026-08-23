@@ -107,20 +107,26 @@ function renderQuestion(question) {
   // A saved cue title often contains the maneuver itself, so showing it here
   // would reveal the correct answer before the driver makes a choice.
   academyQuestionTitle.textContent = "Street-photo question";
-  academyRouteBadge.textContent = `Step ${question.step || "?"}`;
+  const isLocationCue = question.cueType === "location";
+  academyRouteBadge.textContent = isLocationCue ? "Location Cue" : `Step ${question.step || "?"}`;
   const hasNextQuestion = Number(question.questionCount || 0) > 1;
   academyNextButton.disabled = !hasNextQuestion;
   academyNextButton.textContent = hasNextQuestion ? "Next question" : "Only question";
   academyState.textContent = "Choose the best answer, then submit.";
   academyState.className = "form-state empty-state";
   academyPhoto.src = question.image;
-  academyPhoto.alt = `Street photo for Academy step ${question.step || "unknown"}`;
+  academyPhoto.alt = isLocationCue
+    ? "Street photo for an Academy Location Cue"
+    : `Street photo for Academy step ${question.step || "unknown"}`;
   academyPhotoWrap.classList.toggle("needs-picture", Boolean(question.imageNeedsReplacement));
   academyPhotoNotice.textContent = question.imageNeedsReplacement
-    ? "Sample image - click to add real street photo in TaxiBo Cue"
-    : "Click to edit picture in TaxiBo Cue";
+    ? "Sample image - click to add a real street photo in Maintenance"
+    : "Click to open this cue in Maintenance";
   academyPrompt.textContent = question.prompt;
-  academyContext.textContent = `${question.routeName || "Saved route"} · ${question.start || "Start"} → ${question.destination || "Destination"}`;
+  academyContext.textContent = isLocationCue
+    ? `Location Cue · ${Number(question.latitude).toFixed(6)}, ${Number(question.longitude).toFixed(6)} · ${question.direction || "Both directions"}`
+    : `${question.routeName || "Saved route"} · ${question.start || "Start"} → ${question.destination || "Destination"}`;
+  academyEditPictureButton.textContent = isLocationCue ? "Open Location Cue in Maintenance" : "Edit picture in Route Maintenance";
   academyChoices.innerHTML = "";
 
   question.choices.forEach((choice, index) => {
@@ -160,8 +166,12 @@ function openCurrentQuestionInCueMaintenance() {
 
 function openCueInMaintenance(cue) {
   const url = new URL("index.html", window.location.href);
-  url.searchParams.set("editCue", cue.id);
-  if (cue.routeId) {
+  if (cue.cueType === "location") {
+    url.searchParams.set("locationCue", cue.id);
+  } else {
+    url.searchParams.set("editCue", cue.id);
+  }
+  if (cue.cueType !== "location" && cue.routeId) {
     url.searchParams.set("routeId", cue.routeId);
   }
   url.searchParams.set("from", "academy");
@@ -274,6 +284,7 @@ async function submitAnswer() {
       headers: storageHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         questionId: currentQuestion.id,
+        cueType: currentQuestion.cueType || "route",
         selectedAnswer,
       }),
     });
@@ -326,8 +337,8 @@ async function loadStats() {
 
 function renderStats(stats) {
   academyAccuracy.textContent = `${stats.accuracy || 0}%`;
-  academyProgress.textContent = `${stats.correctAttempts || 0} correct of ${stats.totalAttempts || 0} attempts`;
-  academyQuestionCount.textContent = `${stats.totalQuestions || 0} photo${stats.totalQuestions === 1 ? "" : "s"}`;
+  academyProgress.textContent = `${stats.correctAttempts || 0} correct of ${stats.totalAttempts || 0} attempts · ${stats.locationAttempts || 0} Location Cue`;
+  academyQuestionCount.textContent = `${stats.routeQuestions || 0} route · ${stats.locationQuestions || 0} location`;
 
   if (!stats.recent?.length) {
     academyHistory.className = "academy-history empty-state";
@@ -349,7 +360,9 @@ function renderStats(stats) {
     title.textContent = attempt.title;
 
     const context = document.createElement("p");
-    context.textContent = `${attempt.routeName}${attempt.destination ? ` · ${attempt.destination}` : ""}`;
+    context.textContent = attempt.cueType === "location"
+      ? `Location Cue${Number.isFinite(Number(attempt.latitude)) ? ` · ${Number(attempt.latitude).toFixed(6)}, ${Number(attempt.longitude).toFixed(6)}` : ""}`
+      : `${attempt.routeName}${attempt.destination ? ` · ${attempt.destination}` : ""}`;
 
     item.append(status, title, context);
     academyHistory.append(item);

@@ -1773,6 +1773,11 @@ body[data-cue-ui-mode="drive"] .layout {
   background: var(--surface-soft);
 }
 
+.location-cue-card.is-academy-target {
+  outline: 3px solid #d8991d;
+  outline-offset: 3px;
+}
+
 .location-cue-card img {
   width: 104px;
   height: 74px;
