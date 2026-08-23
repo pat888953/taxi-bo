@@ -1785,6 +1785,59 @@ def create_location_cue(payload):
     return next(cue for cue in fetch_location_cues() if cue["id"] == cue_id)
 
 
+def replace_location_cues(cues):
+    if not isinstance(cues, list):
+        raise ValueError("Expected a Location Cue list.")
+
+    prepared = []
+    for cue in cues:
+        cue_id = str(cue.get("id") or uuid4()).strip()
+        title = str(cue.get("title") or "").strip()
+        image = str(cue.get("image") or "").strip()
+        latitude = optional_float(cue.get("latitude"))
+        longitude = optional_float(cue.get("longitude"))
+        radius = optional_float(cue.get("activationRadiusMeters"))
+        direction_mode = str(cue.get("directionMode") or "any").strip().lower()
+        heading = optional_float(cue.get("headingDegrees"))
+        confidence = optional_float(cue.get("confidence"))
+        if not cue_id or not title or not image:
+            raise ValueError("Every Location Cue requires an id, name, and image.")
+        if latitude is None or not -90 <= latitude <= 90 or longitude is None or not -180 <= longitude <= 180:
+            raise ValueError(f'Location Cue "{title}" has invalid coordinates.')
+        radius = 100 if radius is None else radius
+        if not 20 <= radius <= 1000:
+            raise ValueError(f'Location Cue "{title}" has an invalid activation radius.')
+        if direction_mode not in {"any", "heading"}:
+            raise ValueError(f'Location Cue "{title}" has an invalid direction mode.')
+        if direction_mode == "heading" and (heading is None or not 0 <= heading < 360):
+            raise ValueError(f'Location Cue "{title}" has an invalid heading.')
+        if direction_mode == "any":
+            heading = None
+        confidence = 1 if confidence is None else confidence
+        prepared.append((
+            cue_id, title, str(cue.get("instruction") or "").strip(),
+            str(cue.get("notes") or "").strip(), image, latitude, longitude,
+            radius, direction_mode, heading, confidence,
+            int(cue.get("usageCount") or 0),
+        ))
+
+    with connect_db() as db:
+        db.execute("DELETE FROM location_cues")
+        for values in prepared:
+            db.execute(
+                """
+                INSERT INTO location_cues (
+                  id, title, instruction, notes, image, latitude, longitude,
+                  activation_radius_meters, direction_mode, heading_degrees,
+                  confidence, usage_count, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                values,
+            )
+
+    return len(prepared)
+
+
 def delete_location_cue(payload):
     cue_id = str(payload.get("id") or "").strip()
     if not cue_id:
@@ -2672,6 +2725,15 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
                 payload = self.read_json_body()
                 photo = update_photo_stop(photo_id, payload)
                 self.send_json({"ok": True, "photo": photo})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if path == "/api/location-cues":
+            try:
+                payload = self.read_json_body()
+                count = replace_location_cues(payload)
+                self.send_json({"ok": True, "locationCues": count})
             except Exception as error:
                 self.send_json({"ok": False, "error": str(error)}, status=400)
             return

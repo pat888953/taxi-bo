@@ -43,6 +43,17 @@ class LocationCueTests(unittest.TestCase):
         self.assertEqual(deleted["title"], "Blue tunnel sign")
         self.assertEqual(server.fetch_location_cues(), [])
 
+    def test_location_cue_bulk_replace_preserves_ids_for_cloud_sync(self):
+        original = self.create_cue()
+        payload = server.fetch_location_cues()
+
+        count = server.replace_location_cues(payload)
+        saved = server.fetch_location_cues()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(saved[0]["id"], original["id"])
+        self.assertEqual(saved[0]["title"], "Blue tunnel sign")
+
     def test_location_cue_matches_nearby_generated_cue(self):
         cue = self.create_cue()
         matched = server.match_saved_photo_cues([{

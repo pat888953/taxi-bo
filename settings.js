@@ -153,6 +153,30 @@ async function writeRoutesTo(url, routes, headers = {}) {
   return result;
 }
 
+async function fetchLocationCuesFrom(url, headers = {}) {
+  const { response, result } = await fetchJson(`${url}/api/location-cues?syncRead=${Date.now()}`, {
+    cache: "no-store",
+    headers: { Accept: "application/json", ...headers },
+  }, "Read Location Cues");
+  if (!response.ok || !result.ok || !Array.isArray(result.cues)) {
+    throw new Error(result.error || `Could not read Location Cues from ${url}.`);
+  }
+  return result.cues;
+}
+
+async function writeLocationCuesTo(url, cues, headers = {}) {
+  const { response, result } = await fetchJson(`${url}/api/location-cues`, {
+    method: "PUT",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers },
+    body: JSON.stringify(cues),
+  }, "Write Location Cues");
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `Could not write Location Cues to ${url}.`);
+  }
+  return result;
+}
+
 function countCues(routes) {
   return routes.reduce((total, route) => total + (Array.isArray(route.photos) ? route.photos.length : 0), 0);
 }
@@ -202,11 +226,15 @@ async function syncLocalToCloud() {
   try {
     await checkCloudConnection(cloudUrl);
     setSyncStatus("Reading local SQLite routes before cloud sync...");
-    const routes = await fetchRoutesFrom(window.location.origin, localHeaders());
-    setSyncStatus(`Uploading ${routes.length} local routes and ${countCues(routes)} cue photos to ${cloudUrl}...`);
+    const [routes, locationCues] = await Promise.all([
+      fetchRoutesFrom(window.location.origin, localHeaders()),
+      fetchLocationCuesFrom(window.location.origin, localHeaders()),
+    ]);
+    setSyncStatus(`Uploading ${routes.length} routes, ${countCues(routes)} route photos, and ${locationCues.length} Location Cues to ${cloudUrl}...`);
     await writeRoutesTo(cloudUrl, routes);
+    await writeLocationCuesTo(cloudUrl, locationCues);
     localStorage.setItem("taxiBoLastCloudSyncAt", new Date().toISOString());
-    setSyncStatus(`Sync complete. Cloud now has ${routes.length} routes and ${countCues(routes)} cue photos.`);
+    setSyncStatus(`Sync complete. Cloud now has ${routes.length} routes, ${countCues(routes)} route photos, and ${locationCues.length} Location Cues.`);
   } catch (error) {
     setSyncStatus(error.message || "Could not sync local data to cloud.", true);
   } finally {
@@ -228,10 +256,14 @@ async function syncCloudToLocal() {
   try {
     await checkCloudConnection(cloudUrl);
     setSyncStatus(`Reading cloud routes from ${cloudUrl}...`);
-    const routes = await fetchRoutesFrom(cloudUrl);
-    setSyncStatus(`Writing ${routes.length} cloud routes and ${countCues(routes)} cue photos to local SQLite...`);
+    const [routes, locationCues] = await Promise.all([
+      fetchRoutesFrom(cloudUrl),
+      fetchLocationCuesFrom(cloudUrl),
+    ]);
+    setSyncStatus(`Writing ${routes.length} cloud routes, ${countCues(routes)} route photos, and ${locationCues.length} Location Cues to local SQLite...`);
     await writeRoutesTo(window.location.origin, routes, localHeaders());
-    setSyncStatus(`Pull complete. Local SQLite now has ${routes.length} routes and ${countCues(routes)} cue photos.`);
+    await writeLocationCuesTo(window.location.origin, locationCues, localHeaders());
+    setSyncStatus(`Pull complete. Local SQLite now has ${routes.length} routes, ${countCues(routes)} route photos, and ${locationCues.length} Location Cues.`);
   } catch (error) {
     setSyncStatus(error.message || "Could not pull cloud data to local.", true);
   } finally {
