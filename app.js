@@ -2840,22 +2840,24 @@ async function drawRouteMap(route) {
   }
 
   if (hybridSections.length) {
+    const recordedSections = hybridSections.filter((section) => section.source === "recorded");
     const recordedDistance = hybridSections
       .filter((section) => section.source === "recorded")
       .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
     const totalDistance = hybridSections
       .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
     const coverage = totalDistance > 0 ? Math.round(recordedDistance / totalDistance * 100) : 0;
-    routeMapState.textContent = `Showing a Hybrid Route with ${coverage}% proven recorded road in green and generated connectors in orange.`;
-    const sectionLines = hybridSections.map((section) => L.polyline(section.geometry, {
-      color: section.source === "recorded" ? "#17734b" : "#d97706",
-      weight: section.source === "recorded" ? 7 : 5,
-      opacity: section.source === "recorded" ? 0.95 : 0.82,
-      dashArray: section.source === "recorded" ? null : "10 7"
-    }));
-    routeLine = L.featureGroup(sectionLines).addTo(map);
-    map.fitBounds(routeLine.getBounds(), { padding: [32, 32] });
-    return;
+    if (recordedSections.length) {
+      routeMapState.textContent = `Showing a Hybrid Route with ${coverage}% proven recorded road. Generated connectors are hidden to avoid false fork guidance.`;
+      const sectionLines = recordedSections.map((section) => L.polyline(section.geometry, {
+        color: "#17734b",
+        weight: 7,
+        opacity: 0.95
+      }));
+      routeLine = L.featureGroup(sectionLines).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding: [32, 32] });
+      return;
+    }
   }
 
   if (usesRecordedTrack) {

@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
 
@@ -55,7 +55,53 @@ HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR = (
 )
 HUNG_HOM_NORTHBOUND_RECORDING_ID = "8dffe164-c5af-459e-b2f5-f3c4cd17ab82"
 HUNG_HOM_NORTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel northbound corridor"
+HUNG_HOM_SOUTHBOUND_ANCHORS = (
+    {
+        "latitude": 22.3037851,
+        "longitude": 114.1809201,
+        "label": "Hung Hom Tunnel southbound — Kowloon entrance",
+    },
+    {
+        "latitude": 22.2822176,
+        "longitude": 114.1816588,
+        "label": "Hung Hom Tunnel southbound — Hong Kong exit",
+    },
+)
+HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR = (
+    [22.3296852, 114.1554362],
+    [22.3262593, 114.1603956],
+    [22.3234935, 114.1650393],
+    [22.3226425, 114.1684772],
+    [22.3192160, 114.1694827],
+    [22.3152262, 114.1701907],
+    [22.3111711, 114.1710507],
+    [22.3074268, 114.1735832],
+    [22.3065012, 114.1802273],
+    [22.3037851, 114.1809201],
+    [22.2822176, 114.1816588],
+    [22.2799883, 114.1779067],
+)
+HUNG_HOM_SOUTHBOUND_RECORDING_ID = "aeb3aa6b-06ce-4eb9-9545-a983311d6c17"
+HUNG_HOM_SOUTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel southbound corridor"
 HONG_KONG_HARBOUR_DIVIDE = 22.295
+HYBRID_MIN_PROMOTION_COVERAGE = 0.35
+HYBRID_MAX_DISTANCE_RATIO = 1.25
+HDE_COMPLEX_ROAD_ZONES = (
+    {
+        "id": "hung-hom-interchange",
+        "name": "Hung Hom tunnel and flyover interchange",
+        "latitude": 22.3048,
+        "longitude": 114.1812,
+        "radius_meters": 650,
+    },
+    {
+        "id": "cross-harbour-hk-portal",
+        "name": "Cross-Harbour Tunnel Hong Kong portal",
+        "latitude": 22.2828,
+        "longitude": 114.1815,
+        "radius_meters": 450,
+    },
+)
 HONG_KONG_ROUTE_BOUNDS = {
     "min_latitude": 21.9,
     "max_latitude": 22.6,
@@ -1428,7 +1474,9 @@ def generate_route(payload):
     start, destination, start_label = resolve_route_endpoints(payload)
     via_points, via_label = resolve_via_route(payload, start, destination)
     if via_label == "Hung Hom Tunnel northbound":
-        return build_hung_hom_northbound_route(start, destination, start_label)
+        return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
+    if via_label == "Hung Hom Tunnel southbound":
+        return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
     road_route = fetch_road_route(start, destination, via_points or None)
 
     generated = format_generated_route(start, destination, start_label, road_route)
@@ -1450,10 +1498,49 @@ def is_hung_hom_tunnel_request(value):
     }
 
 
+def resolve_known_tunnel_option(value):
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    aliases = {
+        "hung hom": "hung-hom",
+        "hung hom tunnel": "hung-hom",
+        "cross harbour tunnel": "hung-hom",
+        "cross harbor tunnel": "hung-hom",
+        "western": "western",
+        "western tunnel": "western",
+        "western harbour tunnel": "western",
+        "western harbor tunnel": "western",
+        "western harbour crossing": "western",
+        "western harbor crossing": "western",
+        "eastern": "eastern",
+        "eastern tunnel": "eastern",
+        "eastern harbour tunnel": "eastern",
+        "eastern harbor tunnel": "eastern",
+        "eastern harbour crossing": "eastern",
+        "eastern harbor crossing": "eastern",
+    }
+    option_id = aliases.get(normalized)
+    if not option_id:
+        return None
+
+    for candidate_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
+        if candidate_id == option_id:
+            return {
+                "id": candidate_id,
+                "label": label,
+                "waypoint": dict(waypoint),
+            }
+
+    return None
+
+
 def resolve_via_route(payload, start, destination):
     via_text = str(payload.get("viaRoad") or "").strip()
     if not via_text:
         return [], ""
+
+    known_tunnel = resolve_known_tunnel_option(via_text)
+    if known_tunnel and known_tunnel["id"] != "hung-hom":
+        return [known_tunnel["waypoint"]], known_tunnel["label"]
 
     if not is_hung_hom_tunnel_request(via_text):
         via = geocode_place(via_text)
@@ -1464,23 +1551,7 @@ def resolve_via_route(payload, start, destination):
     if start_latitude < HONG_KONG_HARBOUR_DIVIDE < destination_latitude:
         return [dict(point) for point in HUNG_HOM_NORTHBOUND_ANCHORS], "Hung Hom Tunnel northbound"
     if start_latitude > HONG_KONG_HARBOUR_DIVIDE > destination_latitude:
-        try:
-            log_hybrid_engine_issue(payload={
-                "title": "Hung Hom Tunnel southbound recording needed",
-                "issueType": "recording-needed",
-                "severity": "high",
-                "start": start.get("label", "Kowloon start"),
-                "destination": destination.get("label", "Hong Kong destination"),
-                "via": "Hung Hom Tunnel southbound",
-                "message": "This direction is blocked until a correct Kowloon-to-Hong Kong drive is recorded and verified.",
-                "engineState": "blocked",
-                "recordingNeeded": True,
-            })
-        except Exception:
-            pass
-        raise ValueError(
-            "Hung Hom Tunnel southbound is not calibrated yet. Record one correct Kowloon-to-Hong Kong drive before using this tunnel direction."
-        )
+        return [dict(point) for point in HUNG_HOM_SOUTHBOUND_ANCHORS], "Hung Hom Tunnel southbound"
 
     raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
 
@@ -1498,13 +1569,52 @@ def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False):
         raise ValueError(f"TaxiBo rejected the generated tunnel route: {reasons}.")
 
 
-def build_hung_hom_northbound_route(start, destination, start_label):
-    corridor = [list(point) for point in HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR]
-    recorded_routes = fetch_routes(include_images=False, route_id=HUNG_HOM_NORTHBOUND_RECORDING_ID)
+def build_hung_hom_route_for_direction(start, destination, start_label, via_label):
+    if via_label == "Hung Hom Tunnel northbound":
+        return build_hung_hom_recorded_corridor_route(
+            start,
+            destination,
+            start_label,
+            via_label,
+            HUNG_HOM_NORTHBOUND_RECORDING_ID,
+            HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+            HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR,
+            corridor_slice=slice(190, 241),
+        )
+
+    if via_label == "Hung Hom Tunnel southbound":
+        return build_hung_hom_recorded_corridor_route(
+            start,
+            destination,
+            start_label,
+            via_label,
+            HUNG_HOM_SOUTHBOUND_RECORDING_ID,
+            HUNG_HOM_SOUTHBOUND_RECORDING_NAME,
+            HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR,
+        )
+
+    raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
+
+
+def build_hung_hom_recorded_corridor_route(
+    start,
+    destination,
+    start_label,
+    via_label,
+    recording_id,
+    recording_name,
+    fallback_corridor,
+    corridor_slice=None,
+):
+    corridor = [list(point) for point in fallback_corridor]
+    recorded_routes = fetch_routes(include_images=False, route_id=recording_id)
     if recorded_routes:
         recorded_geometry = recorded_route_geometry(recorded_routes[0])
-        if len(recorded_geometry) > 240:
-            corridor = recorded_geometry[190:241]
+        if corridor_slice is not None:
+            recorded_geometry = recorded_geometry[corridor_slice]
+        if len(recorded_geometry) >= 2:
+            corridor = recorded_geometry
+
     entry = {"latitude": corridor[0][0], "longitude": corridor[0][1]}
     exit_point = {"latitude": corridor[-1][0], "longitude": corridor[-1][1]}
     start_connector = fetch_road_route(start, entry)
@@ -1517,8 +1627,8 @@ def build_hung_hom_northbound_route(start, destination, start_label):
         })
     sections.append({
         "source": "recorded", "role": "proven-segment",
-        "recordingId": HUNG_HOM_NORTHBOUND_RECORDING_ID,
-        "recordingName": HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+        "recordingId": recording_id,
+        "recordingName": recording_name,
         "geometry": corridor,
     })
     if len(end_connector.get("geometry", [])) >= 2:
@@ -1549,7 +1659,7 @@ def build_hung_hom_northbound_route(start, destination, start_label):
         "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
         "startLabel": start_label,
         "destinationLabel": destination.get("label", "Destination"),
-        "viaLabel": "Hung Hom Tunnel northbound",
+        "viaLabel": via_label,
         "routeType": "hybrid",
         "geometry": geometry,
         "routeSections": sections,
@@ -1559,8 +1669,8 @@ def build_hung_hom_northbound_route(start, destination, start_label):
         "routeWarnings": warnings,
         "hybridCoverage": min(1.0, recorded_distance / distance) if distance else 0,
         "recordedSegmentDistance": recorded_distance,
-        "sourceRecordedRouteId": HUNG_HOM_NORTHBOUND_RECORDING_ID,
-        "sourceRecordedRouteName": HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+        "sourceRecordedRouteId": recording_id,
+        "sourceRecordedRouteName": recording_name,
         "hybridEntryGapMeters": 0,
         "hybridExitGapMeters": 0,
     }
@@ -1605,6 +1715,7 @@ def resolve_route_endpoints(payload):
 
 
 def format_generated_route(start, destination, start_label, road_route):
+    warnings = analyze_route_sanity(road_route["geometry"], road_route.get("distance"))
 
     return {
         "start": {
@@ -1621,7 +1732,8 @@ def format_generated_route(start, destination, start_label, road_route):
         "distance": road_route["distance"],
         "duration": road_route["duration"],
         "cues": road_route["cues"],
-        "routeWarnings": analyze_route_sanity(road_route["geometry"], road_route.get("distance")),
+        "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
     }
 
 
@@ -1654,7 +1766,7 @@ def generate_cues(payload):
 def prepare_route(payload):
     generated = generate_route(payload)
     hybrid = build_best_hybrid_route(generated)
-    if hybrid:
+    if should_promote_hybrid_route(hybrid):
         generated = hybrid
     matched_cues = match_saved_photo_cues(generated["cues"], geometry=generated.get("geometry"))
     generated["cues"] = matched_cues
@@ -1675,7 +1787,26 @@ def prepare_route_options(payload):
 
     if via_points:
         if via_label == "Hung Hom Tunnel northbound":
-            generated = build_hung_hom_northbound_route(start, destination, start_label)
+            generated = build_hung_hom_recorded_corridor_route(
+                start,
+                destination,
+                start_label,
+                via_label,
+                HUNG_HOM_NORTHBOUND_RECORDING_ID,
+                HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+                HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR,
+                corridor_slice=slice(190, 241),
+            )
+        elif via_label == "Hung Hom Tunnel southbound":
+            generated = build_hung_hom_recorded_corridor_route(
+                start,
+                destination,
+                start_label,
+                via_label,
+                HUNG_HOM_SOUTHBOUND_RECORDING_ID,
+                HUNG_HOM_SOUTHBOUND_RECORDING_NAME,
+                HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR,
+            )
         else:
             road_route = fetch_road_route(start, destination, via_points)
             generated = format_generated_route(start, destination, start_label, road_route)
@@ -1692,8 +1823,12 @@ def prepare_route_options(payload):
     options = []
     for option_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
         try:
-            road_route = fetch_road_route(start, destination, [waypoint])
-            generated = format_generated_route(start, destination, start_label, road_route)
+            if option_id == "hung-hom":
+                _anchors, via_label = resolve_via_route({"viaRoad": "Hung Hom Tunnel"}, start, destination)
+                generated = build_hung_hom_route_for_direction(start, destination, start_label, via_label)
+            else:
+                road_route = fetch_road_route(start, destination, [waypoint])
+                generated = format_generated_route(start, destination, start_label, road_route)
             options.append(match_prepared_route(generated, option_id, label))
         except Exception:
             continue
@@ -1973,14 +2108,14 @@ def add_hybrid_route_option(options):
 
     for generated in options:
         hybrid = build_best_hybrid_route(generated)
-        if hybrid and (
+        if should_promote_hybrid_route(hybrid) and (
             best_hybrid is None
             or hybrid.get("hybridCoverage", 0) > best_hybrid.get("hybridCoverage", 0)
         ):
             best_hybrid = hybrid
 
     if not best_hybrid:
-        return {"options": options}
+        return {"options": sort_route_options_by_driver_trust(options)}
 
     coverage_percent = round(best_hybrid["hybridCoverage"] * 100)
     prepared_hybrid = match_prepared_route(
@@ -1988,7 +2123,203 @@ def add_hybrid_route_option(options):
         "hybrid-recorded-segment",
         f"Hybrid Route — {coverage_percent}% recorded",
     )
-    return {"options": [prepared_hybrid, *options]}
+    return {"options": sort_route_options_by_driver_trust([prepared_hybrid, *options])}
+
+
+def sort_route_options_by_driver_trust(options):
+    return sorted(options, key=route_driver_trust_sort_key)
+
+
+def route_driver_trust_sort_key(route):
+    warnings = route.get("routeWarnings") or []
+    high_warning_count = sum(1 for warning in warnings if warning.get("severity") == "high")
+    medium_warning_count = sum(1 for warning in warnings if warning.get("severity") == "medium")
+    fork_count = int(route.get("routeForkCount") or route_warning_count(warnings, "route-fork"))
+    route_type = str(route.get("routeType") or "generated").lower()
+    recorded_preference = {"recorded": 0, "hybrid": 1, "prepared": 2}.get(route_type, 3)
+    coverage_penalty = 1.0 - max(0.0, min(1.0, float(route.get("hybridCoverage") or 0)))
+    distance = float(route.get("distance") or 0)
+    duration = float(route.get("duration") or 0)
+
+    return (
+        fork_count,
+        high_warning_count,
+        medium_warning_count,
+        recorded_preference,
+        round(coverage_penalty, 3),
+        distance,
+        duration,
+    )
+
+
+def route_warning_count(warnings, code):
+    for warning in warnings or []:
+        if warning.get("code") == code:
+            return int(warning.get("count") or 1)
+    return 0
+
+
+def should_promote_hybrid_route(route):
+    if not route:
+        return False
+
+    warnings = route.get("routeWarnings") or []
+    if any(warning.get("severity") == "high" for warning in warnings):
+        return False
+
+    coverage = float(route.get("hybridCoverage") or 0)
+    if coverage < HYBRID_MIN_PROMOTION_COVERAGE:
+        return False
+
+    recorded_distance = float(route.get("recordedSegmentDistance") or 0)
+    if recorded_distance < 700:
+        return False
+
+    original_distance = route.get("originalGeneratedDistance")
+    hybrid_distance = route.get("distance")
+    if (
+        isinstance(original_distance, (int, float))
+        and original_distance > 0
+        and isinstance(hybrid_distance, (int, float))
+        and hybrid_distance / original_distance > HYBRID_MAX_DISTANCE_RATIO
+    ):
+        return False
+
+    return True
+
+
+def hybrid_connector_has_loop_risk(geometry):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 4:
+        return False
+
+    direct_distance = haversine_distance(geometry[0][0], geometry[0][1], geometry[-1][0], geometry[-1][1])
+    route_distance = sum_geometry_distance(geometry)
+    if direct_distance < 80:
+        return route_distance > 500
+
+    if count_route_revisits(geometry) > 0:
+        return True
+
+    if direct_distance > 250 and route_distance / direct_distance > 2.6:
+        return True
+
+    if direct_distance > 900 and route_distance / direct_distance > 2.1:
+        return True
+
+    return False
+
+
+def geometry_distance_inside_zone(geometry, zone):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return 0.0
+
+    zone_latitude = float(zone["latitude"])
+    zone_longitude = float(zone["longitude"])
+    radius = float(zone["radius_meters"])
+    total = 0.0
+
+    for index in range(1, len(geometry)):
+        previous = geometry[index - 1]
+        current = geometry[index]
+        midpoint = [
+            (previous[0] + current[0]) / 2,
+            (previous[1] + current[1]) / 2,
+        ]
+        if haversine_distance(midpoint[0], midpoint[1], zone_latitude, zone_longitude) <= radius:
+            total += haversine_distance(previous[0], previous[1], current[0], current[1])
+
+    return total
+
+
+def hybrid_connector_has_level_ambiguity_risk(geometry, minimum_distance_meters=120):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return False
+
+    for zone in HDE_COMPLEX_ROAD_ZONES:
+        if geometry_distance_inside_zone(geometry, zone) >= minimum_distance_meters:
+            return True
+
+    return False
+
+
+def angle_difference(first_angle, second_angle):
+    difference = abs((first_angle - second_angle + 180) % 360 - 180)
+    return difference
+
+
+def route_small_angle_branch_risk_count(geometry, touch_radius_meters=55, branch_angle_degrees=35):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 6:
+        return 0
+
+    stride = max(1, len(geometry) // 700)
+    sampled = geometry[::stride]
+    if sampled[-1] != geometry[-1]:
+        sampled.append(geometry[-1])
+
+    segments = []
+    travelled = 0.0
+    for index in range(1, len(sampled)):
+        start = sampled[index - 1]
+        end = sampled[index]
+        distance = haversine_distance(start[0], start[1], end[0], end[1])
+        if distance < 12:
+            continue
+        segments.append({
+            "index": index - 1,
+            "start": start,
+            "end": end,
+            "bearing": initial_bearing(start, end),
+            "travelled": travelled,
+        })
+        travelled += distance
+
+    if len(segments) < 4:
+        return 0
+
+    branch_count = 0
+    for first_index, first in enumerate(segments):
+        for second in segments[first_index + 1:]:
+            if abs(second["index"] - first["index"]) <= 3:
+                continue
+            if abs(second["travelled"] - first["travelled"]) < 250:
+                continue
+
+            same_direction = angle_difference(first["bearing"], second["bearing"])
+            opposite_direction = angle_difference(first["bearing"], (second["bearing"] + 180) % 360)
+
+            if (
+                haversine_distance(first["start"][0], first["start"][1], second["start"][0], second["start"][1]) <= touch_radius_meters
+                and same_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["end"][0], first["end"][1], second["end"][0], second["end"][1]) <= touch_radius_meters
+                and same_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["start"][0], first["start"][1], second["end"][0], second["end"][1]) <= touch_radius_meters
+                and opposite_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["end"][0], first["end"][1], second["start"][0], second["start"][1]) <= touch_radius_meters
+                and opposite_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+
+            if branch_count >= 20:
+                return branch_count
+
+    return branch_count
+
+
+def route_has_small_angle_branch_risk(geometry, touch_radius_meters=55, branch_angle_degrees=35):
+    return route_small_angle_branch_risk_count(geometry, touch_radius_meters, branch_angle_degrees) > 0
 
 
 def build_best_hybrid_route(generated):
@@ -2098,6 +2429,14 @@ def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=
     sections = []
     generated_start_section = generated_geometry[:generated_start_index + 1]
     generated_end_section = generated_geometry[generated_end_index:]
+    if hybrid_connector_has_loop_risk(generated_start_section) or hybrid_connector_has_loop_risk(generated_end_section):
+        return None
+    if (
+        hybrid_connector_has_level_ambiguity_risk(generated_start_section)
+        or hybrid_connector_has_level_ambiguity_risk(generated_end_section)
+    ):
+        return None
+
     if len(generated_start_section) >= 2:
         sections.append({"source": "generated", "role": "start-connector", "geometry": generated_start_section})
     sections.append({
@@ -2114,9 +2453,11 @@ def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=
     hybrid_distance = sum_geometry_distance(hybrid_geometry)
     if hybrid_distance <= 0:
         return None
+    if route_has_small_angle_branch_risk(hybrid_geometry):
+        return None
 
     coverage = min(1.0, recorded_distance / hybrid_distance)
-    if coverage < 0.12:
+    if coverage < HYBRID_MIN_PROMOTION_COVERAGE:
         return None
 
     original_distance = generated.get("distance")
@@ -2143,8 +2484,10 @@ def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=
         "duration": duration,
         "cues": generate_geometry_cues(hybrid_geometry),
         "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
         "hybridCoverage": coverage,
         "recordedSegmentDistance": recorded_distance,
+        "originalGeneratedDistance": original_distance,
         "sourceRecordedRouteId": recorded_route.get("id", ""),
         "sourceRecordedRouteName": recorded_route.get("name", "Recorded route"),
         "hybridEntryGapMeters": round(entry_gap, 1),
@@ -2370,6 +2713,18 @@ def analyze_route_sanity(geometry, distance_meters=None):
                 "severity": "high",
                 "title": "Route appears to loop back",
                 "message": "The generated path revisits the same area. Do not build photo cues from this route until a driver reviews it.",
+            }
+        )
+
+    branch_count = route_small_angle_branch_risk_count(geometry)
+    if branch_count:
+        warnings.append(
+            {
+                "code": "route-fork",
+                "severity": "high",
+                "title": "Route appears to branch or merge",
+                "message": "The generated path touches nearby parallel roads at a shallow angle. Prefer a route with fewer forks or a recorded taxi route.",
+                "count": branch_count,
             }
         )
 
@@ -3044,8 +3399,21 @@ def sample_geometry_points(geometry, count):
 def fetch_json(url):
     request = Request(url, headers=HTTP_HEADERS)
 
-    with urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = ""
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+            parsed = json.loads(body)
+            detail = str(parsed.get("message") or parsed.get("code") or "").strip()
+        except Exception:
+            detail = ""
+        message = f"Routing service rejected these road points ({error.code})."
+        if detail:
+            message = f"{message} {detail}."
+        raise ValueError(message) from error
 
 
 class TaxiBoHandler(SimpleHTTPRequestHandler):
