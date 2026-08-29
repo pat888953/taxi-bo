@@ -96,6 +96,22 @@ HUNG_HOM_SOUTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel southbound corrid
 HONG_KONG_HARBOUR_DIVIDE = 22.295
 HYBRID_MIN_PROMOTION_COVERAGE = 0.35
 HYBRID_MAX_DISTANCE_RATIO = 1.25
+RECORDED_SEED_CONNECTOR_MIN_GAP_METERS = 450
+ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR = {
+    "latitude": 22.316859,
+    "longitude": 114.1599028,
+    "label": "One SilverSea left-turn arrival anchor",
+}
+ONE_SILVERSEA_CHERRY_STREET_CONNECTOR = (
+    [22.316859, 114.1599028],
+    [22.31722, 114.15972],
+    [22.31746, 114.15905],
+    [22.31754, 114.15825],
+    [22.31758, 114.15735],
+    [22.31761, 114.15655],
+    [22.31770, 114.15615],
+    [22.3177593, 114.1558841],
+)
 HDE_COMPLEX_ROAD_ZONES = (
     {
         "id": "hung-hom-interchange",
@@ -1566,11 +1582,18 @@ def generate_route(payload):
         generated = format_generated_route(start, destination, start_label, road_route)
         if via_label:
             generated["viaLabel"] = via_label
-        reject_unsafe_tunnel_route(generated, via_label)
+        reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
+        if via_label and "western" in via_label.lower():
+            seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, generated)
+            if seeded:
+                return seeded
         return generated
     except Exception as error:
         if not via_label:
             raise
+        seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_error=error)
+        if seeded:
+            return seeded
         rescue = build_recorded_rescue_route(start, destination, start_label, via_label, error)
         if rescue:
             return rescue
@@ -1647,14 +1670,18 @@ def resolve_via_route(payload, start, destination):
     raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
 
 
-def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False):
+def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False, allow_route_shape_review=False):
     if not via_label:
         return
     unsafe = [
         warning for warning in route.get("routeWarnings", [])
         if warning.get("code") == "repeated-harbour-crossing"
-        or warning.get("code") == "route-fork"
-        or (warning.get("code") == "route-loop" and not allow_connector_loops)
+        or (warning.get("code") == "route-fork" and not allow_route_shape_review)
+        or (
+            warning.get("code") == "route-loop"
+            and not allow_connector_loops
+            and not allow_route_shape_review
+        )
     ]
     if unsafe:
         reasons = "; ".join(warning.get("title", "Unsafe route") for warning in unsafe)
@@ -1717,6 +1744,511 @@ def build_recorded_rescue_route(start, destination, start_label, failed_via_labe
     hybrid["hdeRescueFromVia"] = failed_via_label
     hybrid["hdeOriginalError"] = str(original_error)
     return hybrid
+
+
+def build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_generated=None, original_error=None):
+    seed = find_recorded_seed_for_route(start, destination, via_label)
+    if not seed:
+        return None
+
+    recorded_route = seed["route"]
+    recorded_geometry = seed["geometry"]
+    recorded_segment = recorded_geometry[seed["startIndex"]:seed["endIndex"] + 1]
+    if len(recorded_segment) < 2:
+        return None
+
+    entry = {"latitude": recorded_segment[0][0], "longitude": recorded_segment[0][1]}
+    exit_point = {"latitude": recorded_segment[-1][0], "longitude": recorded_segment[-1][1]}
+    sections = []
+    connector_duration = 0.0
+    destination_connector_gap = haversine_distance(
+        exit_point["latitude"],
+        exit_point["longitude"],
+        destination["latitude"],
+        destination["longitude"],
+    )
+
+    snap_start_to_recording = seed["startGapMeters"] <= RECORDED_SEED_CONNECTOR_MIN_GAP_METERS
+    snap_destination_to_recording = destination_connector_gap <= RECORDED_SEED_CONNECTOR_MIN_GAP_METERS
+
+    if snap_start_to_recording and seed["startGapMeters"] > 25:
+        start_snap_connector = fetch_display_snap_connector(start, entry, seed["startGapMeters"])
+        sections.append({
+            "source": "generated",
+            "role": "start-snap-connector",
+            "displayOnly": True,
+            "geometry": start_snap_connector["geometry"],
+            "connectorShape": start_snap_connector["shape"],
+        })
+    elif not snap_start_to_recording:
+        start_connector = fetch_safe_connector(start, entry)
+        if len(start_connector.get("geometry", [])) >= 2:
+            sections.append({
+                "source": "generated",
+                "role": "start-connector",
+                "geometry": start_connector["geometry"],
+            })
+            connector_duration += float(start_connector.get("duration") or 0)
+
+    sections.append({
+        "source": "recorded",
+        "role": "proven-segment",
+        "recordingId": recorded_route.get("id", ""),
+        "recordingName": recorded_route.get("name", "Recorded route"),
+        "geometry": recorded_segment,
+    })
+
+    if snap_destination_to_recording and destination_connector_gap > 25:
+        end_snap_connector = fetch_display_snap_connector(exit_point, destination, destination_connector_gap)
+        sections.append({
+            "source": "generated",
+            "role": "end-snap-connector",
+            "displayOnly": True,
+            "geometry": end_snap_connector["geometry"],
+            "connectorShape": end_snap_connector["shape"],
+        })
+    elif not snap_destination_to_recording:
+        end_connector = fetch_safe_connector(exit_point, destination)
+        if len(end_connector.get("geometry", [])) >= 2:
+            sections.append({
+                "source": "generated",
+                "role": "end-connector",
+                "geometry": end_connector["geometry"],
+            })
+            connector_duration += float(end_connector.get("duration") or 0)
+
+    driving_sections = [section for section in sections if not section.get("displayOnly")]
+    geometry = combine_route_sections(driving_sections)
+    display_distance = sum_geometry_distance(combine_route_sections(sections))
+    distance = sum_geometry_distance(geometry)
+    recorded_distance = sum_geometry_distance(recorded_segment)
+    if distance <= 0 or recorded_distance < 700:
+        return None
+
+    warnings = downgrade_recorded_seed_warnings(analyze_route_sanity(geometry, distance))
+    if snap_start_to_recording:
+        warnings.append({
+            "code": "recorded-seed-start-snap",
+            "severity": "low",
+            "title": "Start snapped to recorded drive",
+            "message": (
+                "The recorded taxi line is close to the requested start, "
+                "so TaxiBo avoided a short generated connector loop."
+            ),
+        })
+    if snap_destination_to_recording:
+        warnings.append({
+            "code": "recorded-seed-arrival-snap",
+            "severity": "low",
+            "title": "Arrival snapped to recorded drive",
+            "message": (
+                "The recorded taxi line is close to the destination, "
+                "so TaxiBo avoided a short generated connector loop."
+            ),
+        })
+    if seed.get("arrivalAnchor"):
+        anchor = seed["arrivalAnchor"]
+        anchor_source = "saved Location Cue" if anchor.get("source") == "location-cue" else "known local arrival point"
+        anchor_label = anchor.get("sourceLocationCueTitle") or anchor.get("label") or "arrival cue"
+        warnings.append({
+            "code": "recorded-seed-arrival-anchor",
+            "severity": "low",
+            "title": "Arrival cut at recorded turn",
+            "message": (
+                f"TaxiBo used {anchor_source} '{anchor_label}' to avoid continuing past the destination."
+            ),
+        })
+    warnings.append({
+        "code": "recorded-seed-hybrid",
+        "severity": "medium",
+        "title": "Hybrid route seeded from recorded drive",
+        "message": (
+            "Generated routing looked complex, so TaxiBo used a real recorded drive "
+            "as the proven corridor and generated only the missing connectors."
+        ),
+    })
+    if original_error:
+        warnings.append({
+            "code": "generated-route-replaced",
+            "severity": "medium",
+            "title": "Generated route replaced by recorded drive",
+            "message": str(original_error),
+        })
+
+    duration = connector_duration
+    original_distance = None
+    if original_generated:
+        original_distance = original_generated.get("distance")
+        original_duration = original_generated.get("duration")
+        if isinstance(original_distance, (int, float)) and original_distance > 0 and isinstance(original_duration, (int, float)):
+            duration = original_duration * distance / original_distance
+    if not duration:
+        duration = max(180, distance / 10)
+
+    return {
+        "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
+        "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
+        "startLabel": start_label,
+        "destinationLabel": destination.get("label", "Destination"),
+        "viaLabel": f"{via_label} with recorded drive seed",
+        "routeType": "hybrid",
+        "geometry": geometry,
+        "routeSections": sections,
+        "distance": display_distance if display_distance > 0 else distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(geometry),
+        "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
+        "hybridCoverage": min(1.0, recorded_distance / display_distance) if display_distance else 0,
+        "recordedSegmentDistance": recorded_distance,
+        "originalGeneratedDistance": original_distance,
+        "sourceRecordedRouteId": recorded_route.get("id", ""),
+        "sourceRecordedRouteName": recorded_route.get("name", "Recorded route"),
+        "hybridEntryGapMeters": round(seed["startGapMeters"], 1),
+        "hybridExitGapMeters": round(destination_connector_gap, 1),
+        "arrivalAnchor": seed.get("arrivalAnchor"),
+    }
+
+
+def fetch_safe_connector(start, destination):
+    try:
+        return fetch_road_route(start, destination)
+    except Exception:
+        return {
+            "geometry": [
+                [start["latitude"], start["longitude"]],
+                [destination["latitude"], destination["longitude"]],
+            ],
+            "distance": haversine_distance(
+                start["latitude"],
+                start["longitude"],
+                destination["latitude"],
+                destination["longitude"],
+            ),
+            "duration": 0,
+        }
+
+
+def fetch_display_snap_connector(start, destination, direct_gap_meters):
+    local_connector = local_display_snap_connector(start, destination)
+    if local_connector:
+        return local_connector
+
+    fallback = {
+        "geometry": [
+            [start["latitude"], start["longitude"]],
+            [destination["latitude"], destination["longitude"]],
+        ],
+        "shape": "straight",
+    }
+
+    try:
+        connector = fetch_road_route(start, destination)
+    except Exception:
+        return fallback
+
+    geometry = normalize_geometry(connector.get("geometry"))
+    if len(geometry) < 2:
+        return fallback
+
+    distance = float(connector.get("distance") or sum_geometry_distance(geometry))
+    direct_gap = max(1.0, float(direct_gap_meters or haversine_distance(
+        start["latitude"],
+        start["longitude"],
+        destination["latitude"],
+        destination["longitude"],
+    )))
+    max_local_connector_distance = max(700.0, direct_gap * 4.0)
+    warning_codes = {warning.get("code") for warning in analyze_route_sanity(geometry, distance)}
+
+    if distance > max_local_connector_distance or warning_codes.intersection({"repeated-harbour-crossing", "route-loop", "route-fork"}):
+        if direct_gap < 300:
+            return fallback
+        trimmed_geometry = trim_looped_display_connector(geometry, destination, direct_gap)
+        if len(trimmed_geometry) >= 2:
+            return {
+                "geometry": trimmed_geometry,
+                "shape": "trimmed-road",
+            }
+        return fallback
+
+    return {
+        "geometry": geometry,
+        "shape": "road",
+    }
+
+
+def local_display_snap_connector(start, destination):
+    if not is_one_silversea_destination(destination):
+        return None
+
+    anchor = ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR
+    if haversine_distance(start["latitude"], start["longitude"], anchor["latitude"], anchor["longitude"]) > 80:
+        return None
+
+    geometry = [list(point) for point in ONE_SILVERSEA_CHERRY_STREET_CONNECTOR]
+    geometry[0] = [start["latitude"], start["longitude"]]
+    geometry[-1] = [destination["latitude"], destination["longitude"]]
+    return {
+        "geometry": geometry,
+        "shape": "cherry-street",
+    }
+
+
+def trim_looped_display_connector(geometry, destination, direct_gap_meters):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 8:
+        return []
+
+    destination_point = [destination["latitude"], destination["longitude"]]
+    prefix_limit = min(30, len(geometry))
+    prefix_end = min(
+        range(prefix_limit),
+        key=lambda index: haversine_distance(
+            geometry[index][0],
+            geometry[index][1],
+            destination_point[0],
+            destination_point[1],
+        ),
+    )
+    if prefix_end < 2:
+        prefix_end = min(5, prefix_limit - 1)
+
+    suffix_threshold = max(140.0, direct_gap_meters * 0.3)
+    suffix_start = None
+    for index in range(max(prefix_end + 1, len(geometry) // 2), len(geometry)):
+        distance = haversine_distance(
+            geometry[index][0],
+            geometry[index][1],
+            destination_point[0],
+            destination_point[1],
+        )
+        if distance <= suffix_threshold:
+            suffix_start = index
+            break
+
+    if suffix_start is None:
+        suffix_start = min(
+            range(max(prefix_end + 1, len(geometry) // 2), len(geometry)),
+            key=lambda index: haversine_distance(
+                geometry[index][0],
+                geometry[index][1],
+                destination_point[0],
+                destination_point[1],
+            ),
+        )
+
+    bridge_gap = haversine_distance(
+        geometry[prefix_end][0],
+        geometry[prefix_end][1],
+        geometry[suffix_start][0],
+        geometry[suffix_start][1],
+    )
+    if bridge_gap > max(650.0, direct_gap_meters * 1.5):
+        return []
+
+    return geometry[:prefix_end + 1] + geometry[suffix_start:]
+
+
+def downgrade_recorded_seed_warnings(warnings):
+    downgraded = []
+    for warning in warnings:
+        if warning.get("code") in {"route-loop", "route-fork"}:
+            downgraded.append({
+                **warning,
+                "severity": "medium",
+                "title": f"{warning.get('title', 'Route shape needs review')} on connector",
+                "message": "This shape needs review, but the main corridor comes from a recorded taxi drive.",
+            })
+        else:
+            downgraded.append(warning)
+    return downgraded
+
+
+def find_recorded_seed_for_route(start, destination, via_label):
+    best = None
+    for route in fetch_routes(include_images=False):
+        if not is_recorded_route_record(route):
+            continue
+
+        geometry = recorded_route_geometry(route)
+        for candidate_geometry in (geometry, list(reversed(geometry))):
+            candidate = score_recorded_seed_candidate(route, candidate_geometry, start, destination, via_label)
+            if candidate and (best is None or candidate["score"] > best["score"]):
+                best = candidate
+    return best
+
+
+def score_recorded_seed_candidate(route, geometry, start, destination, via_label):
+    if len(geometry) < 2:
+        return None
+    if via_label and "western" in via_label.lower() and not geometry_uses_western_tunnel(geometry):
+        return None
+
+    arrival_anchor = recorded_seed_arrival_anchor(destination, via_label)
+    arrival_point = arrival_anchor or destination
+    start_index, start_gap = nearest_recorded_seed_geometry_index(geometry, [start["latitude"], start["longitude"]])
+    if arrival_anchor:
+        destination_index, destination_gap = nearest_recorded_seed_geometry_index(
+            geometry,
+            [arrival_point["latitude"], arrival_point["longitude"]],
+        )
+    else:
+        destination_index, destination_gap = recorded_seed_arrival_index(
+            geometry,
+            [arrival_point["latitude"], arrival_point["longitude"]],
+            start_index,
+        )
+    if start_index is None or destination_index is None or destination_index <= start_index:
+        return None
+    if start_gap > 3000 or destination_gap > 4500:
+        return None
+
+    recorded_distance = sum_geometry_distance(geometry[start_index:destination_index + 1])
+    if recorded_distance < 700:
+        return None
+
+    text = " ".join(str(route.get(key) or "") for key in ("name", "variant", "start", "via", "destination", "notes")).lower()
+    via_bonus = 600 if via_label and any(token in text for token in via_label.lower().split() if len(token) >= 4) else 0
+    return {
+        "route": route,
+        "geometry": geometry,
+        "startIndex": start_index,
+        "endIndex": destination_index,
+        "startGapMeters": start_gap,
+        "destinationGapMeters": destination_gap,
+        "arrivalAnchor": arrival_anchor,
+        "score": recorded_distance + via_bonus - start_gap * 1.5 - destination_gap,
+    }
+
+
+def recorded_seed_arrival_anchor(destination, via_label):
+    if not via_label or "western" not in via_label.lower():
+        return None
+
+    cue_anchor = find_location_cue_arrival_anchor(destination)
+    if cue_anchor:
+        return cue_anchor
+
+    if not is_one_silversea_destination(destination):
+        return None
+
+    return ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR
+
+
+def find_location_cue_arrival_anchor(destination):
+    destination_point = {
+        "latitude": destination.get("latitude"),
+        "longitude": destination.get("longitude"),
+    }
+    if not isinstance(destination_point["latitude"], (int, float)) or not isinstance(destination_point["longitude"], (int, float)):
+        return None
+
+    destination_tokens = location_cue_match_tokens(" ".join(
+        str(destination.get(key, "")) for key in ("label", "name", "query")
+    ))
+    if not destination_tokens:
+        return None
+
+    best = None
+    for cue in fetch_location_cues(include_images=False):
+        cue_tokens = location_cue_match_tokens(" ".join(
+            str(cue.get(key, "")) for key in ("title", "instruction", "notes")
+        ))
+        overlap = destination_tokens.intersection(cue_tokens)
+        if not overlap:
+            continue
+
+        distance = haversine_distance(
+            destination_point["latitude"],
+            destination_point["longitude"],
+            cue["latitude"],
+            cue["longitude"],
+        )
+        radius = max(250.0, float(cue.get("activationRadiusMeters") or 100) * 6)
+        if distance > min(1200.0, radius):
+            continue
+
+        confidence = float(cue.get("confidence") or 0)
+        score = len(overlap) * 200 + confidence * 100 - distance * 0.15
+        if best is None or score > best["score"]:
+            best = {
+                "score": score,
+                "cue": cue,
+                "distance": distance,
+                "overlap": overlap,
+            }
+
+    if not best:
+        return None
+
+    cue = best["cue"]
+    return {
+        "latitude": cue["latitude"],
+        "longitude": cue["longitude"],
+        "label": cue["title"],
+        "source": "location-cue",
+        "sourceLocationCueId": cue["id"],
+        "sourceLocationCueTitle": cue["title"],
+        "matchDistanceMeters": round(best["distance"], 1),
+        "matchedTokens": sorted(best["overlap"]),
+    }
+
+
+def location_cue_match_tokens(text):
+    stop_words = {
+        "hong", "kong", "road", "street", "lane", "left", "right", "turn",
+        "use", "for", "the", "and", "with", "toward", "towards",
+    }
+    normalized = str(text or "").lower().replace("silversea", "silver sea")
+    return {
+        token for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 3 and token not in stop_words
+    }
+
+
+def is_one_silversea_destination(destination):
+    destination_text = " ".join(str(destination.get(key, "")) for key in ("label", "name", "query")).lower()
+    return "silver" in destination_text or "hoi fai" in destination_text or "tai kok tsui" in destination_text
+
+
+def nearest_recorded_seed_geometry_index(geometry, point):
+    best_index = None
+    best_distance = None
+    for index, route_point in enumerate(geometry):
+        distance = haversine_distance(point[0], point[1], route_point[0], route_point[1])
+        if best_distance is None or distance < best_distance:
+            best_index = index
+            best_distance = distance
+    return best_index, best_distance if best_distance is not None else float("inf")
+
+
+def recorded_seed_arrival_index(geometry, point, minimum_index=0):
+    nearest_index, nearest_distance = nearest_recorded_seed_geometry_index(geometry, point)
+    if nearest_index is None:
+        return None, float("inf")
+
+    arrival_radius = min(350, max(180, nearest_distance + 120))
+    for index in range(max(0, minimum_index + 1), nearest_index + 1):
+        distance = haversine_distance(point[0], point[1], geometry[index][0], geometry[index][1])
+        if distance <= arrival_radius:
+            return index, distance
+
+    return nearest_index, nearest_distance
+
+
+def geometry_uses_western_tunnel(geometry):
+    if len(geometry) < 2:
+        return False
+    near_south = any(
+        haversine_distance(point[0], point[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1]) <= 900
+        for point in geometry
+    )
+    near_north = any(
+        haversine_distance(point[0], point[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1]) <= 900
+        for point in geometry
+    )
+    return near_south and near_north
 
 
 def build_hung_hom_recorded_corridor_route(
@@ -1935,9 +2467,15 @@ def prepare_route_options(payload):
                 road_route = fetch_road_route(start, destination, via_points)
                 generated = format_generated_route(start, destination, start_label, road_route)
                 generated["viaLabel"] = via_label
-                reject_unsafe_tunnel_route(generated, via_label)
+                reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
+                if via_label and "western" in via_label.lower():
+                    seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, generated)
+                    if seeded:
+                        generated = seeded
             except Exception as error:
-                generated = build_recorded_rescue_route(start, destination, start_label, via_label, error)
+                generated = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_error=error)
+                if not generated:
+                    generated = build_recorded_rescue_route(start, destination, start_label, via_label, error)
                 if not generated:
                     raise
         label = f"Via {via_label}"

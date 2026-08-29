@@ -2847,6 +2847,7 @@ async function drawRouteMap(route) {
 
   if (hybridSections.length) {
     const recordedSections = hybridSections.filter((section) => section.source === "recorded");
+    const generatedSections = hybridSections.filter((section) => section.source === "generated");
     const recordedDistance = hybridSections
       .filter((section) => section.source === "recorded")
       .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
@@ -2854,13 +2855,25 @@ async function drawRouteMap(route) {
       .reduce((total, section) => total + calculateGeometryDistance(section.geometry), 0);
     const coverage = totalDistance > 0 ? Math.round(recordedDistance / totalDistance * 100) : 0;
     if (recordedSections.length) {
-      routeMapState.textContent = `Showing a Hybrid Route with ${coverage}% proven recorded road. Generated connectors are hidden to avoid false fork guidance.`;
-      const sectionLines = recordedSections.map((section) => L.polyline(section.geometry, {
+      routeMapState.textContent = `Showing a Hybrid Route with ${coverage}% proven recorded road. Thick dashed amber parts are generated connectors; solid green is recorded taxi road.`;
+      const generatedCasings = generatedSections.map((section) => L.polyline(section.geometry, {
+        color: "#3d2d13",
+        weight: 8,
+        opacity: 0.38,
+        dashArray: "12 8"
+      }));
+      const generatedLines = generatedSections.map((section) => L.polyline(section.geometry, {
+        color: "#d18417",
+        weight: 6,
+        opacity: 0.9,
+        dashArray: "12 8"
+      }));
+      const recordedLines = recordedSections.map((section) => L.polyline(section.geometry, {
         color: "#17734b",
         weight: 7,
         opacity: 0.95
       }));
-      routeLine = L.featureGroup(sectionLines).addTo(map);
+      routeLine = L.featureGroup([...generatedCasings, ...generatedLines, ...recordedLines]).addTo(map);
       map.fitBounds(routeLine.getBounds(), { padding: [32, 32] });
       return;
     }
@@ -3276,6 +3289,7 @@ function buildRouteSearchText(route) {
     route.name,
     route.variant,
     route.start,
+    route.via,
     route.destination,
     route.timeWindow,
     route.trafficPattern,
@@ -3283,8 +3297,9 @@ function buildRouteSearchText(route) {
   ].join(" "));
 }
 
-function scoreRecordedRouteMatch(route, destinationText, currentPosition = null) {
+function scoreRecordedRouteMatch(route, destinationText, currentPosition = null, requestedRoadText = "") {
   const query = normalizeRouteSearchText(destinationText);
+  const requestedRoad = normalizeRouteSearchText(requestedRoadText);
   const destination = normalizeRouteSearchText(route.destination);
   const routeText = buildRouteSearchText(route);
 
@@ -3303,7 +3318,12 @@ function scoreRecordedRouteMatch(route, destinationText, currentPosition = null)
     reasons.push("route text match");
   }
 
-  const tokens = query
+  if (requestedRoad && routeText.includes(requestedRoad)) {
+    score += 45;
+    reasons.push("same via road");
+  }
+
+  const tokens = `${query} ${requestedRoad}`
     .split(" ")
     .map((token) => token.trim())
     .filter((token) => token.length >= 2);
@@ -3349,11 +3369,11 @@ function scoreRecordedRouteMatch(route, destinationText, currentPosition = null)
   return { score, reasons };
 }
 
-function findRecordedRouteMatches(destinationText, currentPosition = null, limit = 3) {
+function findRecordedRouteMatches(destinationText, currentPosition = null, limit = 3, requestedRoadText = "") {
   return routes
     .filter((route) => getRouteLibraryType(route) === "recorded")
     .map((route) => {
-      const match = scoreRecordedRouteMatch(route, destinationText, currentPosition);
+      const match = scoreRecordedRouteMatch(route, destinationText, currentPosition, requestedRoadText);
       return {
         route,
         score: match.score,
@@ -3796,7 +3816,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
       viaRoad,
       currentPosition
     };
-    recordedMatches = findRecordedRouteMatches(destination, currentPosition);
+    recordedMatches = findRecordedRouteMatches(destination, currentPosition, 3, viaRoad);
     const routeContext = `${locationContext}${viaRoad ? ` Via ${viaRoad}.` : ""}`;
 
     if (!offerAlternatives && recordedMatches.length) {
@@ -3816,7 +3836,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     }
   } catch (error) {
     if (recordedMatches.length) {
-      showPreparedRouteChoices([], destination, locationContext, recordedMatches, error.message);
+      selectRecordedRouteMatch(recordedMatches[0].route.id, true);
     } else {
       routeSummary.className = "route-summary";
       routeSummary.innerHTML = `<strong>Could not prepare this route.</strong><br>${escapeHtml(error.message || "Try a more specific destination.")}`;

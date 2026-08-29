@@ -114,6 +114,30 @@ class HybridRouteTests(unittest.TestCase):
         self.assertEqual(western_points[0]["longitude"], 114.1548)
         self.assertEqual(eastern_points[0]["longitude"], 114.2312)
 
+    def test_hde_uses_matching_location_cue_as_arrival_anchor(self):
+        destination = {
+            "latitude": 22.3177593,
+            "longitude": 114.1558841,
+            "label": "One SilverSea, Hoi Fai Road",
+        }
+        saved_cue = {
+            "id": "location-cue-one-silversea",
+            "title": "One Silver Sea",
+            "instruction": "Use Left Lane",
+            "notes": "Use Left lane for One Silver Sea",
+            "latitude": 22.316859,
+            "longitude": 114.1599028,
+            "activationRadiusMeters": 100,
+            "confidence": 1,
+        }
+
+        with mock.patch.object(server, "fetch_location_cues", return_value=[saved_cue]):
+            anchor = server.recorded_seed_arrival_anchor(destination, "Western Tunnel")
+
+        self.assertEqual(anchor["source"], "location-cue")
+        self.assertEqual(anchor["sourceLocationCueId"], saved_cue["id"])
+        self.assertEqual(anchor["latitude"], saved_cue["latitude"])
+
     def test_failed_tunnel_route_can_be_rescued_by_recorded_route(self):
         generated_geometry = [[22.36, 114.0 + index * 0.0002] for index in range(101)]
         recorded_geometry = [[22.36008, 114.004 + index * 0.0002] for index in range(61)]
