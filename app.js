@@ -1,4 +1,5 @@
 const ROUTES_API = "/api/routes";
+const CLEAN_ROUTE_API = "/api/routes/clean";
 const GENERATE_ROUTE_API = "/api/generate-route";
 const GENERATE_CUES_API = "/api/generate-cues";
 const PREPARE_ROUTE_API = "/api/prepare-route";
@@ -2472,6 +2473,7 @@ function renderRouteList() {
         <span class="pill">${photoCount} cue${photoCount === 1 ? "" : "s"}</span>
         <button class="secondary-button small-button route-review-button" data-route-id="${route.id}" type="button">View</button>
         <button class="secondary-button small-button route-cues-button" data-route-id="${route.id}" type="button">${photoCount ? "Rebuild cues" : "Generate cues"}</button>
+        ${routeType === "recorded" ? `<button class="secondary-button small-button route-clean-button" data-route-id="${route.id}" type="button">Clean route</button>` : ""}
         <button class="secondary-button small-button route-edit-button" data-route-id="${route.id}" type="button">${routeType === "recorded" ? "Edit details" : "Regenerate"}</button>
         <button class="secondary-button small-button route-delete-button" data-route-id="${route.id}" type="button">Delete from DB</button>
       </div>
@@ -2499,6 +2501,10 @@ function renderRouteList() {
 
     article.querySelector(".route-cues-button").addEventListener("click", () => {
       generateCuesForSavedRoute(route.id);
+    });
+
+    article.querySelector(".route-clean-button")?.addEventListener("click", () => {
+      cleanRecordedRoute(route.id);
     });
 
     article.querySelector(".route-delete-button").addEventListener("click", () => {
@@ -4381,6 +4387,55 @@ async function generateCuesForSavedRoute(routeId) {
     updateRouteLibraryStatus(`Saved ${generatedCues.length} generated turn cue${generatedCues.length === 1 ? "" : "s"} to SQLite for "${route.name}".`);
   } catch (error) {
     updateRouteLibraryStatus(error.message || "Could not generate turn cues.", true);
+  }
+}
+
+async function cleanRecordedRoute(routeId) {
+  const route = routes.find((item) => item.id === routeId);
+
+  if (!route) {
+    return;
+  }
+
+  if (getRouteLibraryType(route) !== "recorded") {
+    updateRouteLibraryStatus("Clean route is only available for recorded drives.", true);
+    return;
+  }
+
+  updateRouteLibraryStatus(`Cleaning recorded GPS line for "${route.name}"...`);
+
+  try {
+    const response = await fetch(CLEAN_ROUTE_API, {
+      method: "POST",
+      headers: storageHeaders({
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store"
+      }),
+      cache: "no-store",
+      body: JSON.stringify({ routeId })
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || !result.ok || !result.route) {
+      throw new Error(result.error || "Could not clean this recorded route.");
+    }
+
+    const cleanedRoute = normalizeImportedRoute(result.route);
+    await loadRoutes();
+
+    destinationSelect.value = cleanedRoute.id;
+    photoRouteSelect.value = cleanedRoute.id;
+    renderPhotoStepOptions(cleanedRoute.id);
+    displayRoute(cleanedRoute);
+
+    const report = result.report || {};
+    const removedPoints = Number(report.removedPointCount || 0);
+    const loopCount = Number(report.loopTrimCount || 0);
+    updateRouteLibraryStatus(
+      `Created "${cleanedRoute.name}" with ${removedPoints} GPS point${removedPoints === 1 ? "" : "s"} and ${loopCount} loop/fork section${loopCount === 1 ? "" : "s"} removed. Original recording is unchanged.`
+    );
+  } catch (error) {
+    updateRouteLibraryStatus(error.message || "Could not clean this recorded route.", true);
   }
 }
 

@@ -33,6 +33,16 @@ HONG_KONG_TUNNEL_OPTIONS = (
     ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
     ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
 )
+WESTERN_TUNNEL_SOUTH_APPROACH = [22.2890, 114.1442]
+WESTERN_TUNNEL_NORTH_APPROACH = [22.3044, 114.1602]
+WESTERN_TUNNEL_SPINE = (
+    [22.2893869, 114.1436288],
+    [22.2914, 114.1466],
+    [22.2942, 114.1500],
+    [22.2974, 114.1536],
+    [22.3008, 114.1570],
+    [22.3043807, 114.1602283],
+)
 HUNG_HOM_NORTHBOUND_ANCHORS = (
     {
         "latitude": 22.2826209,
@@ -594,6 +604,80 @@ def replace_routes(routes):
                         photo.get("longitude"),
                     ),
                 )
+
+
+def insert_route(route, after_route_id=None):
+    with connect_db() as db:
+        position = None
+        if after_route_id:
+            row = db.execute("SELECT position FROM routes WHERE id = ?", (after_route_id,)).fetchone()
+            if row:
+                position = int(row["position"]) + 1
+                db.execute(
+                    "UPDATE routes SET position = position + 1 WHERE position >= ?",
+                    (position,),
+                )
+
+        if position is None:
+            row = db.execute("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM routes").fetchone()
+            position = int(row["position"] or 0)
+
+        db.execute(
+            """
+            INSERT INTO routes (
+              id, name, variant, start, via, destination, time_window,
+              traffic_pattern, notes, start_latitude, start_longitude,
+              destination_latitude, destination_longitude, route_geometry, recorded_track_points,
+              route_type, route_sections, route_distance_meters, route_duration_seconds,
+              position, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                route.get("id", ""),
+                route.get("name", "Untitled route"),
+                route.get("variant", "Standard"),
+                route.get("start", ""),
+                route.get("via", ""),
+                route.get("destination", ""),
+                route.get("timeWindow", ""),
+                route.get("trafficPattern", ""),
+                route.get("notes", ""),
+                route.get("startLatitude"),
+                route.get("startLongitude"),
+                route.get("destinationLatitude"),
+                route.get("destinationLongitude"),
+                json.dumps(route.get("routeGeometry") or []),
+                json.dumps(route.get("recordedTrackPoints") or []),
+                route.get("routeType", "standard"),
+                json.dumps(route.get("routeSections") or []),
+                route.get("routeDistanceMeters"),
+                route.get("routeDurationSeconds"),
+                position,
+            ),
+        )
+
+        for photo in route.get("photos", []):
+            db.execute(
+                """
+                INSERT INTO photo_stops (
+                  id, route_id, step, title, instruction, notes,
+                  image, latitude, longitude, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    photo.get("id", ""),
+                    route.get("id", ""),
+                    int(photo.get("step") or 1),
+                    photo.get("title", "Untitled stop"),
+                    photo.get("instruction", ""),
+                    photo.get("notes", ""),
+                    photo.get("image", ""),
+                    photo.get("latitude"),
+                    photo.get("longitude"),
+                ),
+            )
 
 
 def delete_route(route_id):
@@ -1477,13 +1561,20 @@ def generate_route(payload):
         return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
     if via_label == "Hung Hom Tunnel southbound":
         return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
-    road_route = fetch_road_route(start, destination, via_points or None)
-
-    generated = format_generated_route(start, destination, start_label, road_route)
-    if via_label:
-        generated["viaLabel"] = via_label
-    reject_unsafe_tunnel_route(generated, via_label)
-    return generated
+    try:
+        road_route = fetch_road_route(start, destination, via_points or None)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        if via_label:
+            generated["viaLabel"] = via_label
+        reject_unsafe_tunnel_route(generated, via_label)
+        return generated
+    except Exception as error:
+        if not via_label:
+            raise
+        rescue = build_recorded_rescue_route(start, destination, start_label, via_label, error)
+        if rescue:
+            return rescue
+        raise
 
 
 def resolve_via_road(payload):
@@ -1562,6 +1653,7 @@ def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False):
     unsafe = [
         warning for warning in route.get("routeWarnings", [])
         if warning.get("code") == "repeated-harbour-crossing"
+        or warning.get("code") == "route-fork"
         or (warning.get("code") == "route-loop" and not allow_connector_loops)
     ]
     if unsafe:
@@ -1594,6 +1686,37 @@ def build_hung_hom_route_for_direction(start, destination, start_label, via_labe
         )
 
     raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
+
+
+def build_recorded_rescue_route(start, destination, start_label, failed_via_label, original_error):
+    try:
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        hybrid = build_best_hybrid_route(generated)
+    except Exception:
+        return None
+
+    if not should_promote_hybrid_route(hybrid):
+        return None
+
+    rescue_warning = {
+        "code": "requested-via-rescued-by-recording",
+        "severity": "medium",
+        "title": "Requested tunnel route replaced by recorded taxi road",
+        "message": (
+            f"The generated route via {failed_via_label} was rejected, so TaxiBo used "
+            "the closest trusted recorded route instead."
+        ),
+    }
+    hybrid["viaLabel"] = f"Recorded rescue after {failed_via_label}"
+    hybrid["routeWarnings"] = [
+        warning for warning in hybrid.get("routeWarnings", [])
+        if warning.get("severity") != "high"
+    ]
+    hybrid["routeWarnings"].append(rescue_warning)
+    hybrid["hdeRescueFromVia"] = failed_via_label
+    hybrid["hdeOriginalError"] = str(original_error)
+    return hybrid
 
 
 def build_hung_hom_recorded_corridor_route(
@@ -1808,10 +1931,15 @@ def prepare_route_options(payload):
                 HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR,
             )
         else:
-            road_route = fetch_road_route(start, destination, via_points)
-            generated = format_generated_route(start, destination, start_label, road_route)
-            generated["viaLabel"] = via_label
-            reject_unsafe_tunnel_route(generated, via_label)
+            try:
+                road_route = fetch_road_route(start, destination, via_points)
+                generated = format_generated_route(start, destination, start_label, road_route)
+                generated["viaLabel"] = via_label
+                reject_unsafe_tunnel_route(generated, via_label)
+            except Exception as error:
+                generated = build_recorded_rescue_route(start, destination, start_label, via_label, error)
+                if not generated:
+                    raise
         label = f"Via {via_label}"
         return add_hybrid_route_option([match_prepared_route(generated, "via-road", label)])
 
@@ -1827,8 +1955,15 @@ def prepare_route_options(payload):
                 _anchors, via_label = resolve_via_route({"viaRoad": "Hung Hom Tunnel"}, start, destination)
                 generated = build_hung_hom_route_for_direction(start, destination, start_label, via_label)
             else:
-                road_route = fetch_road_route(start, destination, [waypoint])
-                generated = format_generated_route(start, destination, start_label, road_route)
+                try:
+                    road_route = fetch_road_route(start, destination, [waypoint])
+                    generated = format_generated_route(start, destination, start_label, road_route)
+                    generated["viaLabel"] = label
+                    reject_unsafe_tunnel_route(generated, label)
+                except Exception as error:
+                    generated = build_recorded_rescue_route(start, destination, start_label, label, error)
+                    if not generated:
+                        raise
             options.append(match_prepared_route(generated, option_id, label))
         except Exception:
             continue
@@ -2360,6 +2495,276 @@ def recorded_route_geometry(route):
         for point in points
         if isinstance(point, dict)
     ])
+
+
+def clean_recorded_route(payload):
+    route_id = str(payload.get("routeId") or payload.get("id") or "").strip()
+    if not route_id:
+        raise ValueError("Route id is required.")
+
+    route = fetch_route(route_id)
+    if not route:
+        raise ValueError("Route was not found in the database.")
+    if not is_recorded_route_record(route):
+        raise ValueError("Clean route is only available for recorded drives.")
+
+    original_geometry = recorded_route_geometry(route)
+    if len(original_geometry) < 3:
+        raise ValueError("This recording does not have enough GPS points to clean.")
+
+    cleaned_geometry, report = clean_recorded_route_geometry(original_geometry)
+    if len(cleaned_geometry) < 3:
+        raise ValueError("The cleaned route would be too short. Original recording was not changed.")
+
+    cleaned_route_id = str(uuid4())
+    base_name = str(route.get("name") or "Recorded drive").strip() or "Recorded drive"
+    cleaned_photos = build_cleaned_route_photos(route, cleaned_geometry)
+    cleaned_track_points = build_cleaned_track_points(route, cleaned_geometry)
+    cleaned_notes = str(route.get("notes") or "").strip()
+    cleaning_note = (
+        f"Clean route copy created by TaxiBo. Removed {report['removedPointCount']} GPS point"
+        f"{'' if report['removedPointCount'] == 1 else 's'} and {report['loopTrimCount']} loop/fork section"
+        f"{'' if report['loopTrimCount'] == 1 else 's'} from the original recording."
+    )
+    if cleaned_notes:
+        cleaned_notes = f"{cleaned_notes}\n\n{cleaning_note}"
+    else:
+        cleaned_notes = cleaning_note
+
+    cleaned_route = {
+        **route,
+        "id": cleaned_route_id,
+        "name": f"{base_name} (cleaned)",
+        "variant": "Clean route",
+        "notes": cleaned_notes,
+        "routeType": "recorded",
+        "routeGeometry": cleaned_geometry,
+        "recordedTrackPoints": cleaned_track_points,
+        "routeSections": [],
+        "routeDistanceMeters": sum_geometry_distance(cleaned_geometry),
+        "photos": cleaned_photos,
+    }
+
+    insert_route(cleaned_route, after_route_id=route_id)
+    saved_route = fetch_route(cleaned_route_id)
+    return {"route": saved_route, "report": report}
+
+
+def clean_recorded_route_geometry(geometry):
+    cleaned = remove_recorded_spikes(normalize_geometry(geometry))
+    loop_trim_count = 0
+
+    while True:
+        trim = find_recorded_loop_trim(cleaned)
+        if not trim:
+            break
+        start_index, end_index = trim
+        cleaned = cleaned[: start_index + 1] + cleaned[end_index:]
+        loop_trim_count += 1
+        if loop_trim_count >= 20:
+            break
+
+    cleaned = remove_recorded_spikes(cleaned)
+    cleaned, road_repair_count = repair_cleaned_route_gaps(cleaned)
+    return cleaned, {
+        "originalPointCount": len(normalize_geometry(geometry)),
+        "cleanedPointCount": len(cleaned),
+        "removedPointCount": max(0, len(normalize_geometry(geometry)) - len(cleaned)),
+        "loopTrimCount": loop_trim_count,
+        "roadRepairCount": road_repair_count,
+    }
+
+
+def remove_recorded_spikes(geometry):
+    if len(geometry) < 3:
+        return geometry
+
+    cleaned = [geometry[0]]
+    for index in range(1, len(geometry) - 1):
+        previous = cleaned[-1]
+        current = geometry[index]
+        following = geometry[index + 1]
+        prev_distance = haversine_distance(previous[0], previous[1], current[0], current[1])
+        next_distance = haversine_distance(current[0], current[1], following[0], following[1])
+        bridge_distance = haversine_distance(previous[0], previous[1], following[0], following[1])
+
+        if prev_distance < 3:
+            continue
+        if prev_distance > 250 and next_distance > 250 and bridge_distance < 120:
+            continue
+        cleaned.append(current)
+
+    cleaned.append(geometry[-1])
+    return cleaned
+
+
+def find_recorded_loop_trim(geometry, touch_radius_meters=150, minimum_loop_meters=180):
+    if len(geometry) < 8:
+        return None
+
+    cumulative = [0.0]
+    for index in range(1, len(geometry)):
+        previous = geometry[index - 1]
+        current = geometry[index]
+        cumulative.append(
+            cumulative[-1] + haversine_distance(previous[0], previous[1], current[0], current[1])
+        )
+
+    best = None
+    best_distance = 0.0
+    for start_index in range(0, len(geometry) - 6):
+        maximum_end = min(len(geometry), start_index + 260)
+        for end_index in range(start_index + 5, maximum_end):
+            travelled = cumulative[end_index] - cumulative[start_index]
+            if travelled < minimum_loop_meters:
+                continue
+
+            direct = haversine_distance(
+                geometry[start_index][0],
+                geometry[start_index][1],
+                geometry[end_index][0],
+                geometry[end_index][1],
+            )
+            if direct > touch_radius_meters:
+                continue
+            if travelled < max(260, direct * 3.5):
+                continue
+
+            if travelled > best_distance:
+                best = (start_index, end_index)
+                best_distance = travelled
+
+    return best
+
+
+def repair_cleaned_route_gaps(geometry, minimum_gap_meters=350, maximum_route_ratio=2.8):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return geometry, 0
+
+    repaired = [geometry[0]]
+    repair_count = 0
+
+    for index in range(1, len(geometry)):
+        previous = repaired[-1]
+        current = geometry[index]
+        gap_distance = haversine_distance(previous[0], previous[1], current[0], current[1])
+        road_geometry = None
+
+        if gap_distance >= minimum_gap_meters:
+            try:
+                road_route = fetch_road_route(
+                    {"latitude": previous[0], "longitude": previous[1]},
+                    {"latitude": current[0], "longitude": current[1]},
+                )
+                candidate = normalize_geometry(road_route.get("geometry"))
+                candidate_distance = sum_geometry_distance(candidate)
+                if (
+                    len(candidate) >= 2
+                    and candidate_distance >= gap_distance * 0.75
+                    and candidate_distance <= gap_distance * maximum_route_ratio
+                ):
+                    road_geometry = candidate
+            except Exception:
+                road_geometry = None
+
+            if not road_geometry:
+                road_geometry = western_tunnel_spine_for_gap(previous, current)
+
+        if road_geometry:
+            repaired.extend(road_geometry[1:])
+            repair_count += 1
+        else:
+            repaired.append(current)
+
+    return repaired, repair_count
+
+
+def western_tunnel_spine_for_gap(start, end):
+    start_to_south = haversine_distance(start[0], start[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1])
+    start_to_north = haversine_distance(start[0], start[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1])
+    end_to_south = haversine_distance(end[0], end[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1])
+    end_to_north = haversine_distance(end[0], end[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1])
+
+    south_to_north = start_to_south <= 450 and end_to_north <= 650
+    north_to_south = start_to_north <= 650 and end_to_south <= 450
+    if not south_to_north and not north_to_south:
+        return None
+
+    spine = [list(point) for point in WESTERN_TUNNEL_SPINE]
+    if north_to_south:
+        spine.reverse()
+
+    return [start, *spine[1:-1], end]
+
+
+def build_cleaned_track_points(route, geometry):
+    original_points = route.get("recordedTrackPoints") or []
+    original_by_location = []
+    for point in original_points:
+        if not isinstance(point, dict):
+            continue
+        latitude = optional_float(point.get("latitude"))
+        longitude = optional_float(point.get("longitude"))
+        if latitude is None or longitude is None:
+            continue
+        original_by_location.append((latitude, longitude, point))
+
+    cleaned_points = []
+    for index, point in enumerate(geometry):
+        best = None
+        best_distance = None
+        for latitude, longitude, original in original_by_location:
+            distance = haversine_distance(point[0], point[1], latitude, longitude)
+            if best_distance is None or distance < best_distance:
+                best = original
+                best_distance = distance
+        if best and best_distance is not None and best_distance <= 8:
+            cleaned_points.append(best)
+        else:
+            cleaned_points.append({
+                "latitude": point[0],
+                "longitude": point[1],
+                "timestamp": index + 1,
+            })
+    return cleaned_points
+
+
+def build_cleaned_route_photos(route, geometry):
+    original_photos = route.get("photos") or []
+    kept_photos = []
+    for photo in original_photos:
+        latitude = optional_float(photo.get("latitude"))
+        longitude = optional_float(photo.get("longitude"))
+        if latitude is None or longitude is None:
+            continue
+        if distance_to_geometry([latitude, longitude], geometry) <= 120:
+            kept_photos.append({
+                **photo,
+                "id": str(uuid4()),
+                "step": len(kept_photos) + 1,
+            })
+
+    if kept_photos:
+        return kept_photos
+
+    return [
+        {
+            **cue,
+            "id": str(uuid4()),
+            "image": "",
+        }
+        for cue in generate_geometry_cues(geometry)
+    ]
+
+
+def distance_to_geometry(point, geometry):
+    best = None
+    for route_point in geometry:
+        distance = haversine_distance(point[0], point[1], route_point[0], route_point[1])
+        if best is None or distance < best:
+            best = distance
+    return best if best is not None else float("inf")
 
 
 def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=55):
@@ -3626,7 +4031,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
     def handle_post(self):
         path = urlparse(self.path).path
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/routes/clean", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
             self.send_error(404, "Not found")
             return
 
@@ -3700,6 +4105,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/academy/attempt":
                 self.send_json({"ok": True, "attempt": record_academy_attempt(payload)})
+                return
+
+            if path == "/api/routes/clean":
+                self.send_json({"ok": True, **clean_recorded_route(payload)})
                 return
 
             if path == "/api/generate-route":

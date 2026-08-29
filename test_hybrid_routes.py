@@ -114,6 +114,78 @@ class HybridRouteTests(unittest.TestCase):
         self.assertEqual(western_points[0]["longitude"], 114.1548)
         self.assertEqual(eastern_points[0]["longitude"], 114.2312)
 
+    def test_failed_tunnel_route_can_be_rescued_by_recorded_route(self):
+        generated_geometry = [[22.36, 114.0 + index * 0.0002] for index in range(101)]
+        recorded_geometry = [[22.36008, 114.004 + index * 0.0002] for index in range(61)]
+
+        def fake_road_route(start, destination, via_points=None):
+            if via_points:
+                raise ValueError("TaxiBo rejected the generated tunnel route: Route appears to loop back.")
+            return {
+                "geometry": generated_geometry,
+                "distance": server.sum_geometry_distance(generated_geometry),
+                "duration": 600,
+                "cues": [],
+            }
+
+        with mock.patch.object(server, "fetch_routes", return_value=[{
+            "id": "recorded-rescue-test",
+            "name": "Recorded drive 20/08/2026 上午02:07 to 上午04:14",
+            "routeType": "recorded",
+            "routeGeometry": recorded_geometry,
+        }]), mock.patch.object(server, "fetch_road_route", side_effect=fake_road_route):
+            rescue = server.build_recorded_rescue_route(
+                {"latitude": 22.36, "longitude": 114.0},
+                {"latitude": 22.36, "longitude": 114.02, "label": "Destination"},
+                "Start",
+                "Western Tunnel",
+                ValueError("Route appears to loop back."),
+            )
+
+        self.assertIsNotNone(rescue)
+        self.assertEqual(rescue["routeType"], "hybrid")
+        self.assertEqual(rescue["hdeRescueFromVia"], "Western Tunnel")
+        self.assertTrue(any(warning["code"] == "requested-via-rescued-by-recording" for warning in rescue["routeWarnings"]))
+
+    def test_suggested_western_tunnel_rejects_forked_generated_option(self):
+        def fake_road_route(start, destination, via_points=None):
+            if via_points and via_points[0]["longitude"] == 114.1548:
+                return {
+                    "geometry": [
+                        [22.3000, 114.0000],
+                        [22.3000, 114.0020],
+                        [22.3000, 114.0040],
+                        [22.3000, 114.0060],
+                        [22.3000, 114.0080],
+                        [22.3000, 114.0100],
+                        [22.3001, 114.0040],
+                        [22.3001, 114.0060],
+                        [22.3001, 114.0080],
+                        [22.3001, 114.0100],
+                    ],
+                    "distance": 2000,
+                    "duration": 200,
+                    "cues": [],
+                }
+            return {
+                "geometry": [[22.34, 114.19], [22.28, 114.17]],
+                "distance": 7000,
+                "duration": 900,
+                "cues": [],
+            }
+
+        with mock.patch.object(server, "resolve_route_endpoints", return_value=(
+            {"latitude": 22.34, "longitude": 114.19, "label": "Kowloon"},
+            {"latitude": 22.28, "longitude": 114.17, "label": "Hong Kong"},
+            "Kowloon",
+        )), mock.patch.object(server, "fetch_routes", return_value=[]), \
+            mock.patch.object(server, "fetch_road_route", side_effect=fake_road_route), \
+            mock.patch.object(server, "match_saved_photo_cues", side_effect=lambda cues, geometry=None: cues):
+            result = server.prepare_route_options({"destination": "Hong Kong"})
+
+        western_options = [option for option in result["options"] if option["optionId"] == "western"]
+        self.assertFalse(western_options)
+
     def test_fetch_json_converts_http_error_to_route_message(self):
         error = HTTPError(
             "https://router.example.test",
@@ -463,6 +535,112 @@ class HybridRouteTests(unittest.TestCase):
                 saved = server.fetch_routes()
                 self.assertEqual(saved[0]["routeType"], "hybrid")
                 self.assertEqual(saved[0]["routeSections"][0]["source"], "recorded")
+        finally:
+            server.DB_PATH = original_path
+
+    def test_clean_recorded_route_geometry_removes_loop_fork(self):
+        geometry = [
+            [22.3000, 114.1000],
+            [22.3000, 114.1010],
+            [22.3000, 114.1020],
+            [22.3000, 114.1030],
+            [22.3012, 114.1035],
+            [22.3024, 114.1035],
+            [22.3036, 114.1035],
+            [22.3024, 114.1030],
+            [22.3012, 114.1030],
+            [22.3000, 114.1030],
+            [22.3000, 114.1040],
+            [22.3000, 114.1050],
+        ]
+
+        cleaned, report = server.clean_recorded_route_geometry(geometry)
+
+        self.assertLess(len(cleaned), len(geometry))
+        self.assertEqual(report["loopTrimCount"], 1)
+        self.assertEqual(cleaned[:4], geometry[:4])
+        self.assertEqual(cleaned[-2:], geometry[-2:])
+
+    def test_clean_recorded_route_repairs_long_shortcut_with_road_geometry(self):
+        geometry = [
+            [22.2893869, 114.1436288],
+            [22.3043807, 114.1602283],
+        ]
+        road_geometry = [
+            [22.2893869, 114.1436288],
+            [22.2930, 114.1486],
+            [22.2983, 114.1543],
+            [22.3043807, 114.1602283],
+        ]
+
+        with mock.patch.object(server, "fetch_road_route", return_value={
+            "geometry": road_geometry,
+            "distance": server.sum_geometry_distance(road_geometry),
+            "duration": 120,
+            "cues": [],
+        }):
+            repaired, repair_count = server.repair_cleaned_route_gaps(geometry)
+
+        self.assertEqual(repair_count, 1)
+        self.assertEqual(repaired, road_geometry)
+
+    def test_clean_recorded_route_uses_western_tunnel_spine_when_router_fails(self):
+        geometry = [
+            [22.2893869, 114.1436288],
+            [22.3043807, 114.1602283],
+        ]
+
+        with mock.patch.object(server, "fetch_road_route", side_effect=ValueError("router unavailable")):
+            repaired, repair_count = server.repair_cleaned_route_gaps(geometry)
+
+        self.assertEqual(repair_count, 1)
+        self.assertGreater(len(repaired), len(geometry))
+        self.assertEqual(repaired[0], geometry[0])
+        self.assertEqual(repaired[-1], geometry[-1])
+
+    def test_clean_recorded_route_saves_copy_and_keeps_original(self):
+        original_path = server.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                server.DB_PATH = Path(directory) / "clean-route.db"
+                server.initialize_db("local")
+                route = {
+                    "id": "recorded-route-with-fork",
+                    "name": "Recorded drive fork test",
+                    "variant": "Recorded from Dashcam road recording",
+                    "start": "Start",
+                    "destination": "Destination",
+                    "routeType": "recorded",
+                    "routeGeometry": [
+                        [22.3000, 114.1000],
+                        [22.3000, 114.1010],
+                        [22.3000, 114.1020],
+                        [22.3000, 114.1030],
+                        [22.3012, 114.1035],
+                        [22.3024, 114.1035],
+                        [22.3036, 114.1035],
+                        [22.3024, 114.1030],
+                        [22.3012, 114.1030],
+                        [22.3000, 114.1030],
+                        [22.3000, 114.1040],
+                        [22.3000, 114.1050],
+                    ],
+                    "photos": [],
+                }
+                server.replace_routes([route])
+
+                result = server.clean_recorded_route({"routeId": "recorded-route-with-fork"})
+                saved = server.fetch_routes()
+
+                self.assertEqual(len(saved), 2)
+                self.assertEqual(saved[0]["id"], "recorded-route-with-fork")
+                self.assertEqual(len(saved[0]["routeGeometry"]), len(route["routeGeometry"]))
+                self.assertEqual(result["route"]["variant"], "Clean route")
+                self.assertLess(
+                    len(result["route"]["routeGeometry"]),
+                    len(route["routeGeometry"]),
+                )
+                self.assertEqual(result["report"]["loopTrimCount"], 1)
         finally:
             server.DB_PATH = original_path
 
