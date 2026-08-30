@@ -33,6 +33,14 @@ HONG_KONG_TUNNEL_OPTIONS = (
     ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
     ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
 )
+KNOWN_HONG_KONG_PLACES = (
+    {
+        "aliases": ("香港仔中心", "aberdeen centre", "aberdeen center"),
+        "label": "香港仔中心 Aberdeen Centre, Aberdeen, Hong Kong",
+        "latitude": 22.24861,
+        "longitude": 114.15396,
+    },
+)
 WESTERN_TUNNEL_SOUTH_APPROACH = [22.2890, 114.1442]
 WESTERN_TUNNEL_NORTH_APPROACH = [22.3044, 114.1602]
 WESTERN_TUNNEL_SPINE = (
@@ -3990,6 +3998,10 @@ def normalize_geometry(geometry):
 
 
 def geocode_place(query):
+    known_place = resolve_known_hong_kong_place(query)
+    if known_place:
+        return known_place
+
     variants = build_query_variants(query)
     network_errors = []
     prefer_hong_kong = looks_like_hong_kong_query(query)
@@ -4012,6 +4024,22 @@ def geocode_place(query):
         raise ValueError(f'Could not find "{query}" inside Hong Kong. Try adding the district or "Hong Kong".')
 
     raise ValueError(f'Could not find "{query}". Try adding city/state, for example "2 Shepherd Ln, Chapel Hill, NC".')
+
+
+def resolve_known_hong_kong_place(query):
+    text = str(query or "").strip().lower()
+    if not text:
+        return None
+
+    for place in KNOWN_HONG_KONG_PLACES:
+        for alias in place["aliases"]:
+            if alias.lower() in text:
+                return {
+                    "latitude": place["latitude"],
+                    "longitude": place["longitude"],
+                    "label": place["label"],
+                }
+    return None
 
 
 def build_query_variants(query):

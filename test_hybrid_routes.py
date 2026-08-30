@@ -114,6 +114,13 @@ class HybridRouteTests(unittest.TestCase):
         self.assertEqual(western_points[0]["longitude"], 114.1548)
         self.assertEqual(eastern_points[0]["longitude"], 114.2312)
 
+    def test_geocode_knows_aberdeen_centre_local_alias(self):
+        place = server.geocode_place("香港仔中心")
+
+        self.assertEqual(place["label"], "香港仔中心 Aberdeen Centre, Aberdeen, Hong Kong")
+        self.assertAlmostEqual(place["latitude"], 22.24861)
+        self.assertAlmostEqual(place["longitude"], 114.15396)
+
     def test_geometry_cues_borrow_nearby_reference_road_name(self):
         geometry = [
             [22.3000, 114.1000],

@@ -311,7 +311,7 @@ function setCueUiMode(mode) {
   updateSpeedUnitDisplay();
 
   if (testStartEntryGroup) {
-    testStartEntryGroup.hidden = nextMode !== "testing";
+    testStartEntryGroup.hidden = !["drive", "testing"].includes(nextMode);
   }
 
   cueModeButtons.forEach((button) => {
@@ -3759,7 +3759,7 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
     : null;
   const typedDestination = destinationSearch.value.trim();
   const viaRoad = routeEntryMode === "destination" ? viaRoadSearch.value.trim() : "";
-  const testingStart = document.body.dataset.cueUiMode === "testing"
+  const manualStart = ["drive", "testing"].includes(document.body.dataset.cueUiMode)
     ? testStartSearch?.value.trim() || ""
     : "";
   // A route-name search may remain in the text box after the driver picks a
@@ -3767,10 +3767,10 @@ async function prepareRouteFromDestination(offerAlternatives = false) {
   // text, otherwise the app incorrectly falls back to the device location.
   const destination = selectedRoute?.destination || typedDestination || "";
   const acceptedPickup = String(acceptedTripContext?.pickup || "").trim();
-  const hasSavedStartCoordinates = !testingStart && !acceptedPickup &&
+  const hasSavedStartCoordinates = !manualStart && !acceptedPickup &&
     Number.isFinite(selectedRoute?.startLatitude) &&
     Number.isFinite(selectedRoute?.startLongitude);
-  const start = testingStart || acceptedPickup || (hasSavedStartCoordinates ? "" : selectedRoute?.start || "");
+  const start = manualStart || acceptedPickup || (hasSavedStartCoordinates ? "" : selectedRoute?.start || "");
   let currentPosition = hasSavedStartCoordinates ? {
     latitude: selectedRoute.startLatitude,
     longitude: selectedRoute.startLongitude
