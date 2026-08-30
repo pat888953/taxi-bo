@@ -114,6 +114,33 @@ class HybridRouteTests(unittest.TestCase):
         self.assertEqual(western_points[0]["longitude"], 114.1548)
         self.assertEqual(eastern_points[0]["longitude"], 114.2312)
 
+    def test_geometry_cues_borrow_nearby_reference_road_name(self):
+        geometry = [
+            [22.3000, 114.1000],
+            [22.3000, 114.1010],
+            [22.3000, 114.1020],
+            [22.3000, 114.1030],
+            [22.3006, 114.1030],
+            [22.3012, 114.1030],
+            [22.3018, 114.1030],
+            [22.3024, 114.1030],
+            [22.3030, 114.1030],
+            [22.3036, 114.1030],
+            [22.3042, 114.1030],
+            [22.3048, 114.1030],
+        ]
+        reference_cues = [{
+            "latitude": 22.3006,
+            "longitude": 114.1030,
+            "roadName": "Waterloo Road",
+        }]
+
+        cues = server.generate_geometry_cues(geometry, reference_cues=reference_cues)
+
+        self.assertTrue(cues)
+        self.assertIn("Waterloo Road", cues[0]["title"])
+        self.assertIn("Waterloo Road", cues[0]["instruction"])
+
     def test_hde_uses_matching_location_cue_as_arrival_anchor(self):
         destination = {
             "latitude": 22.3177593,

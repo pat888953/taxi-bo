@@ -1885,6 +1885,8 @@ def build_recorded_seed_hybrid_route(start, destination, start_label, via_label,
     if not duration:
         duration = max(180, distance / 10)
 
+    reference_cues = (original_generated or {}).get("cues") or []
+
     return {
         "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
         "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
@@ -1896,7 +1898,7 @@ def build_recorded_seed_hybrid_route(start, destination, start_label, via_label,
         "routeSections": sections,
         "distance": display_distance if display_distance > 0 else distance,
         "duration": duration,
-        "cues": generate_geometry_cues(geometry),
+        "cues": generate_geometry_cues(geometry, reference_cues=reference_cues),
         "routeWarnings": warnings,
         "routeForkCount": route_warning_count(warnings, "route-fork"),
         "hybridCoverage": min(1.0, recorded_distance / display_distance) if display_distance else 0,
@@ -2309,6 +2311,11 @@ def build_hung_hom_recorded_corridor_route(
         if warning.get("code") == "route-loop" else warning
         for warning in warnings
     ]
+    reference_cues = [
+        *(start_connector.get("cues") or []),
+        *(end_connector.get("cues") or []),
+    ]
+
     route = {
         "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
         "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
@@ -2320,7 +2327,7 @@ def build_hung_hom_recorded_corridor_route(
         "routeSections": sections,
         "distance": distance,
         "duration": duration,
-        "cues": generate_geometry_cues(geometry),
+        "cues": generate_geometry_cues(geometry, reference_cues=reference_cues),
         "routeWarnings": warnings,
         "hybridCoverage": min(1.0, recorded_distance / distance) if distance else 0,
         "recordedSegmentDistance": recorded_distance,
@@ -3425,7 +3432,7 @@ def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=
         "routeSections": sections,
         "distance": hybrid_distance,
         "duration": duration,
-        "cues": generate_geometry_cues(hybrid_geometry),
+        "cues": generate_geometry_cues(hybrid_geometry, reference_cues=generated.get("cues")),
         "routeWarnings": warnings,
         "routeForkCount": route_warning_count(warnings, "route-fork"),
         "hybridCoverage": coverage,
@@ -4222,6 +4229,7 @@ def build_turn_cue(step, maneuver, step_number):
         "notes": "Generated from the driving route. Replace with your own photo when ready.",
         "latitude": latitude,
         "longitude": longitude,
+        "roadName": road_name,
         "approachHeading": approach_heading if isinstance(approach_heading, (int, float)) else None,
         "image": "",
     }
@@ -4253,7 +4261,7 @@ def format_cue_instruction(maneuver_type, modifier, road_name):
     return instruction + "."
 
 
-def generate_geometry_cues(geometry):
+def generate_geometry_cues(geometry, reference_cues=None):
     cues = []
 
     if len(geometry) < 3:
@@ -4276,15 +4284,17 @@ def generate_geometry_cues(geometry):
             continue
 
         direction = "Left" if turn_angle > 0 else "Right"
+        road_name = nearest_reference_road_name(current_point, reference_cues)
         cues.append(
             {
                 "id": f"geometry-cue-{step_number}",
                 "step": step_number,
-                "title": f"{direction} turn cue",
-                "instruction": f"Prepare for a {direction.lower()} turn or bend in the route.",
+                "title": f"{direction} turn cue{f' near {road_name}' if road_name else ''}",
+                "instruction": f"Prepare for a {direction.lower()} turn or bend near {road_name}." if road_name else f"Prepare for a {direction.lower()} turn or bend in the route.",
                 "notes": "Estimated from saved route geometry. Replace with your own junction photo when ready.",
                 "latitude": current_point[0],
                 "longitude": current_point[1],
+                "roadName": road_name,
                 "approachHeading": initial_bearing(previous_point, current_point),
                 "image": "",
             }
@@ -4297,21 +4307,62 @@ def generate_geometry_cues(geometry):
 
     if not cues:
         for point in sample_geometry_points(geometry, 5):
+            road_name = nearest_reference_road_name(point, reference_cues)
             cues.append(
                 {
                     "id": f"geometry-cue-{step_number}",
                     "step": step_number,
-                    "title": f"Route checkpoint {step_number}",
-                    "instruction": "Continue along the generated route.",
+                    "title": f"Route checkpoint {step_number}{f' near {road_name}' if road_name else ''}",
+                    "instruction": f"Continue along {road_name}." if road_name else "Continue along the generated route.",
                     "notes": "Estimated checkpoint from saved route geometry. Replace with your own junction photo when ready.",
                     "latitude": point[0],
                     "longitude": point[1],
+                    "roadName": road_name,
                     "image": "",
                 }
             )
             step_number += 1
 
     return cues
+
+
+def nearest_reference_road_name(point, reference_cues=None, radius_meters=220):
+    if not reference_cues:
+        return ""
+
+    best = None
+    for cue in reference_cues:
+        if not isinstance(cue, dict):
+            continue
+        road_name = extract_reference_road_name(cue)
+        latitude = cue.get("latitude")
+        longitude = cue.get("longitude")
+        if not road_name or not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+            continue
+        distance = haversine_distance(point[0], point[1], latitude, longitude)
+        if distance <= radius_meters and (best is None or distance < best["distance"]):
+            best = {"distance": distance, "roadName": road_name}
+
+    return best["roadName"] if best else ""
+
+
+def extract_reference_road_name(cue):
+    road_name = str(cue.get("roadName") or "").strip()
+    if road_name:
+        return road_name
+
+    text = " ".join([
+        str(cue.get("title") or ""),
+        str(cue.get("instruction") or ""),
+    ])
+    match = re.search(r"\b(?:onto|on|near|toward)\s+([^.;]+)", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+
+    road_name = match.group(1).strip()
+    if not road_name or road_name.lower() in {"the generated route", "the route"}:
+        return ""
+    return road_name
 
 
 def calculate_turn_angle(previous_point, current_point, next_point):
