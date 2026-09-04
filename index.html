@@ -516,6 +516,15 @@
                 <input id="dashcamStartTime" type="datetime-local" step="1" aria-describedby="dashcamStartTimeHelp">
                 <small id="dashcamStartTimeHelp" class="field-help">Enter the exact date and time shown at the start of the first video file.</small>
               </label>
+              <div class="dashcam-time-nudge" aria-label="Fine tune video start time">
+                <span>Fine tune alignment</span>
+                <div class="finder-actions">
+                  <button class="secondary-button small-button" type="button" data-dashcam-time-shift="-10">-10s</button>
+                  <button class="secondary-button small-button" type="button" data-dashcam-time-shift="-1">-1s</button>
+                  <button class="secondary-button small-button" type="button" data-dashcam-time-shift="1">+1s</button>
+                  <button class="secondary-button small-button" type="button" data-dashcam-time-shift="10">+10s</button>
+                </div>
+              </div>
 
               <label class="field">
                 <span>Video recording timezone</span>
@@ -544,12 +553,24 @@
               </label>
             </div>
 
+            <div class="split-fields dashcam-coordinate-fields">
+              <label class="field">
+                <span>Cue latitude</span>
+                <input id="dashcamCueLatitude" type="number" inputmode="decimal" step="0.000001" placeholder="22.322746">
+              </label>
+
+              <label class="field">
+                <span>Cue longitude</span>
+                <input id="dashcamCueLongitude" type="number" inputmode="decimal" step="0.000001" placeholder="114.211861">
+              </label>
+            </div>
+
             <div class="finder-actions">
               <button id="dashcamCaptureButton" class="primary-button" type="button">Capture frame to cue</button>
               <button id="dashcamSaveButton" class="secondary-button" type="button" disabled>Save dashcam cue</button>
             </div>
 
-            <div id="dashcamImageOptions" class="dashcam-image-options" hidden>
+            <div id="dashcamImageOptions" class="dashcam-image-options">
               <div>
                 <strong>Choose the cue image</strong>
                 <span>Keep the dashcam frame, or replace it with your own Google Maps screenshot.</span>

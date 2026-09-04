@@ -767,6 +767,65 @@ def update_photo_stop(photo_id, payload):
     }
 
 
+def create_route_photo_stop(route_id, payload):
+    route_id = str(route_id or "").strip()
+    if not route_id:
+        raise ValueError("Route id is required.")
+
+    photo_id = str(payload.get("id") or uuid4()).strip()
+    step = int(payload.get("step") or 1)
+    title = str(payload.get("title", "Untitled stop")).strip() or "Untitled stop"
+    instruction = str(payload.get("instruction", "")).strip()
+    notes = str(payload.get("notes", "")).strip()
+    image = str(payload.get("image", "")).strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+
+    if not image:
+        raise ValueError("Photo cue image is required.")
+    if latitude is not None and not -90 <= latitude <= 90:
+        raise ValueError("Invalid photo latitude.")
+    if longitude is not None and not -180 <= longitude <= 180:
+        raise ValueError("Invalid photo longitude.")
+
+    with connect_db() as db:
+        route = db.execute("SELECT id FROM routes WHERE id = ?", (route_id,)).fetchone()
+        if not route:
+            raise ValueError("Route not found.")
+
+        db.execute(
+            """
+            INSERT INTO photo_stops (
+              id, route_id, step, title, instruction, notes,
+              image, latitude, longitude, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (photo_id, route_id, step, title, instruction, notes, image, latitude, longitude),
+        )
+
+        row = db.execute(
+            """
+            SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
+            FROM photo_stops
+            WHERE id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+
+    return {
+        "id": row["id"],
+        "routeId": row["route_id"],
+        "step": row["step"],
+        "title": row["title"],
+        "instruction": row["instruction"],
+        "notes": row["notes"],
+        "image": row["image"],
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+    }
+
+
 def academy_answer_for_photo(photo):
     instruction = str(photo["instruction"] or "").strip()
     title = str(photo["title"] or "").strip()
@@ -4647,6 +4706,20 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
     def handle_post(self):
         path = urlparse(self.path).path
+        route_photo_prefix = "/api/routes/"
+        route_photo_suffix = "/photo-stops"
+
+        if path.startswith(route_photo_prefix) and path.endswith(route_photo_suffix):
+            try:
+                route_id = unquote(path[len(route_photo_prefix):-len(route_photo_suffix)]).strip()
+                if not route_id or "/" in route_id:
+                    raise ValueError("A valid route ID is required.")
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                self.send_json({"ok": True, "photo": create_route_photo_stop(route_id, payload)})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
 
         if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/routes/clean", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
             self.send_error(404, "Not found")

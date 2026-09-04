@@ -174,12 +174,15 @@ const dashcamVideoInput = document.querySelector("#dashcamVideoInput");
 const dashcamVideo = document.querySelector("#dashcamVideo");
 const dashcamStartTime = document.querySelector("#dashcamStartTime");
 const dashcamStartTimeHelp = document.querySelector("#dashcamStartTimeHelp");
+const dashcamTimeShiftButtons = document.querySelectorAll("[data-dashcam-time-shift]");
 const dashcamTimeZone = document.querySelector("#dashcamTimeZone");
 const dashcamCaptureButton = document.querySelector("#dashcamCaptureButton");
 const dashcamStatus = document.querySelector("#dashcamStatus");
 const dashcamPreview = document.querySelector("#dashcamPreview");
 const dashcamCueTitle = document.querySelector("#dashcamCueTitle");
 const dashcamCueInstruction = document.querySelector("#dashcamCueInstruction");
+const dashcamCueLatitude = document.querySelector("#dashcamCueLatitude");
+const dashcamCueLongitude = document.querySelector("#dashcamCueLongitude");
 const dashcamSaveButton = document.querySelector("#dashcamSaveButton");
 const dashcamImageOptions = document.querySelector("#dashcamImageOptions");
 const dashcamUseFrameButton = document.querySelector("#dashcamUseFrameButton");
@@ -206,6 +209,7 @@ const locationCueList = document.querySelector("#locationCueList");
 
 let routes = [];
 let locationCues = [];
+let dashcamAlignmentCorrection = null;
 let pendingLocationCueImage = "";
 let map;
 let mapMarkers = [];
@@ -1095,22 +1099,35 @@ snapCueToRouteButton?.addEventListener("click", () => {
 });
 
 dashcamRouteSelect?.addEventListener("change", () => {
+  clearDashcamAlignmentCorrection();
   updateDashcamStatus();
   updateDashcamTimeGuidance();
 });
 
 dashcamVideoInput?.addEventListener("change", () => {
+  clearDashcamAlignmentCorrection();
   loadDashcamVideoFile();
 });
 
 dashcamTimeZone?.addEventListener("change", () => {
+  clearDashcamAlignmentCorrection();
   updateDashcamStatus();
   updateDashcamTimeGuidance();
 });
 
 dashcamStartTime?.addEventListener("input", () => {
+  clearDashcamAlignmentCorrection();
   updateDashcamTimeGuidance();
 });
+
+dashcamTimeShiftButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    shiftDashcamStartTime(Number(button.dataset.dashcamTimeShift));
+  });
+});
+
+dashcamCueLatitude?.addEventListener("input", updateDashcamCueCoordinatesFromFields);
+dashcamCueLongitude?.addEventListener("input", updateDashcamCueCoordinatesFromFields);
 
 dashcamVideo?.addEventListener("loadedmetadata", () => {
   updateDashcamTimeGuidance();
@@ -1358,6 +1375,25 @@ async function savePhotoStop(photo) {
 
   if (!response.ok || !result.ok) {
     throw new Error(result.error || "Could not update this photo cue in the database.");
+  }
+
+  return result.photo;
+}
+
+async function createRoutePhotoStop(routeId, photo) {
+  const response = await fetch(`${ROUTES_API}/${encodeURIComponent(routeId)}/photo-stops`, {
+    method: "POST",
+    headers: storageHeaders({
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    }),
+    cache: "no-store",
+    body: JSON.stringify(photo)
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Could not save this dashcam cue to the database.");
   }
 
   return result.photo;
@@ -1862,6 +1898,25 @@ function formatDashcamDuration(seconds) {
     : `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
+function shiftDashcamStartTime(seconds) {
+  if (!dashcamStartTime || !Number.isFinite(seconds) || seconds === 0) {
+    return;
+  }
+
+  const currentTimestamp = parseDateTimeInZone(dashcamStartTime.value, getDashcamTimeZone());
+  if (!Number.isFinite(currentTimestamp)) {
+    updateDashcamStatus("Enter a valid video start date and time before fine tuning alignment.", true);
+    return;
+  }
+
+  const adjustedTimestamp = currentTimestamp + seconds * 1000;
+  dashcamStartTime.value = formatDateTimeForZone(new Date(adjustedTimestamp), getDashcamTimeZone());
+  clearDashcamAlignmentCorrection();
+  updateDashcamTimeGuidance();
+  const direction = seconds < 0 ? "earlier" : "later";
+  updateDashcamStatus(`Video start time moved ${formatDashcamDuration(Math.abs(seconds))} ${direction}. Capture the same frame again to check the matched coordinate.`);
+}
+
 function updateDashcamTimeGuidance() {
   if (!dashcamStartTime || !dashcamStartTimeHelp) {
     return;
@@ -1965,6 +2020,111 @@ function loadDashcamVideoFile() {
   updateDashcamStatus("Video loaded. Enter the video start time, play it, pause at the landmark, then capture the frame.");
 }
 
+function clearDashcamAlignmentCorrection() {
+  dashcamAlignmentCorrection = null;
+}
+
+function getDashcamAlignmentKey() {
+  return {
+    routeId: dashcamRouteSelect?.value || "",
+    videoName: dashcamVideoInput?.files?.[0]?.name || "",
+    videoStartTime: dashcamStartTime?.value || "",
+    timeZone: getDashcamTimeZone()
+  };
+}
+
+function isDashcamAlignmentCurrent(correction) {
+  if (!correction) {
+    return false;
+  }
+
+  const key = getDashcamAlignmentKey();
+  return correction.routeId === key.routeId &&
+    correction.videoName === key.videoName &&
+    correction.videoStartTime === key.videoStartTime &&
+    correction.timeZone === key.timeZone;
+}
+
+function getCurrentDashcamAlignmentCorrection() {
+  return isDashcamAlignmentCurrent(dashcamAlignmentCorrection)
+    ? dashcamAlignmentCorrection
+    : null;
+}
+
+function formatSignedDashcamSeconds(milliseconds) {
+  const seconds = Math.round(milliseconds / 1000);
+  const sign = seconds >= 0 ? "+" : "-";
+  return `${sign}${formatDashcamDuration(Math.abs(seconds))}`;
+}
+
+function findNearestDashcamRoutePoint(route, latitude, longitude) {
+  const points = route?.recordedTrackPoints || [];
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || points.length === 0) {
+    return null;
+  }
+
+  let nearest = null;
+  let nearestDistance = Infinity;
+  points.forEach((point) => {
+    if (!Number.isFinite(point.latitude) || !Number.isFinite(point.longitude)) {
+      return;
+    }
+
+    const distance = haversineDistance([latitude, longitude], [point.latitude, point.longitude]);
+    if (distance < nearestDistance) {
+      nearest = point;
+      nearestDistance = distance;
+    }
+  });
+
+  return nearest
+    ? { point: nearest, distanceMeters: nearestDistance }
+    : null;
+}
+
+function learnDashcamAlignmentFromCueCorrection(latitude, longitude) {
+  const route = getDashcamRoute();
+  const rawTargetTimestamp = Number(dashcamPreview?.dataset.rawTargetTimestamp);
+  const originalLatitude = parseOptionalNumber(dashcamPreview?.dataset.matchedLatitude);
+  const originalLongitude = parseOptionalNumber(dashcamPreview?.dataset.matchedLongitude);
+
+  if (!route || !Number.isFinite(rawTargetTimestamp)) {
+    return "";
+  }
+
+  const alignmentKey = getDashcamAlignmentKey();
+  const nearest = findNearestDashcamRoutePoint(route, latitude, longitude);
+  if (nearest?.point && Number.isFinite(nearest.point.timestamp) && nearest.distanceMeters <= 350) {
+    const timeOffsetMs = nearest.point.timestamp - rawTargetTimestamp;
+    dashcamAlignmentCorrection = {
+      ...alignmentKey,
+      type: "time",
+      timeOffsetMs,
+      anchorLatitude: latitude,
+      anchorLongitude: longitude,
+      anchorDistanceMeters: nearest.distanceMeters,
+      learnedAt: Date.now()
+    };
+    return `TaxiBo learned a ${formatSignedDashcamSeconds(timeOffsetMs)} video/GPS time correction for the next captures.`;
+  }
+
+  if (Number.isFinite(originalLatitude) && Number.isFinite(originalLongitude)) {
+    dashcamAlignmentCorrection = {
+      ...alignmentKey,
+      type: "position",
+      timeOffsetMs: 0,
+      latitudeOffset: latitude - originalLatitude,
+      longitudeOffset: longitude - originalLongitude,
+      anchorLatitude: latitude,
+      anchorLongitude: longitude,
+      learnedAt: Date.now()
+    };
+    return "TaxiBo learned a position correction for the next captures.";
+  }
+
+  return "";
+}
+
 function getDashcamMatchedPoint() {
   const route = getDashcamRoute();
   const points = route?.recordedTrackPoints || [];
@@ -1982,7 +2142,9 @@ function getDashcamMatchedPoint() {
     throw new Error("Load and pause a dashcam video first.");
   }
 
-  const targetTimestamp = videoStartMs + dashcamVideo.currentTime * 1000;
+  const rawTargetTimestamp = videoStartMs + dashcamVideo.currentTime * 1000;
+  const alignment = getCurrentDashcamAlignmentCorrection();
+  const targetTimestamp = rawTargetTimestamp + (alignment?.type === "time" ? alignment.timeOffsetMs : 0);
   const routeStartTimestamp = points[0].timestamp;
   const routeEndTimestamp = points.at(-1).timestamp;
   let nearest = points[0];
@@ -2014,9 +2176,19 @@ function getDashcamMatchedPoint() {
     }
   }
 
+  if (alignment?.type === "position") {
+    matchedPoint = {
+      ...matchedPoint,
+      latitude: matchedPoint.latitude + (alignment.latitudeOffset || 0),
+      longitude: matchedPoint.longitude + (alignment.longitudeOffset || 0)
+    };
+  }
+
   return {
     point: matchedPoint,
+    rawTargetTimestamp,
     targetTimestamp,
+    alignmentApplied: Boolean(alignment),
     deltaSeconds: nearestDelta / 1000,
     outsideRouteSeconds: targetTimestamp < routeStartTimestamp
       ? (routeStartTimestamp - targetTimestamp) / 1000
@@ -2041,10 +2213,59 @@ function syncDashcamMatchToCueEditor(route, point, captureMessage) {
 
   photoLatitudeInput.value = point.latitude.toFixed(6);
   photoLongitudeInput.value = point.longitude.toFixed(6);
+  setDashcamCoordinateFields(point.latitude, point.longitude);
   setMapPickMarker([point.latitude, point.longitude]);
   setCueCoordinateMessage(captureMessage);
   setCueSnapButtonMode("dashcam");
   drawRouteMap(route);
+}
+
+function setDashcamCoordinateFields(latitude, longitude) {
+  if (dashcamCueLatitude) {
+    dashcamCueLatitude.value = Number.isFinite(Number(latitude)) ? Number(latitude).toFixed(6) : "";
+  }
+  if (dashcamCueLongitude) {
+    dashcamCueLongitude.value = Number.isFinite(Number(longitude)) ? Number(longitude).toFixed(6) : "";
+  }
+}
+
+function updateDashcamCueCoordinatesFromFields() {
+  const latitude = parseOptionalNumber(dashcamCueLatitude?.value);
+  const longitude = parseOptionalNumber(dashcamCueLongitude?.value);
+  const image = dashcamPreview?.dataset.image || dashcamPreview?.dataset.capturedImage;
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    if (dashcamSaveButton) {
+      dashcamSaveButton.disabled = true;
+    }
+    updateDashcamStatus("Enter a valid cue latitude and longitude before saving.", true);
+    return;
+  }
+
+  if (latitude < 22.13 || latitude > 22.58 || longitude < 113.8 || longitude > 114.45) {
+    if (dashcamSaveButton) {
+      dashcamSaveButton.disabled = true;
+    }
+    updateDashcamStatus("Cue coordinates are outside the Hong Kong working area.", true);
+    return;
+  }
+
+  if (dashcamPreview) {
+    dashcamPreview.dataset.latitude = String(latitude);
+    dashcamPreview.dataset.longitude = String(longitude);
+  }
+  photoLatitudeInput.value = latitude.toFixed(6);
+  photoLongitudeInput.value = longitude.toFixed(6);
+  setMapPickMarker([latitude, longitude]);
+  if (getDashcamRoute()) {
+    drawRouteMap(getDashcamRoute());
+  }
+  if (dashcamSaveButton) {
+    dashcamSaveButton.disabled = !image;
+  }
+  const alignmentMessage = learnDashcamAlignmentFromCueCorrection(latitude, longitude);
+  const suffix = alignmentMessage ? ` ${alignmentMessage}` : "";
+  updateDashcamStatus(`Cue position adjusted to ${latitude.toFixed(6)}, ${longitude.toFixed(6)}.${suffix}`);
 }
 
 function captureDashcamCueFrame() {
@@ -2055,7 +2276,15 @@ function captureDashcamCueFrame() {
       throw new Error("Load the dashcam video and wait until the preview appears.");
     }
 
-    const { point, deltaSeconds, outsideRouteSeconds, outsideRouteDirection } = getDashcamMatchedPoint();
+    const {
+      point,
+      rawTargetTimestamp,
+      targetTimestamp,
+      deltaSeconds,
+      outsideRouteSeconds,
+      outsideRouteDirection,
+      alignmentApplied
+    } = getDashcamMatchedPoint();
     const canvas = document.createElement("canvas");
     canvas.width = dashcamVideo.videoWidth;
     canvas.height = dashcamVideo.videoHeight;
@@ -2068,13 +2297,18 @@ function captureDashcamCueFrame() {
     dashcamPreview.dataset.image = image;
     dashcamPreview.dataset.capturedImage = image;
     dashcamPreview.dataset.imageSource = "dashcam";
+    dashcamPreview.dataset.rawTargetTimestamp = String(rawTargetTimestamp);
+    dashcamPreview.dataset.targetTimestamp = String(targetTimestamp);
     dashcamPreview.dataset.deltaSeconds = String(deltaSeconds);
 
     if (outsideRouteSeconds > 0) {
       dashcamPreview.dataset.latitude = "";
       dashcamPreview.dataset.longitude = "";
+      dashcamPreview.dataset.matchedLatitude = "";
+      dashcamPreview.dataset.matchedLongitude = "";
+      setDashcamCoordinateFields(null, null);
       dashcamSaveButton.disabled = true;
-      dashcamImageOptions.hidden = true;
+      dashcamImageOptions.hidden = false;
       const timingMessage = outsideRouteDirection === "before"
         ? `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} BEFORE the recorded route starts. Move the video forward.`
         : `This frame occurs ${formatDashcamDuration(outsideRouteSeconds)} AFTER the recorded route ends. Move the video backward.`;
@@ -2085,17 +2319,24 @@ function captureDashcamCueFrame() {
     if (deltaSeconds > 300) {
       dashcamPreview.dataset.latitude = "";
       dashcamPreview.dataset.longitude = "";
+      dashcamPreview.dataset.matchedLatitude = "";
+      dashcamPreview.dataset.matchedLongitude = "";
+      setDashcamCoordinateFields(null, null);
       dashcamSaveButton.disabled = true;
-      dashcamImageOptions.hidden = true;
+      dashcamImageOptions.hidden = false;
       updateDashcamStatus(`Frame captured for preview. Its time is inside the route period, but the nearest saved GPS sample is ${formatDashcamDuration(deltaSeconds)} away. Saving is disabled because the GPS recording has a large time gap.`, true);
       return;
     }
 
     dashcamPreview.dataset.latitude = String(point.latitude);
     dashcamPreview.dataset.longitude = String(point.longitude);
+    dashcamPreview.dataset.matchedLatitude = String(point.latitude);
+    dashcamPreview.dataset.matchedLongitude = String(point.longitude);
+    setDashcamCoordinateFields(point.latitude, point.longitude);
     dashcamImageOptions.hidden = false;
     dashcamSaveButton.disabled = false;
-    const captureMessage = `Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).`;
+    const alignmentText = alignmentApplied ? " Alignment correction applied." : "";
+    const captureMessage = `Captured video ${formatDashcamDuration(dashcamVideo.currentTime)} and matched it to ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)} (${Math.round(deltaSeconds)} seconds from nearest GPS sample).${alignmentText} If this is not the real cue location, fine tune the video time or edit cue latitude/longitude before saving.`;
     updateDashcamStatus(captureMessage);
     syncDashcamMatchToCueEditor(getDashcamRoute(), point, captureMessage);
   } catch (error) {
@@ -2114,9 +2355,14 @@ function resetDashcamImageOptions() {
   dashcamPreview.dataset.imageSource = "";
   dashcamPreview.dataset.latitude = "";
   dashcamPreview.dataset.longitude = "";
+  dashcamPreview.dataset.matchedLatitude = "";
+  dashcamPreview.dataset.matchedLongitude = "";
+  dashcamPreview.dataset.rawTargetTimestamp = "";
+  dashcamPreview.dataset.targetTimestamp = "";
   dashcamPreview.dataset.deltaSeconds = "";
+  setDashcamCoordinateFields(null, null);
   if (dashcamImageOptions) {
-    dashcamImageOptions.hidden = true;
+    dashcamImageOptions.hidden = false;
   }
   if (dashcamMapImageInput) {
     dashcamMapImageInput.value = "";
@@ -2185,8 +2431,8 @@ async function useDashcamReplacementImage(file) {
 async function saveDashcamCuePhoto() {
   const route = getDashcamRoute();
   const image = dashcamPreview?.dataset.image;
-  const latitude = parseOptionalNumber(dashcamPreview?.dataset.latitude);
-  const longitude = parseOptionalNumber(dashcamPreview?.dataset.longitude);
+  const latitude = parseOptionalNumber(dashcamCueLatitude?.value) ?? parseOptionalNumber(dashcamPreview?.dataset.latitude);
+  const longitude = parseOptionalNumber(dashcamCueLongitude?.value) ?? parseOptionalNumber(dashcamPreview?.dataset.longitude);
 
   if (!route || !image || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     updateDashcamStatus("Capture a dashcam frame before saving it as a cue.", true);
@@ -2214,20 +2460,25 @@ async function saveDashcamCuePhoto() {
   updateDashcamStatus("Saving dashcam cue photo to the route database...");
 
   try {
-    route.photos.push(cue);
+    const savedCue = normalizeImportedPhoto(await createRoutePhotoStop(route.id, cue));
+    route.photos.push(savedCue);
     route.photos.sort((a, b) => a.step - b.step);
-    await saveRoutes();
     photoRouteSelect.value = route.id;
-    renderPhotoStepOptions(route.id, cue.step);
+    renderPhotoStepOptions(route.id, savedCue.step);
     displayRoute(route);
     renderDashcamRouteSelect();
     dashcamCueTitle.value = "";
     dashcamCueInstruction.value = "";
     dashcamPreview.hidden = true;
     resetDashcamImageOptions();
-    updateDashcamStatus(`Saved "${cue.title}" as step ${cue.step} on the recorded route line.`);
+    updateDataFileStatus();
+    updateRouteLibraryStatus(
+      getTaxiBoStorageMode() === "local"
+        ? "Saved cue to local SQLite. Cloud sync is pending."
+        : "Saved cue to PostgreSQL."
+    );
+    updateDashcamStatus(`Saved "${savedCue.title}" as step ${savedCue.step} on the recorded route line.`);
   } catch (error) {
-    route.photos = route.photos.filter((photo) => photo.id !== cue.id);
     updateDashcamStatus(error.message || "Could not save this dashcam cue.", true);
   } finally {
     dashcamSaveButton.disabled = !dashcamPreview?.dataset.image;
