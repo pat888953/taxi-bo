@@ -1,0 +1,25 @@
+{
+  "name": "taxibo-street-map",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Hong Kong-only TaxiBoStreetMap recorder with a PostGIS-ready backend.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "osm:download": "powershell -ExecutionPolicy Bypass -File scripts/download-hk-osm.ps1",
+    "osm:import": "powershell -ExecutionPolicy Bypass -File scripts/import-hk-osm.ps1",
+    "osm:check": "powershell -ExecutionPolicy Bypass -File scripts/check-osm-import.ps1",
+    "valhalla:prepare": "powershell -ExecutionPolicy Bypass -File scripts/prepare-valhalla.ps1",
+    "valhalla:start": "powershell -ExecutionPolicy Bypass -File scripts/start-valhalla.ps1",
+    "valhalla:check": "powershell -ExecutionPolicy Bypass -File scripts/check-valhalla.ps1",
+    "valhalla:trace": "powershell -ExecutionPolicy Bypass -File scripts/test-valhalla-trace.ps1",
+    "db:migrate": "powershell -ExecutionPolicy Bypass -File scripts/migrate-db.ps1"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,4854 @@
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import base64
+from contextvars import ContextVar
+from io import BytesIO
+import json
+import math
+import os
+import random
+import re
+import sys
+import sqlite3
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from uuid import uuid4
+
+
+ROOT = Path(__file__).resolve().parent
+DB_PATH = ROOT / "taxi_bo.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USING_POSTGRES = bool(DATABASE_URL)
+STARTUP_DATABASE_ERROR = ""
+ACTIVE_STORAGE_MODE = ContextVar("ACTIVE_STORAGE_MODE", default="cloud" if USING_POSTGRES else "local")
+HTTP_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
+}
+
+HONG_KONG_TUNNEL_OPTIONS = (
+    ("hung-hom", "Hung Hom Tunnel", {"latitude": 22.3029, "longitude": 114.1815}),
+    ("western", "Western Tunnel", {"latitude": 22.3038, "longitude": 114.1548}),
+    ("eastern", "Eastern Tunnel", {"latitude": 22.2963, "longitude": 114.2312}),
+)
+KNOWN_HONG_KONG_PLACES = (
+    {
+        "aliases": ("香港仔中心", "aberdeen centre", "aberdeen center"),
+        "label": "香港仔中心 Aberdeen Centre, Aberdeen, Hong Kong",
+        "latitude": 22.24861,
+        "longitude": 114.15396,
+    },
+)
+WESTERN_TUNNEL_SOUTH_APPROACH = [22.2890, 114.1442]
+WESTERN_TUNNEL_NORTH_APPROACH = [22.3044, 114.1602]
+WESTERN_TUNNEL_SPINE = (
+    [22.2893869, 114.1436288],
+    [22.2914, 114.1466],
+    [22.2942, 114.1500],
+    [22.2974, 114.1536],
+    [22.3008, 114.1570],
+    [22.3043807, 114.1602283],
+)
+HUNG_HOM_NORTHBOUND_ANCHORS = (
+    {
+        "latitude": 22.2826209,
+        "longitude": 114.1813300,
+        "label": "Hung Hom Tunnel northbound — Hong Kong entrance",
+    },
+    {
+        "latitude": 22.3032138,
+        "longitude": 114.1805407,
+        "label": "Hung Hom Tunnel northbound — Kowloon exit",
+    },
+)
+HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR = (
+    [22.2826209, 114.1813300],
+    [22.2841137, 114.1831091],
+    [22.2843151, 114.1831714],
+    [22.3010198, 114.1803874],
+    [22.3012854, 114.1802959],
+    [22.3032138, 114.1805407],
+)
+HUNG_HOM_NORTHBOUND_RECORDING_ID = "8dffe164-c5af-459e-b2f5-f3c4cd17ab82"
+HUNG_HOM_NORTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel northbound corridor"
+HUNG_HOM_SOUTHBOUND_ANCHORS = (
+    {
+        "latitude": 22.3037851,
+        "longitude": 114.1809201,
+        "label": "Hung Hom Tunnel southbound — Kowloon entrance",
+    },
+    {
+        "latitude": 22.2822176,
+        "longitude": 114.1816588,
+        "label": "Hung Hom Tunnel southbound — Hong Kong exit",
+    },
+)
+HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR = (
+    [22.3296852, 114.1554362],
+    [22.3262593, 114.1603956],
+    [22.3234935, 114.1650393],
+    [22.3226425, 114.1684772],
+    [22.3192160, 114.1694827],
+    [22.3152262, 114.1701907],
+    [22.3111711, 114.1710507],
+    [22.3074268, 114.1735832],
+    [22.3065012, 114.1802273],
+    [22.3037851, 114.1809201],
+    [22.2822176, 114.1816588],
+    [22.2799883, 114.1779067],
+)
+HUNG_HOM_SOUTHBOUND_RECORDING_ID = "aeb3aa6b-06ce-4eb9-9545-a983311d6c17"
+HUNG_HOM_SOUTHBOUND_RECORDING_NAME = "Recorded Hung Hom Tunnel southbound corridor"
+HONG_KONG_HARBOUR_DIVIDE = 22.295
+HYBRID_MIN_PROMOTION_COVERAGE = 0.35
+HYBRID_MAX_DISTANCE_RATIO = 1.25
+RECORDED_SEED_CONNECTOR_MIN_GAP_METERS = 450
+ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR = {
+    "latitude": 22.316859,
+    "longitude": 114.1599028,
+    "label": "One SilverSea left-turn arrival anchor",
+}
+ONE_SILVERSEA_CHERRY_STREET_CONNECTOR = (
+    [22.316859, 114.1599028],
+    [22.31722, 114.15972],
+    [22.31746, 114.15905],
+    [22.31754, 114.15825],
+    [22.31758, 114.15735],
+    [22.31761, 114.15655],
+    [22.31770, 114.15615],
+    [22.3177593, 114.1558841],
+)
+HDE_COMPLEX_ROAD_ZONES = (
+    {
+        "id": "hung-hom-interchange",
+        "name": "Hung Hom tunnel and flyover interchange",
+        "latitude": 22.3048,
+        "longitude": 114.1812,
+        "radius_meters": 650,
+    },
+    {
+        "id": "cross-harbour-hk-portal",
+        "name": "Cross-Harbour Tunnel Hong Kong portal",
+        "latitude": 22.2828,
+        "longitude": 114.1815,
+        "radius_meters": 450,
+    },
+)
+HONG_KONG_ROUTE_BOUNDS = {
+    "min_latitude": 21.9,
+    "max_latitude": 22.6,
+    "min_longitude": 113.8,
+    "max_longitude": 114.5,
+}
+MAX_OCR_IMAGE_BYTES = 12 * 1024 * 1024
+OCR_ENGINE = None
+
+
+class DatabaseConnection:
+    def __init__(self, connection, postgres=False):
+        self.connection = connection
+        self.postgres = postgres
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, error_type, error, traceback):
+        try:
+            if error_type is None:
+                self.connection.commit()
+            else:
+                self.connection.rollback()
+        finally:
+            self.connection.close()
+
+    def execute(self, query, parameters=()):
+        if self.postgres:
+            query = query.replace("?", "%s")
+        return self.connection.execute(query, parameters)
+
+    def executescript(self, script):
+        if not self.postgres:
+            return self.connection.executescript(script)
+
+        script = script.replace("DEFAULT CURRENT_TIMESTAMP", "DEFAULT (CURRENT_TIMESTAMP::text)")
+
+        for statement in script.split(";"):
+            statement = statement.strip()
+            if statement:
+                self.connection.execute(statement)
+
+
+def connect_db(mode=None):
+    storage_mode = mode or ACTIVE_STORAGE_MODE.get()
+
+    if USING_POSTGRES and storage_mode != "local":
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as error:
+            raise RuntimeError(
+                "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
+            ) from error
+
+        connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return DatabaseConnection(connection, postgres=True)
+
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    return DatabaseConnection(connection)
+
+
+def initialize_db(mode=None):
+    with connect_db(mode) as db:
+        db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS routes (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              variant TEXT NOT NULL,
+              start TEXT NOT NULL,
+              via TEXT NOT NULL DEFAULT '',
+              destination TEXT NOT NULL,
+              time_window TEXT NOT NULL DEFAULT '',
+              traffic_pattern TEXT NOT NULL DEFAULT '',
+              notes TEXT NOT NULL DEFAULT '',
+              start_latitude REAL,
+              start_longitude REAL,
+              destination_latitude REAL,
+              destination_longitude REAL,
+              route_type TEXT NOT NULL DEFAULT 'standard',
+              route_geometry TEXT NOT NULL DEFAULT '[]',
+              route_sections TEXT NOT NULL DEFAULT '[]',
+              recorded_track_points TEXT NOT NULL DEFAULT '[]',
+              route_distance_meters REAL,
+              route_duration_seconds REAL,
+              position INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS photo_stops (
+              id TEXT PRIMARY KEY,
+              route_id TEXT NOT NULL,
+              step INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              instruction TEXT NOT NULL DEFAULT '',
+              notes TEXT NOT NULL DEFAULT '',
+              image TEXT NOT NULL,
+              latitude REAL,
+              longitude REAL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_photo_stops_route_step
+              ON photo_stops(route_id, step);
+
+            CREATE TABLE IF NOT EXISTS location_cues (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              instruction TEXT NOT NULL DEFAULT '',
+              notes TEXT NOT NULL DEFAULT '',
+              image TEXT NOT NULL,
+              latitude REAL NOT NULL,
+              longitude REAL NOT NULL,
+              activation_radius_meters REAL NOT NULL DEFAULT 100,
+              direction_mode TEXT NOT NULL DEFAULT 'any',
+              heading_degrees REAL,
+              confidence REAL NOT NULL DEFAULT 1,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_location_cues_location
+              ON location_cues(latitude, longitude);
+
+            CREATE TABLE IF NOT EXISTS proven_corridors (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              direction TEXT NOT NULL DEFAULT 'unknown',
+              source_route_id TEXT NOT NULL,
+              geometry TEXT NOT NULL DEFAULT '[]',
+              distance_meters REAL NOT NULL DEFAULT 0,
+              confidence REAL NOT NULL DEFAULT 0.8,
+              verification_count INTEGER NOT NULL DEFAULT 1,
+              status TEXT NOT NULL DEFAULT 'proven',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_proven_corridors_source
+              ON proven_corridors(source_route_id);
+
+            CREATE TABLE IF NOT EXISTS hybrid_engine_issues (
+              id TEXT PRIMARY KEY,
+              fingerprint TEXT NOT NULL UNIQUE,
+              title TEXT NOT NULL,
+              issue_type TEXT NOT NULL DEFAULT 'route-review',
+              severity TEXT NOT NULL DEFAULT 'medium',
+              status TEXT NOT NULL DEFAULT 'open',
+              start_label TEXT NOT NULL DEFAULT '',
+              destination_label TEXT NOT NULL DEFAULT '',
+              via_label TEXT NOT NULL DEFAULT '',
+              latitude REAL,
+              longitude REAL,
+              message TEXT NOT NULL DEFAULT '',
+              engine_state TEXT NOT NULL DEFAULT 'draft',
+              confidence REAL NOT NULL DEFAULT 0,
+              recording_needed INTEGER NOT NULL DEFAULT 0,
+              occurrence_count INTEGER NOT NULL DEFAULT 1,
+              route_snapshot TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              resolved_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_hybrid_engine_issues_status
+              ON hybrid_engine_issues(status, severity, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS incoming_orders (
+              id TEXT PRIMARY KEY,
+              pickup TEXT NOT NULL DEFAULT '',
+              destination TEXT NOT NULL,
+              fare TEXT NOT NULL DEFAULT '',
+              waiting_time TEXT NOT NULL DEFAULT '',
+              lock_status TEXT NOT NULL DEFAULT 'unknown',
+              captured_at TEXT NOT NULL DEFAULT '',
+              offer_fingerprint TEXT NOT NULL DEFAULT '',
+              raw_text TEXT NOT NULL DEFAULT '',
+              source TEXT NOT NULL DEFAULT 'phone',
+              consumed_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_incoming_orders_pending
+              ON incoming_orders(consumed_at, created_at);
+
+            CREATE TABLE IF NOT EXISTS accepted_trips (
+              id TEXT PRIMARY KEY,
+              source TEXT NOT NULL DEFAULT '',
+              source_order_id TEXT NOT NULL DEFAULT '',
+              pickup TEXT NOT NULL,
+              destination TEXT NOT NULL,
+              accepted_at TEXT NOT NULL DEFAULT '',
+              consumed_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_accepted_trips_pending
+              ON accepted_trips(consumed_at, created_at);
+
+            CREATE TABLE IF NOT EXISTS route_recordings (
+              id TEXT PRIMARY KEY,
+              source_route_id TEXT NOT NULL DEFAULT '',
+              route_name TEXT NOT NULL DEFAULT '',
+              start_label TEXT NOT NULL DEFAULT '',
+              destination TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'recording',
+              points_json TEXT NOT NULL DEFAULT '[]',
+              distance_meters REAL NOT NULL DEFAULT 0,
+              duration_seconds REAL NOT NULL DEFAULT 0,
+              point_count INTEGER NOT NULL DEFAULT 0,
+              start_latitude REAL,
+              start_longitude REAL,
+              end_latitude REAL,
+              end_longitude REAL,
+              started_at TEXT NOT NULL,
+              ended_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_route_recordings_started
+              ON route_recordings(started_at DESC);
+
+            CREATE TABLE IF NOT EXISTS speed_warnings (
+              id TEXT PRIMARY KEY,
+              label TEXT NOT NULL,
+              latitude REAL NOT NULL,
+              longitude REAL NOT NULL,
+              speed_limit_mph REAL NOT NULL,
+              radius_meters REAL NOT NULL DEFAULT 600,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_speed_warnings_location
+              ON speed_warnings(latitude, longitude);
+
+            CREATE TABLE IF NOT EXISTS academy_attempts (
+              id TEXT PRIMARY KEY,
+              photo_stop_id TEXT NOT NULL,
+              route_id TEXT NOT NULL DEFAULT '',
+              cue_type TEXT NOT NULL DEFAULT 'route',
+              location_cue_id TEXT NOT NULL DEFAULT '',
+              selected_answer TEXT NOT NULL,
+              correct_answer TEXT NOT NULL,
+              is_correct INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_academy_attempts_photo_stop
+              ON academy_attempts(photo_stop_id, created_at DESC);
+            """
+        )
+        ensure_route_columns(db)
+        ensure_incoming_order_columns(db)
+        ensure_academy_attempt_columns(db)
+
+
+def ensure_route_columns(db):
+    if db.postgres:
+        rows = db.execute(
+            """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'routes'
+            """
+        ).fetchall()
+    else:
+        rows = db.execute("PRAGMA table_info(routes)").fetchall()
+
+    existing = {row["name"] for row in rows}
+    columns = {
+        "start_latitude": "REAL",
+        "start_longitude": "REAL",
+        "via": "TEXT NOT NULL DEFAULT ''",
+        "destination_latitude": "REAL",
+        "destination_longitude": "REAL",
+        "route_type": "TEXT NOT NULL DEFAULT 'standard'",
+        "route_geometry": "TEXT NOT NULL DEFAULT '[]'",
+        "route_sections": "TEXT NOT NULL DEFAULT '[]'",
+        "recorded_track_points": "TEXT NOT NULL DEFAULT '[]'",
+        "route_distance_meters": "REAL",
+        "route_duration_seconds": "REAL",
+    }
+
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE routes ADD COLUMN {name} {definition}")
+
+
+def ensure_incoming_order_columns(db):
+    if db.postgres:
+        rows = db.execute(
+            """
+            SELECT column_name AS name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'incoming_orders'
+            """
+        ).fetchall()
+    else:
+        rows = db.execute("PRAGMA table_info(incoming_orders)").fetchall()
+
+    existing = {row["name"] for row in rows}
+    columns = {
+        "pickup": "TEXT NOT NULL DEFAULT ''",
+        "fare": "TEXT NOT NULL DEFAULT ''",
+        "waiting_time": "TEXT NOT NULL DEFAULT ''",
+        "lock_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        "captured_at": "TEXT NOT NULL DEFAULT ''",
+        "offer_fingerprint": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE incoming_orders ADD COLUMN {name} {definition}")
+
+
+def ensure_academy_attempt_columns(db):
+    if db.postgres:
+        rows = db.execute(
+            """
+            SELECT column_name AS name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'academy_attempts'
+            """
+        ).fetchall()
+    else:
+        rows = db.execute("PRAGMA table_info(academy_attempts)").fetchall()
+
+    existing = {row["name"] for row in rows}
+    columns = {
+        "cue_type": "TEXT NOT NULL DEFAULT 'route'",
+        "location_cue_id": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE academy_attempts ADD COLUMN {name} {definition}")
+
+
+def fetch_routes(include_images=True, route_id=None):
+    with connect_db() as db:
+        route_filter = "WHERE id = ?" if route_id else ""
+        route_params = (route_id,) if route_id else ()
+        route_rows = db.execute(
+            f"""
+            SELECT
+              id, name, variant, start, via, destination, time_window, traffic_pattern, notes,
+              start_latitude, start_longitude, destination_latitude, destination_longitude,
+              route_type, route_geometry, route_sections, recorded_track_points,
+              route_distance_meters, route_duration_seconds
+            FROM routes
+            {route_filter}
+            ORDER BY position ASC, updated_at DESC
+            """,
+            route_params,
+        ).fetchall()
+        photo_filter = "WHERE route_id = ?" if route_id else ""
+        photo_params = (route_id,) if route_id else ()
+        photo_rows = db.execute(
+            f"""
+            SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
+            FROM photo_stops
+            {photo_filter}
+            ORDER BY step ASC, created_at ASC
+            """,
+            photo_params,
+        ).fetchall()
+
+    photos_by_route = {}
+    for photo in photo_rows:
+        photos_by_route.setdefault(photo["route_id"], []).append(
+            {
+                "id": photo["id"],
+                "step": photo["step"],
+                "title": photo["title"],
+                "instruction": photo["instruction"],
+                "notes": photo["notes"],
+                "image": photo["image"] if include_images else "",
+                "latitude": photo["latitude"],
+                "longitude": photo["longitude"],
+            }
+        )
+
+    return [
+        {
+            "id": route["id"],
+            "name": route["name"],
+            "variant": route["variant"],
+            "start": route["start"],
+            "via": route["via"],
+            "destination": route["destination"],
+            "timeWindow": route["time_window"],
+            "trafficPattern": route["traffic_pattern"],
+            "notes": route["notes"],
+            "startLatitude": route["start_latitude"],
+            "startLongitude": route["start_longitude"],
+            "destinationLatitude": route["destination_latitude"],
+            "destinationLongitude": route["destination_longitude"],
+            "routeType": route["route_type"],
+            "routeGeometry": json.loads(route["route_geometry"] or "[]"),
+            "routeSections": json.loads(route["route_sections"] or "[]"),
+            "recordedTrackPoints": json.loads(route["recorded_track_points"] or "[]"),
+            "routeDistanceMeters": route["route_distance_meters"],
+            "routeDurationSeconds": route["route_duration_seconds"],
+            "photos": photos_by_route.get(route["id"], []),
+        }
+        for route in route_rows
+    ]
+
+
+def fetch_route(route_id):
+    routes = fetch_routes(include_images=True, route_id=route_id)
+    return routes[0] if routes else None
+
+
+def replace_routes(routes):
+    with connect_db() as db:
+        existing_photo_images = {
+            row["id"]: row["image"]
+            for row in db.execute("SELECT id, image FROM photo_stops").fetchall()
+        }
+        db.execute("DELETE FROM photo_stops")
+        db.execute("DELETE FROM routes")
+
+        for position, route in enumerate(routes):
+            db.execute(
+                """
+                INSERT INTO routes (
+                  id, name, variant, start, via, destination, time_window,
+                  traffic_pattern, notes, start_latitude, start_longitude,
+                  destination_latitude, destination_longitude, route_geometry, recorded_track_points,
+                  route_type, route_sections, route_distance_meters, route_duration_seconds,
+                  position, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    route.get("id", ""),
+                    route.get("name", "Untitled route"),
+                    route.get("variant", "Standard"),
+                    route.get("start", ""),
+                    route.get("via", ""),
+                    route.get("destination", ""),
+                    route.get("timeWindow", ""),
+                    route.get("trafficPattern", ""),
+                    route.get("notes", ""),
+                    route.get("startLatitude"),
+                    route.get("startLongitude"),
+                    route.get("destinationLatitude"),
+                    route.get("destinationLongitude"),
+                    json.dumps(route.get("routeGeometry") or []),
+                    json.dumps(route.get("recordedTrackPoints") or []),
+                    route.get("routeType", "standard"),
+                    json.dumps(route.get("routeSections") or []),
+                    route.get("routeDistanceMeters"),
+                    route.get("routeDurationSeconds"),
+                    position,
+                ),
+            )
+
+            for photo in route.get("photos", []):
+                photo_id = photo.get("id", "")
+                photo_image = photo.get("image", "")
+                if photo_id in existing_photo_images and is_placeholder_photo(photo_image):
+                    photo_image = existing_photo_images[photo_id]
+
+                db.execute(
+                    """
+                    INSERT INTO photo_stops (
+                      id, route_id, step, title, instruction, notes,
+                      image, latitude, longitude, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        photo_id,
+                        route.get("id", ""),
+                        int(photo.get("step") or 1),
+                        photo.get("title", "Untitled stop"),
+                        photo.get("instruction", ""),
+                        photo.get("notes", ""),
+                        photo_image,
+                        photo.get("latitude"),
+                        photo.get("longitude"),
+                    ),
+                )
+
+
+def insert_route(route, after_route_id=None):
+    with connect_db() as db:
+        position = None
+        if after_route_id:
+            row = db.execute("SELECT position FROM routes WHERE id = ?", (after_route_id,)).fetchone()
+            if row:
+                position = int(row["position"]) + 1
+                db.execute(
+                    "UPDATE routes SET position = position + 1 WHERE position >= ?",
+                    (position,),
+                )
+
+        if position is None:
+            row = db.execute("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM routes").fetchone()
+            position = int(row["position"] or 0)
+
+        db.execute(
+            """
+            INSERT INTO routes (
+              id, name, variant, start, via, destination, time_window,
+              traffic_pattern, notes, start_latitude, start_longitude,
+              destination_latitude, destination_longitude, route_geometry, recorded_track_points,
+              route_type, route_sections, route_distance_meters, route_duration_seconds,
+              position, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                route.get("id", ""),
+                route.get("name", "Untitled route"),
+                route.get("variant", "Standard"),
+                route.get("start", ""),
+                route.get("via", ""),
+                route.get("destination", ""),
+                route.get("timeWindow", ""),
+                route.get("trafficPattern", ""),
+                route.get("notes", ""),
+                route.get("startLatitude"),
+                route.get("startLongitude"),
+                route.get("destinationLatitude"),
+                route.get("destinationLongitude"),
+                json.dumps(route.get("routeGeometry") or []),
+                json.dumps(route.get("recordedTrackPoints") or []),
+                route.get("routeType", "standard"),
+                json.dumps(route.get("routeSections") or []),
+                route.get("routeDistanceMeters"),
+                route.get("routeDurationSeconds"),
+                position,
+            ),
+        )
+
+        for photo in route.get("photos", []):
+            db.execute(
+                """
+                INSERT INTO photo_stops (
+                  id, route_id, step, title, instruction, notes,
+                  image, latitude, longitude, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    photo.get("id", ""),
+                    route.get("id", ""),
+                    int(photo.get("step") or 1),
+                    photo.get("title", "Untitled stop"),
+                    photo.get("instruction", ""),
+                    photo.get("notes", ""),
+                    photo.get("image", ""),
+                    photo.get("latitude"),
+                    photo.get("longitude"),
+                ),
+            )
+
+
+def delete_route(route_id):
+    with connect_db() as db:
+        db.execute("DELETE FROM photo_stops WHERE route_id = ?", (route_id,))
+        result = db.execute("DELETE FROM routes WHERE id = ?", (route_id,))
+        return result.rowcount > 0
+
+
+def update_photo_stop(photo_id, payload):
+    photo_id = str(photo_id or "").strip()
+    if not photo_id:
+        raise ValueError("Photo cue id is required.")
+
+    step = int(payload.get("step") or 1)
+    title = str(payload.get("title", "Untitled stop")).strip() or "Untitled stop"
+    instruction = str(payload.get("instruction", "")).strip()
+    notes = str(payload.get("notes", "")).strip()
+    image = str(payload.get("image", "")).strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+
+    if not image:
+        raise ValueError("Photo cue image is required.")
+    if latitude is not None and not -90 <= latitude <= 90:
+        raise ValueError("Invalid photo latitude.")
+    if longitude is not None and not -180 <= longitude <= 180:
+        raise ValueError("Invalid photo longitude.")
+
+    with connect_db() as db:
+        result = db.execute(
+            """
+            UPDATE photo_stops
+            SET step = ?, title = ?, instruction = ?, notes = ?,
+                image = ?, latitude = ?, longitude = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (step, title, instruction, notes, image, latitude, longitude, photo_id),
+        )
+
+        if result.rowcount == 0:
+            raise ValueError("Photo cue was not found in the database.")
+
+        row = db.execute(
+            """
+            SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
+            FROM photo_stops
+            WHERE id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+
+    return {
+        "id": row["id"],
+        "routeId": row["route_id"],
+        "step": row["step"],
+        "title": row["title"],
+        "instruction": row["instruction"],
+        "notes": row["notes"],
+        "image": row["image"],
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+    }
+
+
+def create_route_photo_stop(route_id, payload):
+    route_id = str(route_id or "").strip()
+    if not route_id:
+        raise ValueError("Route id is required.")
+
+    photo_id = str(payload.get("id") or uuid4()).strip()
+    step = int(payload.get("step") or 1)
+    title = str(payload.get("title", "Untitled stop")).strip() or "Untitled stop"
+    instruction = str(payload.get("instruction", "")).strip()
+    notes = str(payload.get("notes", "")).strip()
+    image = str(payload.get("image", "")).strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+
+    if not image:
+        raise ValueError("Photo cue image is required.")
+    if latitude is not None and not -90 <= latitude <= 90:
+        raise ValueError("Invalid photo latitude.")
+    if longitude is not None and not -180 <= longitude <= 180:
+        raise ValueError("Invalid photo longitude.")
+
+    with connect_db() as db:
+        route = db.execute("SELECT id FROM routes WHERE id = ?", (route_id,)).fetchone()
+        if not route:
+            raise ValueError("Route not found.")
+
+        db.execute(
+            """
+            INSERT INTO photo_stops (
+              id, route_id, step, title, instruction, notes,
+              image, latitude, longitude, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (photo_id, route_id, step, title, instruction, notes, image, latitude, longitude),
+        )
+
+        row = db.execute(
+            """
+            SELECT id, route_id, step, title, instruction, notes, image, latitude, longitude
+            FROM photo_stops
+            WHERE id = ?
+            """,
+            (photo_id,),
+        ).fetchone()
+
+    return {
+        "id": row["id"],
+        "routeId": row["route_id"],
+        "step": row["step"],
+        "title": row["title"],
+        "instruction": row["instruction"],
+        "notes": row["notes"],
+        "image": row["image"],
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+    }
+
+
+def academy_answer_for_photo(photo):
+    instruction = str(photo["instruction"] or "").strip()
+    title = str(photo["title"] or "").strip()
+    notes = str(photo["notes"] or "").strip()
+
+    if instruction:
+        return instruction
+    if notes:
+        return notes
+    return title or "Review this cue photo carefully."
+
+
+def is_placeholder_photo(image):
+    image = str(image or "")
+    return (
+        not image
+        or "Taxi%20Bo%20Sample" in image
+        or "Taxi Bo Sample" in image
+        or "Imported%20stop" in image
+    )
+
+
+def fetch_academy_question(excluded_question_id=""):
+    excluded_question_id = str(excluded_question_id or "").strip()
+
+    with connect_db() as db:
+        route_rows = db.execute(
+            """
+            SELECT photo_stops.id, photo_stops.route_id, photo_stops.step,
+              photo_stops.title, photo_stops.instruction, photo_stops.notes,
+              photo_stops.image, routes.name AS route_name, routes.start, routes.destination
+            FROM photo_stops JOIN routes ON routes.id = photo_stops.route_id
+            WHERE photo_stops.image IS NOT NULL AND photo_stops.image != ''
+            """
+        ).fetchall()
+        location_rows = db.execute(
+            """
+            SELECT id, title, instruction, notes, image, latitude, longitude,
+              direction_mode, heading_degrees
+            FROM location_cues WHERE image IS NOT NULL AND image != ''
+            """
+        ).fetchall()
+
+    candidates = [{**dict(row), "cue_type": "route"} for row in route_rows]
+    candidates.extend({**dict(row), "cue_type": "location"} for row in location_rows)
+    if not candidates:
+        return {
+            "available": False,
+            "message": "Add a Route Cue or Location Cue photo first, then TaxiBo Academy can build practice questions.",
+        }
+
+    eligible = [item for item in candidates if item["id"] != excluded_question_id] or candidates
+    question_row = random.choice(eligible)
+    distractor_rows = [item for item in candidates if item["id"] != question_row["id"]]
+    random.shuffle(distractor_rows)
+
+    correct_answer = academy_answer_for_photo(question_row)
+    choices = [correct_answer]
+
+    for row in distractor_rows[:8]:
+        answer = academy_answer_for_photo(row)
+        if answer and answer not in choices:
+            choices.append(answer)
+        if len(choices) == 4:
+            break
+
+    fallback_choices = [
+        "Slow down and identify the next landmark.",
+        "Continue straight and keep checking the route cues.",
+        "Prepare for the next junction before changing lanes.",
+    ]
+    for choice in fallback_choices:
+        if len(choices) == 4:
+            break
+        if choice not in choices:
+            choices.append(choice)
+
+    random.shuffle(choices)
+    is_location = question_row["cue_type"] == "location"
+    direction = "Both directions"
+    if is_location and question_row.get("direction_mode") == "heading":
+        direction = f'{round(float(question_row.get("heading_degrees") or 0))}° heading'
+
+    return {
+        "available": True,
+        "question": {
+            "id": question_row["id"],
+            "cueType": question_row["cue_type"],
+            "routeId": "" if is_location else question_row["route_id"],
+            "routeName": "Location Cue" if is_location else question_row["route_name"],
+            "start": "" if is_location else question_row["start"],
+            "destination": "" if is_location else question_row["destination"],
+            "step": None if is_location else question_row["step"],
+            "latitude": question_row.get("latitude") if is_location else None,
+            "longitude": question_row.get("longitude") if is_location else None,
+            "direction": direction if is_location else "",
+            "questionCount": len(candidates),
+            # Cue titles frequently describe the correct maneuver. Keep the
+            # quiz heading neutral so API clients cannot accidentally reveal it.
+            "title": "Street-photo question",
+            "image": question_row["image"],
+            "imageNeedsReplacement": is_placeholder_photo(question_row["image"]),
+            "prompt": "Look at this street photo. What should the taxi driver do here?",
+            "choices": choices,
+        },
+    }
+
+
+def fetch_academy_repairs():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+              photo_stops.id, photo_stops.route_id, photo_stops.step,
+              photo_stops.title, photo_stops.instruction, photo_stops.notes,
+              photo_stops.image, routes.name AS route_name,
+              routes.start, routes.destination
+            FROM photo_stops
+            JOIN routes ON routes.id = photo_stops.route_id
+            ORDER BY routes.updated_at DESC, routes.position ASC, photo_stops.step ASC
+            """
+        ).fetchall()
+
+    repair_items = []
+    for row in rows:
+        image = row["image"]
+        if not is_placeholder_photo(image):
+            continue
+
+        repair_items.append(
+            {
+                "id": row["id"],
+                "routeId": row["route_id"],
+                "routeName": row["route_name"],
+                "start": row["start"],
+                "destination": row["destination"],
+                "step": row["step"],
+                "title": row["title"],
+                "instruction": row["instruction"],
+                "notes": row["notes"],
+                "image": image,
+                "reason": "Missing picture" if not image else "Sample picture",
+            }
+        )
+
+    return {
+        "repairCount": len(repair_items),
+        "items": repair_items[:80],
+        "truncated": len(repair_items) > 80,
+    }
+
+
+def record_academy_attempt(payload):
+    photo_stop_id = str(payload.get("questionId", "")).strip()
+    cue_type = str(payload.get("cueType", "route")).strip().lower()
+    selected_answer = str(payload.get("selectedAnswer", "")).strip()
+
+    if not photo_stop_id:
+        raise ValueError("Question ID is required.")
+    if not selected_answer:
+        raise ValueError("Select an answer before submitting.")
+
+    with connect_db() as db:
+        if cue_type == "location":
+            photo = db.execute(
+                "SELECT id, title, instruction, notes FROM location_cues WHERE id = ?",
+                (photo_stop_id,),
+            ).fetchone()
+            route_id = ""
+        else:
+            cue_type = "route"
+            photo = db.execute(
+                "SELECT id, route_id, title, instruction, notes FROM photo_stops WHERE id = ?",
+                (photo_stop_id,),
+            ).fetchone()
+            route_id = photo["route_id"] if photo else ""
+
+        if not photo:
+            raise ValueError("Academy question was not found.")
+
+        correct_answer = academy_answer_for_photo(photo)
+        is_correct = 1 if selected_answer == correct_answer else 0
+        attempt_id = str(uuid4())
+
+        db.execute(
+            """
+            INSERT INTO academy_attempts (
+              id, photo_stop_id, route_id, cue_type, location_cue_id,
+              selected_answer, correct_answer, is_correct
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                photo_stop_id,
+                route_id,
+                cue_type,
+                photo_stop_id if cue_type == "location" else "",
+                selected_answer,
+                correct_answer,
+                is_correct,
+            ),
+        )
+
+    return {
+        "id": attempt_id,
+        "questionId": photo_stop_id,
+        "cueType": cue_type,
+        "correct": bool(is_correct),
+        "correctAnswer": correct_answer,
+    }
+
+
+def fetch_academy_stats():
+    with connect_db() as db:
+        totals = db.execute(
+            """
+            SELECT
+              COUNT(*) AS total_attempts,
+              COALESCE(SUM(is_correct), 0) AS correct_attempts
+            FROM academy_attempts
+            """
+        ).fetchone()
+        route_total = db.execute(
+            """
+            SELECT COUNT(*) AS total_questions
+            FROM photo_stops
+            WHERE image IS NOT NULL
+              AND image != ''
+            """
+        ).fetchone()
+        location_total = db.execute(
+            "SELECT COUNT(*) AS total_questions FROM location_cues WHERE image IS NOT NULL AND image != ''"
+        ).fetchone()
+        type_rows = db.execute(
+            """
+            SELECT cue_type, COUNT(*) AS attempts, COALESCE(SUM(is_correct), 0) AS correct
+            FROM academy_attempts GROUP BY cue_type
+            """
+        ).fetchall()
+        recent_rows = db.execute(
+            """
+            SELECT
+              academy_attempts.photo_stop_id,
+              academy_attempts.selected_answer,
+              academy_attempts.correct_answer,
+              academy_attempts.is_correct,
+              academy_attempts.created_at,
+              academy_attempts.cue_type,
+              COALESCE(location_cues.title, photo_stops.title) AS title,
+              routes.name AS route_name,
+              routes.destination,
+              location_cues.latitude,
+              location_cues.longitude
+            FROM academy_attempts
+            LEFT JOIN photo_stops ON academy_attempts.cue_type = 'route'
+              AND photo_stops.id = academy_attempts.photo_stop_id
+            LEFT JOIN location_cues ON academy_attempts.cue_type = 'location'
+              AND location_cues.id = academy_attempts.location_cue_id
+            LEFT JOIN routes ON routes.id = academy_attempts.route_id
+            ORDER BY academy_attempts.created_at DESC
+            LIMIT 6
+            """
+        ).fetchall()
+
+    total_attempts = int(totals["total_attempts"] or 0)
+    correct_attempts = int(totals["correct_attempts"] or 0)
+    type_stats = {row["cue_type"]: dict(row) for row in type_rows}
+    route_questions = int(route_total["total_questions"] or 0)
+    location_questions = int(location_total["total_questions"] or 0)
+
+    return {
+        "totalQuestions": route_questions + location_questions,
+        "routeQuestions": route_questions,
+        "locationQuestions": location_questions,
+        "totalAttempts": total_attempts,
+        "correctAttempts": correct_attempts,
+        "accuracy": round((correct_attempts / total_attempts) * 100) if total_attempts else 0,
+        "routeAttempts": int(type_stats.get("route", {}).get("attempts", 0)),
+        "locationAttempts": int(type_stats.get("location", {}).get("attempts", 0)),
+        "recent": [
+            {
+                "questionId": row["photo_stop_id"],
+                "cueType": row["cue_type"],
+                "title": row["title"] or "Deleted cue photo",
+                "routeName": row["route_name"] or ("Location Cue" if row["cue_type"] == "location" else "Unknown route"),
+                "destination": row["destination"] or "",
+                "latitude": row["latitude"],
+                "longitude": row["longitude"],
+                "selectedAnswer": row["selected_answer"],
+                "correctAnswer": row["correct_answer"],
+                "correct": bool(row["is_correct"]),
+                "createdAt": row["created_at"],
+            }
+            for row in recent_rows
+        ],
+    }
+
+
+def create_incoming_order(payload):
+    destination = str(payload.get("destination", "")).strip()
+
+    if not destination:
+        raise ValueError("Destination is required.")
+
+    order_id = str(uuid4())
+
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO incoming_orders (
+              id, pickup, destination, fare, waiting_time, lock_status,
+              captured_at, offer_fingerprint, raw_text, source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order_id,
+                str(payload.get("pickup", "")).strip(),
+                destination,
+                str(payload.get("fare", "")).strip(),
+                str(payload.get("waitingTime", "")).strip(),
+                str(payload.get("lockStatus", "unknown")).strip() or "unknown",
+                str(payload.get("capturedAt", "")).strip(),
+                str(payload.get("fingerprint", "")).strip(),
+                str(payload.get("rawText", "")).strip(),
+                str(payload.get("source", "phone")).strip() or "phone",
+            ),
+        )
+
+    return {
+        "id": order_id,
+        "destination": destination,
+        "pickup": str(payload.get("pickup", "")).strip(),
+    }
+
+
+def fetch_pending_orders():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, pickup, destination, fare, waiting_time, lock_status,
+                   captured_at, offer_fingerprint, raw_text, source, created_at
+            FROM incoming_orders
+            WHERE consumed_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
+        ).fetchall()
+
+    return [serialize_incoming_order(row) for row in rows]
+
+
+def serialize_incoming_order(row):
+    return {
+        "id": row["id"], "pickup": row["pickup"], "destination": row["destination"],
+        "fare": row["fare"], "waitingTime": row["waiting_time"],
+        "lockStatus": row["lock_status"], "capturedAt": row["captured_at"],
+        "fingerprint": row["offer_fingerprint"], "rawText": row["raw_text"],
+        "source": row["source"], "createdAt": row["created_at"],
+    }
+
+
+def verify_incoming_order(payload):
+    order_id = str(payload.get("id", "")).strip()
+    fingerprint = str(payload.get("fingerprint", "")).strip()
+    with connect_db() as db:
+        row = db.execute(
+            """SELECT id, pickup, destination, fare, waiting_time, lock_status,
+                      captured_at, offer_fingerprint, raw_text, source, created_at
+               FROM incoming_orders WHERE id = ? AND consumed_at IS NULL""",
+            (order_id,),
+        ).fetchone()
+    if not row:
+        return {"valid": False, "reason": "Offer is no longer in the inbox."}
+    if not fingerprint or fingerprint != row["offer_fingerprint"]:
+        return {"valid": False, "reason": "Offer details changed. Scan FlyTaxi again."}
+    return {"valid": True, "order": serialize_incoming_order(row)}
+
+
+def acknowledge_incoming_order(payload):
+    order_id = str(payload.get("id", "")).strip()
+
+    if not order_id:
+        raise ValueError("Order id is required.")
+
+    with connect_db() as db:
+        db.execute(
+            """
+            UPDATE incoming_orders
+            SET consumed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (order_id,),
+        )
+
+    return {"id": order_id}
+
+
+def create_accepted_trip(payload):
+    pickup = str(payload.get("pickup", "")).strip()
+    destination = str(payload.get("destination", "")).strip()
+    if not pickup or not destination:
+        raise ValueError("Accepted trip pickup and destination are required.")
+
+    trip = {
+        "id": str(uuid4()),
+        "source": str(payload.get("source", "Fleet app")).strip() or "Fleet app",
+        "sourceOrderId": str(payload.get("sourceOrderId", "")).strip(),
+        "pickup": pickup,
+        "destination": destination,
+        "acceptedAt": str(payload.get("acceptedAt", "")).strip(),
+    }
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO accepted_trips (
+              id, source, source_order_id, pickup, destination, accepted_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trip["id"], trip["source"], trip["sourceOrderId"],
+                trip["pickup"], trip["destination"], trip["acceptedAt"],
+            ),
+        )
+    return trip
+
+
+def fetch_pending_accepted_trip():
+    with connect_db() as db:
+        row = db.execute(
+            """
+            SELECT id, source, source_order_id, pickup, destination, accepted_at, created_at
+            FROM accepted_trips
+            WHERE consumed_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"], "source": row["source"],
+        "sourceOrderId": row["source_order_id"], "pickup": row["pickup"],
+        "destination": row["destination"], "acceptedAt": row["accepted_at"],
+        "createdAt": row["created_at"],
+    }
+
+
+def acknowledge_accepted_trip(payload):
+    trip_id = str(payload.get("id", "")).strip()
+    if not trip_id:
+        raise ValueError("Accepted trip id is required.")
+    with connect_db() as db:
+        db.execute(
+            "UPDATE accepted_trips SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (trip_id,),
+        )
+    return {"id": trip_id}
+
+
+def create_route_recording(payload):
+    recording = normalize_route_recording(payload)
+
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO route_recordings (
+              id, source_route_id, route_name, start_label, destination,
+              status, points_json, distance_meters, duration_seconds,
+              point_count, start_latitude, start_longitude, end_latitude,
+              end_longitude, started_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'recording', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                recording["id"],
+                recording["sourceRouteId"],
+                recording["routeName"],
+                recording["startLabel"],
+                recording["destination"],
+                json.dumps(recording["points"]),
+                recording["distanceMeters"],
+                recording["durationSeconds"],
+                len(recording["points"]),
+                recording["startLatitude"],
+                recording["startLongitude"],
+                recording["endLatitude"],
+                recording["endLongitude"],
+                recording["startedAt"],
+            ),
+        )
+
+    return recording_summary(recording, "recording")
+
+
+def update_route_recording(payload, finish=False):
+    recording = normalize_route_recording(payload)
+    status = "completed" if finish else "recording"
+    ended_at = recording["endedAt"] if finish else None
+
+    with connect_db() as db:
+        cursor = db.execute(
+            """
+            UPDATE route_recordings
+            SET points_json = ?, distance_meters = ?, duration_seconds = ?,
+                point_count = ?, end_latitude = ?, end_longitude = ?,
+                status = ?, ended_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                json.dumps(recording["points"]),
+                recording["distanceMeters"],
+                recording["durationSeconds"],
+                len(recording["points"]),
+                recording["endLatitude"],
+                recording["endLongitude"],
+                status,
+                ended_at,
+                recording["id"],
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise ValueError("Route recording was not found.")
+
+    return recording_summary(recording, status)
+
+
+def discard_route_recording(payload):
+    recording_id = str(payload.get("id", "")).strip()
+
+    if not recording_id:
+        raise ValueError("Recording id is required.")
+
+    with connect_db() as db:
+        db.execute("DELETE FROM route_recordings WHERE id = ?", (recording_id,))
+
+    return {"id": recording_id, "status": "discarded"}
+
+
+def fetch_active_route_recording():
+    with connect_db() as db:
+        row = db.execute(
+            """
+            SELECT id, source_route_id, route_name, start_label, destination,
+                   points_json, distance_meters, duration_seconds, started_at
+            FROM route_recordings
+            WHERE status = 'recording'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "sourceRouteId": row["source_route_id"],
+        "routeName": row["route_name"],
+        "startLabel": row["start_label"],
+        "destination": row["destination"],
+        "points": json.loads(row["points_json"] or "[]"),
+        "distanceMeters": row["distance_meters"],
+        "durationSeconds": row["duration_seconds"],
+        "startedAt": row["started_at"],
+        "status": "recording",
+    }
+
+
+def normalize_route_recording(payload):
+    recording_id = str(payload.get("id", "")).strip()
+    started_at = str(payload.get("startedAt", "")).strip()
+
+    if not recording_id or not started_at:
+        raise ValueError("Recording id and start time are required.")
+
+    raw_points = payload.get("points")
+    if not isinstance(raw_points, list) or not raw_points:
+        raise ValueError("At least one GPS point is required.")
+    if len(raw_points) > 25000:
+        raise ValueError("This recording contains too many GPS points.")
+
+    points = [normalize_recording_point(point) for point in raw_points]
+    first = points[0]
+    last = points[-1]
+
+    return {
+        "id": recording_id,
+        "sourceRouteId": str(payload.get("sourceRouteId", "")).strip(),
+        "routeName": str(payload.get("routeName", "")).strip(),
+        "startLabel": str(payload.get("startLabel", "")).strip(),
+        "destination": str(payload.get("destination", "")).strip(),
+        "points": points,
+        "distanceMeters": max(0.0, float(payload.get("distanceMeters") or 0)),
+        "durationSeconds": max(0.0, float(payload.get("durationSeconds") or 0)),
+        "startLatitude": first["latitude"],
+        "startLongitude": first["longitude"],
+        "endLatitude": last["latitude"],
+        "endLongitude": last["longitude"],
+        "startedAt": started_at,
+        "endedAt": str(payload.get("endedAt", "")).strip() or None,
+    }
+
+
+def normalize_recording_point(point):
+    if not isinstance(point, dict):
+        raise ValueError("Invalid GPS point.")
+
+    latitude = float(point.get("latitude"))
+    longitude = float(point.get("longitude"))
+    timestamp = int(point.get("timestamp"))
+
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180 or timestamp <= 0:
+        raise ValueError("Invalid GPS point coordinates or timestamp.")
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timestamp": timestamp,
+        "accuracy": optional_float(point.get("accuracy")),
+        "speed": optional_float(point.get("speed")),
+        "heading": optional_float(point.get("heading")),
+    }
+
+
+def optional_float(value):
+    if value is None or value == "":
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def fetch_speed_warnings():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, label, latitude, longitude, speed_limit_mph, radius_meters
+            FROM speed_warnings
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "label": row["label"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "speedLimitMph": row["speed_limit_mph"],
+            "radiusMeters": row["radius_meters"],
+        }
+        for row in rows
+    ]
+
+
+def create_speed_warning(payload):
+    label = str(payload.get("label", "Speed awareness point")).strip()[:120] or "Speed awareness point"
+    latitude = float(payload.get("latitude"))
+    longitude = float(payload.get("longitude"))
+    speed_limit = float(payload.get("speedLimitMph"))
+    radius = float(payload.get("radiusMeters") or 600)
+
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError("Invalid warning coordinates.")
+    if not 5 <= speed_limit <= 100:
+        raise ValueError("Speed limit must be between 5 and 100 mph.")
+    if not 100 <= radius <= 3000:
+        raise ValueError("Warning distance must be between 100 and 3000 meters.")
+
+    warning = {
+        "id": str(uuid4()),
+        "label": label,
+        "latitude": latitude,
+        "longitude": longitude,
+        "speedLimitMph": speed_limit,
+        "radiusMeters": radius,
+    }
+
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO speed_warnings (
+              id, label, latitude, longitude, speed_limit_mph, radius_meters
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                warning["id"], warning["label"], warning["latitude"],
+                warning["longitude"], warning["speedLimitMph"], warning["radiusMeters"],
+            ),
+        )
+
+    return warning
+
+
+def delete_speed_warning(payload):
+    warning_id = str(payload.get("id", "")).strip()
+    if not warning_id:
+        raise ValueError("Warning id is required.")
+
+    with connect_db() as db:
+        db.execute("DELETE FROM speed_warnings WHERE id = ?", (warning_id,))
+
+    return {"id": warning_id}
+
+
+def recording_summary(recording, status):
+    return {
+        "id": recording["id"],
+        "status": status,
+        "pointCount": len(recording["points"]),
+        "distanceMeters": recording["distanceMeters"],
+        "durationSeconds": recording["durationSeconds"],
+    }
+
+
+def recognize_order_image(payload):
+    image_data = str(payload.get("image", ""))
+
+    if not image_data:
+        raise ValueError("Screenshot image is required.")
+
+    encoded = image_data.split(",", 1)[1] if "," in image_data else image_data
+
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except ValueError as error:
+        raise ValueError("The screenshot data is invalid.") from error
+
+    if not image_bytes or len(image_bytes) > MAX_OCR_IMAGE_BYTES:
+        raise ValueError("Screenshot must be smaller than 12 MB.")
+
+    try:
+        import numpy as np
+        from PIL import Image, ImageOps
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as error:
+        raise RuntimeError(
+            "Server OCR is not installed. Run: python -m pip install rapidocr-onnxruntime==1.4.4"
+        ) from error
+
+    try:
+        image = ImageOps.exif_transpose(Image.open(BytesIO(image_bytes))).convert("RGB")
+        image.thumbnail((2200, 4000))
+    except Exception as error:
+        raise ValueError("Could not open this screenshot image.") from error
+
+    global OCR_ENGINE
+    if OCR_ENGINE is None:
+        OCR_ENGINE = RapidOCR()
+
+    result, _ = OCR_ENGINE(np.asarray(image))
+    detections = result or []
+    lines = [str(item[1]).strip() for item in detections if len(item) >= 3 and str(item[1]).strip()]
+    scores = [float(item[2]) for item in detections if len(item) >= 3]
+    text = "\n".join(lines)
+
+    if not lines:
+        raise ValueError("No readable text was found in this screenshot.")
+
+    return {
+        "text": text,
+        "lines": lines,
+        "destination": extract_order_destination(lines),
+        "confidence": sum(scores) / len(scores) if scores else None,
+    }
+
+
+def extract_order_destination(lines):
+    address_words = re.compile(
+        r"\b(rd|road|st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane|ct|court|"
+        r"way|pkwy|parkway|hwy|highway|chapel hill|carrboro|durham|raleigh|graham|"
+        r"nc|north carolina|hong kong)\b",
+        re.IGNORECASE,
+    )
+    noise_words = re.compile(
+        r"\b(accept|restaurant|pickup|delivery|total|minute|minutes|min|mile|miles|"
+        r"guarantee|guaranteed)\b|外送|獨享|接受|保證|分鐘|英里",
+        re.IGNORECASE,
+    )
+    clean_lines = [normalize_ocr_line(line) for line in lines if str(line).strip()]
+    candidates = []
+
+    for index, line in enumerate(clean_lines):
+        if not address_words.search(line) or noise_words.search(line):
+            continue
+
+        previous = clean_lines[index - 1] if index else ""
+        if previous and address_words.search(previous) and not noise_words.search(previous):
+            line = f"{previous} {line}"
+
+        candidates.append(clean_order_address(line))
+
+    return candidates[-1] if candidates else ""
+
+
+def clean_order_address(address):
+    address = re.sub(r"^[\s\-:|]+", "", address)
+    address = re.sub(r"\s*,\s*", ", ", address)
+    address = re.sub(r"\s*&\s*", " & ", address)
+    return re.sub(r"\s+", " ", address).strip()
+
+
+def normalize_ocr_line(line):
+    line = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(line))
+    line = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", line)
+    line = re.sub(r"\s*&\s*", " & ", line)
+    line = re.sub(r"\s*,\s*", ", ", line)
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def generate_route(payload):
+    start, destination, start_label = resolve_route_endpoints(payload)
+    via_points, via_label = resolve_via_route(payload, start, destination)
+    if via_label == "Hung Hom Tunnel northbound":
+        return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
+    if via_label == "Hung Hom Tunnel southbound":
+        return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
+    try:
+        road_route = fetch_road_route(start, destination, via_points or None)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        if via_label:
+            generated["viaLabel"] = via_label
+        reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
+        if via_label and "western" in via_label.lower():
+            seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, generated)
+            if seeded:
+                return seeded
+        return generated
+    except Exception as error:
+        if not via_label:
+            raise
+        seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_error=error)
+        if seeded:
+            return seeded
+        rescue = build_recorded_rescue_route(start, destination, start_label, via_label, error)
+        if rescue:
+            return rescue
+        raise
+
+
+def resolve_via_road(payload):
+    via_text = str(payload.get("viaRoad") or "").strip()
+    return geocode_place(via_text) if via_text else None
+
+
+def is_hung_hom_tunnel_request(value):
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    return normalized in {
+        "hung hom", "hung hom tunnel", "cross harbour tunnel", "cross harbor tunnel"
+    }
+
+
+def resolve_known_tunnel_option(value):
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    aliases = {
+        "hung hom": "hung-hom",
+        "hung hom tunnel": "hung-hom",
+        "cross harbour tunnel": "hung-hom",
+        "cross harbor tunnel": "hung-hom",
+        "western": "western",
+        "western tunnel": "western",
+        "western harbour tunnel": "western",
+        "western harbor tunnel": "western",
+        "western harbour crossing": "western",
+        "western harbor crossing": "western",
+        "eastern": "eastern",
+        "eastern tunnel": "eastern",
+        "eastern harbour tunnel": "eastern",
+        "eastern harbor tunnel": "eastern",
+        "eastern harbour crossing": "eastern",
+        "eastern harbor crossing": "eastern",
+    }
+    option_id = aliases.get(normalized)
+    if not option_id:
+        return None
+
+    for candidate_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
+        if candidate_id == option_id:
+            return {
+                "id": candidate_id,
+                "label": label,
+                "waypoint": dict(waypoint),
+            }
+
+    return None
+
+
+def resolve_via_route(payload, start, destination):
+    via_text = str(payload.get("viaRoad") or "").strip()
+    if not via_text:
+        return [], ""
+
+    known_tunnel = resolve_known_tunnel_option(via_text)
+    if known_tunnel and known_tunnel["id"] != "hung-hom":
+        return [known_tunnel["waypoint"]], known_tunnel["label"]
+
+    if not is_hung_hom_tunnel_request(via_text):
+        via = geocode_place(via_text)
+        return [via], via["label"]
+
+    start_latitude = float(start["latitude"])
+    destination_latitude = float(destination["latitude"])
+    if start_latitude < HONG_KONG_HARBOUR_DIVIDE < destination_latitude:
+        return [dict(point) for point in HUNG_HOM_NORTHBOUND_ANCHORS], "Hung Hom Tunnel northbound"
+    if start_latitude > HONG_KONG_HARBOUR_DIVIDE > destination_latitude:
+        return [dict(point) for point in HUNG_HOM_SOUTHBOUND_ANCHORS], "Hung Hom Tunnel southbound"
+
+    raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
+
+
+def reject_unsafe_tunnel_route(route, via_label, allow_connector_loops=False, allow_route_shape_review=False):
+    if not via_label:
+        return
+    unsafe = [
+        warning for warning in route.get("routeWarnings", [])
+        if warning.get("code") == "repeated-harbour-crossing"
+        or (warning.get("code") == "route-fork" and not allow_route_shape_review)
+        or (
+            warning.get("code") == "route-loop"
+            and not allow_connector_loops
+            and not allow_route_shape_review
+        )
+    ]
+    if unsafe:
+        reasons = "; ".join(warning.get("title", "Unsafe route") for warning in unsafe)
+        raise ValueError(f"TaxiBo rejected the generated tunnel route: {reasons}.")
+
+
+def build_hung_hom_route_for_direction(start, destination, start_label, via_label):
+    if via_label == "Hung Hom Tunnel northbound":
+        return build_hung_hom_recorded_corridor_route(
+            start,
+            destination,
+            start_label,
+            via_label,
+            HUNG_HOM_NORTHBOUND_RECORDING_ID,
+            HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+            HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR,
+            corridor_slice=slice(190, 241),
+        )
+
+    if via_label == "Hung Hom Tunnel southbound":
+        return build_hung_hom_recorded_corridor_route(
+            start,
+            destination,
+            start_label,
+            via_label,
+            HUNG_HOM_SOUTHBOUND_RECORDING_ID,
+            HUNG_HOM_SOUTHBOUND_RECORDING_NAME,
+            HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR,
+        )
+
+    raise ValueError("Hung Hom Tunnel can only be selected for a journey that crosses Victoria Harbour.")
+
+
+def build_recorded_rescue_route(start, destination, start_label, failed_via_label, original_error):
+    try:
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        hybrid = build_best_hybrid_route(generated)
+    except Exception:
+        return None
+
+    if not should_promote_hybrid_route(hybrid):
+        return None
+
+    rescue_warning = {
+        "code": "requested-via-rescued-by-recording",
+        "severity": "medium",
+        "title": "Requested tunnel route replaced by recorded taxi road",
+        "message": (
+            f"The generated route via {failed_via_label} was rejected, so TaxiBo used "
+            "the closest trusted recorded route instead."
+        ),
+    }
+    hybrid["viaLabel"] = f"Recorded rescue after {failed_via_label}"
+    hybrid["routeWarnings"] = [
+        warning for warning in hybrid.get("routeWarnings", [])
+        if warning.get("severity") != "high"
+    ]
+    hybrid["routeWarnings"].append(rescue_warning)
+    hybrid["hdeRescueFromVia"] = failed_via_label
+    hybrid["hdeOriginalError"] = str(original_error)
+    return hybrid
+
+
+def build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_generated=None, original_error=None):
+    seed = find_recorded_seed_for_route(start, destination, via_label)
+    if not seed:
+        return None
+
+    recorded_route = seed["route"]
+    recorded_geometry = seed["geometry"]
+    recorded_segment = recorded_geometry[seed["startIndex"]:seed["endIndex"] + 1]
+    if len(recorded_segment) < 2:
+        return None
+
+    entry = {"latitude": recorded_segment[0][0], "longitude": recorded_segment[0][1]}
+    exit_point = {"latitude": recorded_segment[-1][0], "longitude": recorded_segment[-1][1]}
+    sections = []
+    connector_duration = 0.0
+    destination_connector_gap = haversine_distance(
+        exit_point["latitude"],
+        exit_point["longitude"],
+        destination["latitude"],
+        destination["longitude"],
+    )
+
+    snap_start_to_recording = seed["startGapMeters"] <= RECORDED_SEED_CONNECTOR_MIN_GAP_METERS
+    snap_destination_to_recording = destination_connector_gap <= RECORDED_SEED_CONNECTOR_MIN_GAP_METERS
+
+    if snap_start_to_recording and seed["startGapMeters"] > 25:
+        start_snap_connector = fetch_display_snap_connector(start, entry, seed["startGapMeters"])
+        sections.append({
+            "source": "generated",
+            "role": "start-snap-connector",
+            "displayOnly": True,
+            "geometry": start_snap_connector["geometry"],
+            "connectorShape": start_snap_connector["shape"],
+        })
+    elif not snap_start_to_recording:
+        start_connector = fetch_safe_connector(start, entry)
+        if len(start_connector.get("geometry", [])) >= 2:
+            sections.append({
+                "source": "generated",
+                "role": "start-connector",
+                "geometry": start_connector["geometry"],
+            })
+            connector_duration += float(start_connector.get("duration") or 0)
+
+    sections.append({
+        "source": "recorded",
+        "role": "proven-segment",
+        "recordingId": recorded_route.get("id", ""),
+        "recordingName": recorded_route.get("name", "Recorded route"),
+        "geometry": recorded_segment,
+    })
+
+    if snap_destination_to_recording and destination_connector_gap > 25:
+        end_snap_connector = fetch_display_snap_connector(exit_point, destination, destination_connector_gap)
+        sections.append({
+            "source": "generated",
+            "role": "end-snap-connector",
+            "displayOnly": True,
+            "geometry": end_snap_connector["geometry"],
+            "connectorShape": end_snap_connector["shape"],
+        })
+    elif not snap_destination_to_recording:
+        end_connector = fetch_safe_connector(exit_point, destination)
+        if len(end_connector.get("geometry", [])) >= 2:
+            sections.append({
+                "source": "generated",
+                "role": "end-connector",
+                "geometry": end_connector["geometry"],
+            })
+            connector_duration += float(end_connector.get("duration") or 0)
+
+    driving_sections = [section for section in sections if not section.get("displayOnly")]
+    geometry = combine_route_sections(driving_sections)
+    display_distance = sum_geometry_distance(combine_route_sections(sections))
+    distance = sum_geometry_distance(geometry)
+    recorded_distance = sum_geometry_distance(recorded_segment)
+    if distance <= 0 or recorded_distance < 700:
+        return None
+
+    warnings = downgrade_recorded_seed_warnings(analyze_route_sanity(geometry, distance))
+    if snap_start_to_recording:
+        warnings.append({
+            "code": "recorded-seed-start-snap",
+            "severity": "low",
+            "title": "Start snapped to recorded drive",
+            "message": (
+                "The recorded taxi line is close to the requested start, "
+                "so TaxiBo avoided a short generated connector loop."
+            ),
+        })
+    if snap_destination_to_recording:
+        warnings.append({
+            "code": "recorded-seed-arrival-snap",
+            "severity": "low",
+            "title": "Arrival snapped to recorded drive",
+            "message": (
+                "The recorded taxi line is close to the destination, "
+                "so TaxiBo avoided a short generated connector loop."
+            ),
+        })
+    if seed.get("arrivalAnchor"):
+        anchor = seed["arrivalAnchor"]
+        anchor_source = "saved Location Cue" if anchor.get("source") == "location-cue" else "known local arrival point"
+        anchor_label = anchor.get("sourceLocationCueTitle") or anchor.get("label") or "arrival cue"
+        warnings.append({
+            "code": "recorded-seed-arrival-anchor",
+            "severity": "low",
+            "title": "Arrival cut at recorded turn",
+            "message": (
+                f"TaxiBo used {anchor_source} '{anchor_label}' to avoid continuing past the destination."
+            ),
+        })
+    warnings.append({
+        "code": "recorded-seed-hybrid",
+        "severity": "medium",
+        "title": "Hybrid route seeded from recorded drive",
+        "message": (
+            "Generated routing looked complex, so TaxiBo used a real recorded drive "
+            "as the proven corridor and generated only the missing connectors."
+        ),
+    })
+    if original_error:
+        warnings.append({
+            "code": "generated-route-replaced",
+            "severity": "medium",
+            "title": "Generated route replaced by recorded drive",
+            "message": str(original_error),
+        })
+
+    duration = connector_duration
+    original_distance = None
+    if original_generated:
+        original_distance = original_generated.get("distance")
+        original_duration = original_generated.get("duration")
+        if isinstance(original_distance, (int, float)) and original_distance > 0 and isinstance(original_duration, (int, float)):
+            duration = original_duration * distance / original_distance
+    if not duration:
+        duration = max(180, distance / 10)
+
+    reference_cues = (original_generated or {}).get("cues") or []
+
+    return {
+        "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
+        "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
+        "startLabel": start_label,
+        "destinationLabel": destination.get("label", "Destination"),
+        "viaLabel": f"{via_label} with recorded drive seed",
+        "routeType": "hybrid",
+        "geometry": geometry,
+        "routeSections": sections,
+        "distance": display_distance if display_distance > 0 else distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(geometry, reference_cues=reference_cues),
+        "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
+        "hybridCoverage": min(1.0, recorded_distance / display_distance) if display_distance else 0,
+        "recordedSegmentDistance": recorded_distance,
+        "originalGeneratedDistance": original_distance,
+        "sourceRecordedRouteId": recorded_route.get("id", ""),
+        "sourceRecordedRouteName": recorded_route.get("name", "Recorded route"),
+        "hybridEntryGapMeters": round(seed["startGapMeters"], 1),
+        "hybridExitGapMeters": round(destination_connector_gap, 1),
+        "arrivalAnchor": seed.get("arrivalAnchor"),
+    }
+
+
+def fetch_safe_connector(start, destination):
+    try:
+        return fetch_road_route(start, destination)
+    except Exception:
+        return {
+            "geometry": [
+                [start["latitude"], start["longitude"]],
+                [destination["latitude"], destination["longitude"]],
+            ],
+            "distance": haversine_distance(
+                start["latitude"],
+                start["longitude"],
+                destination["latitude"],
+                destination["longitude"],
+            ),
+            "duration": 0,
+        }
+
+
+def fetch_display_snap_connector(start, destination, direct_gap_meters):
+    local_connector = local_display_snap_connector(start, destination)
+    if local_connector:
+        return local_connector
+
+    fallback = {
+        "geometry": [
+            [start["latitude"], start["longitude"]],
+            [destination["latitude"], destination["longitude"]],
+        ],
+        "shape": "straight",
+    }
+
+    try:
+        connector = fetch_road_route(start, destination)
+    except Exception:
+        return fallback
+
+    geometry = normalize_geometry(connector.get("geometry"))
+    if len(geometry) < 2:
+        return fallback
+
+    distance = float(connector.get("distance") or sum_geometry_distance(geometry))
+    direct_gap = max(1.0, float(direct_gap_meters or haversine_distance(
+        start["latitude"],
+        start["longitude"],
+        destination["latitude"],
+        destination["longitude"],
+    )))
+    max_local_connector_distance = max(700.0, direct_gap * 4.0)
+    warning_codes = {warning.get("code") for warning in analyze_route_sanity(geometry, distance)}
+
+    if distance > max_local_connector_distance or warning_codes.intersection({"repeated-harbour-crossing", "route-loop", "route-fork"}):
+        if direct_gap < 300:
+            return fallback
+        trimmed_geometry = trim_looped_display_connector(geometry, destination, direct_gap)
+        if len(trimmed_geometry) >= 2:
+            return {
+                "geometry": trimmed_geometry,
+                "shape": "trimmed-road",
+            }
+        return fallback
+
+    return {
+        "geometry": geometry,
+        "shape": "road",
+    }
+
+
+def local_display_snap_connector(start, destination):
+    if not is_one_silversea_destination(destination):
+        return None
+
+    anchor = ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR
+    if haversine_distance(start["latitude"], start["longitude"], anchor["latitude"], anchor["longitude"]) > 80:
+        return None
+
+    geometry = [list(point) for point in ONE_SILVERSEA_CHERRY_STREET_CONNECTOR]
+    geometry[0] = [start["latitude"], start["longitude"]]
+    geometry[-1] = [destination["latitude"], destination["longitude"]]
+    return {
+        "geometry": geometry,
+        "shape": "cherry-street",
+    }
+
+
+def trim_looped_display_connector(geometry, destination, direct_gap_meters):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 8:
+        return []
+
+    destination_point = [destination["latitude"], destination["longitude"]]
+    prefix_limit = min(30, len(geometry))
+    prefix_end = min(
+        range(prefix_limit),
+        key=lambda index: haversine_distance(
+            geometry[index][0],
+            geometry[index][1],
+            destination_point[0],
+            destination_point[1],
+        ),
+    )
+    if prefix_end < 2:
+        prefix_end = min(5, prefix_limit - 1)
+
+    suffix_threshold = max(140.0, direct_gap_meters * 0.3)
+    suffix_start = None
+    for index in range(max(prefix_end + 1, len(geometry) // 2), len(geometry)):
+        distance = haversine_distance(
+            geometry[index][0],
+            geometry[index][1],
+            destination_point[0],
+            destination_point[1],
+        )
+        if distance <= suffix_threshold:
+            suffix_start = index
+            break
+
+    if suffix_start is None:
+        suffix_start = min(
+            range(max(prefix_end + 1, len(geometry) // 2), len(geometry)),
+            key=lambda index: haversine_distance(
+                geometry[index][0],
+                geometry[index][1],
+                destination_point[0],
+                destination_point[1],
+            ),
+        )
+
+    bridge_gap = haversine_distance(
+        geometry[prefix_end][0],
+        geometry[prefix_end][1],
+        geometry[suffix_start][0],
+        geometry[suffix_start][1],
+    )
+    if bridge_gap > max(650.0, direct_gap_meters * 1.5):
+        return []
+
+    return geometry[:prefix_end + 1] + geometry[suffix_start:]
+
+
+def downgrade_recorded_seed_warnings(warnings):
+    downgraded = []
+    for warning in warnings:
+        if warning.get("code") in {"route-loop", "route-fork"}:
+            downgraded.append({
+                **warning,
+                "severity": "medium",
+                "title": f"{warning.get('title', 'Route shape needs review')} on connector",
+                "message": "This shape needs review, but the main corridor comes from a recorded taxi drive.",
+            })
+        else:
+            downgraded.append(warning)
+    return downgraded
+
+
+def find_recorded_seed_for_route(start, destination, via_label):
+    best = None
+    for route in fetch_routes(include_images=False):
+        if not is_recorded_route_record(route):
+            continue
+
+        geometry = recorded_route_geometry(route)
+        for candidate_geometry in (geometry, list(reversed(geometry))):
+            candidate = score_recorded_seed_candidate(route, candidate_geometry, start, destination, via_label)
+            if candidate and (best is None or candidate["score"] > best["score"]):
+                best = candidate
+    return best
+
+
+def score_recorded_seed_candidate(route, geometry, start, destination, via_label):
+    if len(geometry) < 2:
+        return None
+    if via_label and "western" in via_label.lower() and not geometry_uses_western_tunnel(geometry):
+        return None
+
+    arrival_anchor = recorded_seed_arrival_anchor(destination, via_label)
+    arrival_point = arrival_anchor or destination
+    start_index, start_gap = nearest_recorded_seed_geometry_index(geometry, [start["latitude"], start["longitude"]])
+    if arrival_anchor:
+        destination_index, destination_gap = nearest_recorded_seed_geometry_index(
+            geometry,
+            [arrival_point["latitude"], arrival_point["longitude"]],
+        )
+    else:
+        destination_index, destination_gap = recorded_seed_arrival_index(
+            geometry,
+            [arrival_point["latitude"], arrival_point["longitude"]],
+            start_index,
+        )
+    if start_index is None or destination_index is None or destination_index <= start_index:
+        return None
+    if start_gap > 3000 or destination_gap > 4500:
+        return None
+
+    recorded_distance = sum_geometry_distance(geometry[start_index:destination_index + 1])
+    if recorded_distance < 700:
+        return None
+
+    text = " ".join(str(route.get(key) or "") for key in ("name", "variant", "start", "via", "destination", "notes")).lower()
+    via_bonus = 600 if via_label and any(token in text for token in via_label.lower().split() if len(token) >= 4) else 0
+    return {
+        "route": route,
+        "geometry": geometry,
+        "startIndex": start_index,
+        "endIndex": destination_index,
+        "startGapMeters": start_gap,
+        "destinationGapMeters": destination_gap,
+        "arrivalAnchor": arrival_anchor,
+        "score": recorded_distance + via_bonus - start_gap * 1.5 - destination_gap,
+    }
+
+
+def recorded_seed_arrival_anchor(destination, via_label):
+    if not via_label or "western" not in via_label.lower():
+        return None
+
+    cue_anchor = find_location_cue_arrival_anchor(destination)
+    if cue_anchor:
+        return cue_anchor
+
+    if not is_one_silversea_destination(destination):
+        return None
+
+    return ONE_SILVERSEA_WESTERN_TUNNEL_ARRIVAL_ANCHOR
+
+
+def find_location_cue_arrival_anchor(destination):
+    destination_point = {
+        "latitude": destination.get("latitude"),
+        "longitude": destination.get("longitude"),
+    }
+    if not isinstance(destination_point["latitude"], (int, float)) or not isinstance(destination_point["longitude"], (int, float)):
+        return None
+
+    destination_tokens = location_cue_match_tokens(" ".join(
+        str(destination.get(key, "")) for key in ("label", "name", "query")
+    ))
+    if not destination_tokens:
+        return None
+
+    best = None
+    for cue in fetch_location_cues(include_images=False):
+        cue_tokens = location_cue_match_tokens(" ".join(
+            str(cue.get(key, "")) for key in ("title", "instruction", "notes")
+        ))
+        overlap = destination_tokens.intersection(cue_tokens)
+        if not overlap:
+            continue
+
+        distance = haversine_distance(
+            destination_point["latitude"],
+            destination_point["longitude"],
+            cue["latitude"],
+            cue["longitude"],
+        )
+        radius = max(250.0, float(cue.get("activationRadiusMeters") or 100) * 6)
+        if distance > min(1200.0, radius):
+            continue
+
+        confidence = float(cue.get("confidence") or 0)
+        score = len(overlap) * 200 + confidence * 100 - distance * 0.15
+        if best is None or score > best["score"]:
+            best = {
+                "score": score,
+                "cue": cue,
+                "distance": distance,
+                "overlap": overlap,
+            }
+
+    if not best:
+        return None
+
+    cue = best["cue"]
+    return {
+        "latitude": cue["latitude"],
+        "longitude": cue["longitude"],
+        "label": cue["title"],
+        "source": "location-cue",
+        "sourceLocationCueId": cue["id"],
+        "sourceLocationCueTitle": cue["title"],
+        "matchDistanceMeters": round(best["distance"], 1),
+        "matchedTokens": sorted(best["overlap"]),
+    }
+
+
+def location_cue_match_tokens(text):
+    stop_words = {
+        "hong", "kong", "road", "street", "lane", "left", "right", "turn",
+        "use", "for", "the", "and", "with", "toward", "towards",
+    }
+    normalized = str(text or "").lower().replace("silversea", "silver sea")
+    return {
+        token for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 3 and token not in stop_words
+    }
+
+
+def is_one_silversea_destination(destination):
+    destination_text = " ".join(str(destination.get(key, "")) for key in ("label", "name", "query")).lower()
+    return "silver" in destination_text or "hoi fai" in destination_text or "tai kok tsui" in destination_text
+
+
+def nearest_recorded_seed_geometry_index(geometry, point):
+    best_index = None
+    best_distance = None
+    for index, route_point in enumerate(geometry):
+        distance = haversine_distance(point[0], point[1], route_point[0], route_point[1])
+        if best_distance is None or distance < best_distance:
+            best_index = index
+            best_distance = distance
+    return best_index, best_distance if best_distance is not None else float("inf")
+
+
+def recorded_seed_arrival_index(geometry, point, minimum_index=0):
+    nearest_index, nearest_distance = nearest_recorded_seed_geometry_index(geometry, point)
+    if nearest_index is None:
+        return None, float("inf")
+
+    arrival_radius = min(350, max(180, nearest_distance + 120))
+    for index in range(max(0, minimum_index + 1), nearest_index + 1):
+        distance = haversine_distance(point[0], point[1], geometry[index][0], geometry[index][1])
+        if distance <= arrival_radius:
+            return index, distance
+
+    return nearest_index, nearest_distance
+
+
+def geometry_uses_western_tunnel(geometry):
+    if len(geometry) < 2:
+        return False
+    near_south = any(
+        haversine_distance(point[0], point[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1]) <= 900
+        for point in geometry
+    )
+    near_north = any(
+        haversine_distance(point[0], point[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1]) <= 900
+        for point in geometry
+    )
+    return near_south and near_north
+
+
+def build_hung_hom_recorded_corridor_route(
+    start,
+    destination,
+    start_label,
+    via_label,
+    recording_id,
+    recording_name,
+    fallback_corridor,
+    corridor_slice=None,
+):
+    corridor = [list(point) for point in fallback_corridor]
+    recorded_routes = fetch_routes(include_images=False, route_id=recording_id)
+    if recorded_routes:
+        recorded_geometry = recorded_route_geometry(recorded_routes[0])
+        if corridor_slice is not None:
+            recorded_geometry = recorded_geometry[corridor_slice]
+        if len(recorded_geometry) >= 2:
+            corridor = recorded_geometry
+
+    entry = {"latitude": corridor[0][0], "longitude": corridor[0][1]}
+    exit_point = {"latitude": corridor[-1][0], "longitude": corridor[-1][1]}
+    start_connector = fetch_road_route(start, entry)
+    end_connector = fetch_road_route(exit_point, destination)
+    sections = []
+    if len(start_connector.get("geometry", [])) >= 2:
+        sections.append({
+            "source": "generated", "role": "start-connector",
+            "geometry": start_connector["geometry"],
+        })
+    sections.append({
+        "source": "recorded", "role": "proven-segment",
+        "recordingId": recording_id,
+        "recordingName": recording_name,
+        "geometry": corridor,
+    })
+    if len(end_connector.get("geometry", [])) >= 2:
+        sections.append({
+            "source": "generated", "role": "end-connector",
+            "geometry": end_connector["geometry"],
+        })
+
+    geometry = combine_route_sections(sections)
+    distance = sum_geometry_distance(geometry)
+    recorded_distance = sum_geometry_distance(corridor)
+    connector_duration = float(start_connector.get("duration") or 0) + float(end_connector.get("duration") or 0)
+    duration = connector_duration + 180
+    warnings = analyze_route_sanity(geometry, distance)
+    warnings = [
+        {
+            **warning,
+            "code": "connector-loop-review",
+            "severity": "medium",
+            "title": "Connector contains a road ramp",
+            "message": "The tunnel crossing is proven, but review the generated approach connector before driving.",
+        }
+        if warning.get("code") == "route-loop" else warning
+        for warning in warnings
+    ]
+    reference_cues = [
+        *(start_connector.get("cues") or []),
+        *(end_connector.get("cues") or []),
+    ]
+
+    route = {
+        "start": {"latitude": start["latitude"], "longitude": start["longitude"]},
+        "destination": {"latitude": destination["latitude"], "longitude": destination["longitude"]},
+        "startLabel": start_label,
+        "destinationLabel": destination.get("label", "Destination"),
+        "viaLabel": via_label,
+        "routeType": "hybrid",
+        "geometry": geometry,
+        "routeSections": sections,
+        "distance": distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(geometry, reference_cues=reference_cues),
+        "routeWarnings": warnings,
+        "hybridCoverage": min(1.0, recorded_distance / distance) if distance else 0,
+        "recordedSegmentDistance": recorded_distance,
+        "sourceRecordedRouteId": recording_id,
+        "sourceRecordedRouteName": recording_name,
+        "hybridEntryGapMeters": 0,
+        "hybridExitGapMeters": 0,
+    }
+    reject_unsafe_tunnel_route(route, route["viaLabel"], allow_connector_loops=True)
+    return route
+
+
+def resolve_route_endpoints(payload):
+    start_text = str(payload.get("start") or "").strip()
+    destination_text = str(payload.get("destination") or "").strip()
+    current_position = payload.get("currentPosition") or {}
+
+    if not destination_text:
+        raise ValueError("Enter a destination before generating the route.")
+
+    if start_text:
+        start = geocode_place(start_text)
+        start_label = start["label"]
+    else:
+        latitude = current_position.get("latitude")
+        longitude = current_position.get("longitude")
+        accuracy = current_position.get("accuracy")
+
+        if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+            raise ValueError("Enter a start address or allow current-location access.")
+
+        if looks_like_hong_kong_query(destination_text):
+            if not is_in_hong_kong_bounds(latitude, longitude):
+                raise ValueError("The current GPS point is outside Hong Kong, so TaxiBo ignored it. Try again for a fresh GPS fix or pick a saved start reference.")
+            if isinstance(accuracy, (int, float)) and accuracy > 250:
+                raise ValueError(f"The current GPS accuracy is about {round(accuracy)} m, so TaxiBo ignored it for route generation. Try again outdoors or pick a saved start reference.")
+
+        start = {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "label": "Current location",
+        }
+        start_label = "Current location"
+
+    destination = geocode_place(destination_text)
+    return start, destination, start_label
+
+
+def format_generated_route(start, destination, start_label, road_route):
+    warnings = analyze_route_sanity(road_route["geometry"], road_route.get("distance"))
+
+    return {
+        "start": {
+            "latitude": start["latitude"],
+            "longitude": start["longitude"],
+        },
+        "destination": {
+            "latitude": destination["latitude"],
+            "longitude": destination["longitude"],
+        },
+        "startLabel": start_label,
+        "destinationLabel": destination["label"],
+        "geometry": road_route["geometry"],
+        "distance": road_route["distance"],
+        "duration": road_route["duration"],
+        "cues": road_route["cues"],
+        "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
+    }
+
+
+def generate_cues(payload):
+    fallback_geometry = normalize_geometry(payload.get("geometry"))
+
+    try:
+        start = normalize_point(payload.get("start"), "start")
+        destination = normalize_point(payload.get("destination"), "destination")
+        road_route = fetch_road_route(start, destination)
+    except Exception:
+        if not fallback_geometry:
+            raise
+
+        road_route = {
+            "geometry": fallback_geometry,
+            "distance": None,
+            "duration": None,
+            "cues": generate_geometry_cues(fallback_geometry),
+        }
+
+    return {
+        "geometry": road_route["geometry"],
+        "distance": road_route["distance"],
+        "duration": road_route["duration"],
+        "cues": road_route["cues"],
+    }
+
+
+def prepare_route(payload):
+    generated = generate_route(payload)
+    hybrid = build_best_hybrid_route(generated)
+    if should_promote_hybrid_route(hybrid):
+        generated = hybrid
+    matched_cues = match_saved_photo_cues(generated["cues"], geometry=generated.get("geometry"))
+    generated["cues"] = matched_cues
+    generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
+    generated["cueCount"] = len(matched_cues)
+    apply_hybrid_engine_assessment(generated)
+    if generated["hybridEngine"]["recordingNeeded"] or generated.get("routeWarnings"):
+        try:
+            log_hybrid_engine_issue(generated)
+        except Exception:
+            pass
+    return generated
+
+
+def prepare_route_options(payload):
+    start, destination, start_label = resolve_route_endpoints(payload)
+    via_points, via_label = resolve_via_route(payload, start, destination)
+
+    if via_points:
+        if via_label == "Hung Hom Tunnel northbound":
+            generated = build_hung_hom_recorded_corridor_route(
+                start,
+                destination,
+                start_label,
+                via_label,
+                HUNG_HOM_NORTHBOUND_RECORDING_ID,
+                HUNG_HOM_NORTHBOUND_RECORDING_NAME,
+                HUNG_HOM_NORTHBOUND_RECORDED_CORRIDOR,
+                corridor_slice=slice(190, 241),
+            )
+        elif via_label == "Hung Hom Tunnel southbound":
+            generated = build_hung_hom_recorded_corridor_route(
+                start,
+                destination,
+                start_label,
+                via_label,
+                HUNG_HOM_SOUTHBOUND_RECORDING_ID,
+                HUNG_HOM_SOUTHBOUND_RECORDING_NAME,
+                HUNG_HOM_SOUTHBOUND_RECORDED_CORRIDOR,
+            )
+        else:
+            try:
+                road_route = fetch_road_route(start, destination, via_points)
+                generated = format_generated_route(start, destination, start_label, road_route)
+                generated["viaLabel"] = via_label
+                reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
+                if via_label and "western" in via_label.lower():
+                    seeded = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, generated)
+                    if seeded:
+                        generated = seeded
+            except Exception as error:
+                generated = build_recorded_seed_hybrid_route(start, destination, start_label, via_label, original_error=error)
+                if not generated:
+                    generated = build_recorded_rescue_route(start, destination, start_label, via_label, error)
+                if not generated:
+                    raise
+        label = f"Via {via_label}"
+        return add_hybrid_route_option([match_prepared_route(generated, "via-road", label)])
+
+    if not requires_harbour_crossing(start, destination):
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        return add_hybrid_route_option([match_prepared_route(generated, "fastest", "Fastest route")])
+
+    options = []
+    for option_id, label, waypoint in HONG_KONG_TUNNEL_OPTIONS:
+        try:
+            if option_id == "hung-hom":
+                _anchors, via_label = resolve_via_route({"viaRoad": "Hung Hom Tunnel"}, start, destination)
+                generated = build_hung_hom_route_for_direction(start, destination, start_label, via_label)
+            else:
+                try:
+                    road_route = fetch_road_route(start, destination, [waypoint])
+                    generated = format_generated_route(start, destination, start_label, road_route)
+                    generated["viaLabel"] = label
+                    reject_unsafe_tunnel_route(generated, label)
+                except Exception as error:
+                    generated = build_recorded_rescue_route(start, destination, start_label, label, error)
+                    if not generated:
+                        raise
+            options.append(match_prepared_route(generated, option_id, label))
+        except Exception:
+            continue
+
+    if not options:
+        road_route = fetch_road_route(start, destination)
+        generated = format_generated_route(start, destination, start_label, road_route)
+        options.append(match_prepared_route(generated, "fastest", "Fastest route"))
+
+    return add_hybrid_route_option(options)
+
+
+def match_prepared_route(generated, option_id, label):
+    matched_cues = match_saved_photo_cues(generated["cues"], geometry=generated.get("geometry"))
+    generated["cues"] = matched_cues
+    generated["matchedCueCount"] = sum(1 for cue in matched_cues if cue.get("matchedPhoto"))
+    generated["cueCount"] = len(matched_cues)
+    generated["optionId"] = option_id
+    generated["optionLabel"] = label
+    apply_hybrid_engine_assessment(generated)
+    if generated["hybridEngine"]["recordingNeeded"] or generated.get("routeWarnings"):
+        try:
+            log_hybrid_engine_issue(generated)
+        except Exception:
+            pass
+    return generated
+
+
+def apply_hybrid_engine_assessment(route):
+    warnings = route.get("routeWarnings") or []
+    high_warnings = [warning for warning in warnings if warning.get("severity") == "high"]
+    medium_warnings = [warning for warning in warnings if warning.get("severity") == "medium"]
+    route_type = str(route.get("routeType") or "generated").lower()
+    coverage = max(0.0, min(1.0, float(route.get("hybridCoverage") or 0)))
+
+    if high_warnings:
+        state = "blocked"
+        confidence = 0
+    elif route_type == "recorded" or coverage >= 0.85:
+        state = "proven"
+        confidence = max(0.9, coverage)
+    elif route_type == "hybrid" and coverage > 0:
+        state = "hybrid"
+        confidence = min(0.89, 0.55 + coverage * 0.4 - len(medium_warnings) * 0.08)
+    else:
+        state = "draft"
+        confidence = max(0.15, 0.45 - len(medium_warnings) * 0.1)
+
+    route["hybridEngine"] = {
+        "state": state,
+        "confidence": round(max(0, confidence), 2),
+        "provenCoverage": round(coverage, 4),
+        "recordingNeeded": state in {"draft", "blocked"},
+        "generatedConnectorCount": sum(
+            1 for section in route.get("routeSections") or [] if section.get("source") == "generated"
+        ),
+        "provenCorridorCount": sum(
+            1 for section in route.get("routeSections") or [] if section.get("source") == "recorded"
+        ),
+        "reasons": [warning.get("title", "Route warning") for warning in warnings],
+    }
+    route["routeTrusted"] = state in {"proven", "hybrid"} and not medium_warnings
+    return route
+
+
+def infer_corridor_direction(geometry):
+    if len(geometry) < 2:
+        return "unknown"
+    latitude_change = geometry[-1][0] - geometry[0][0]
+    longitude_change = geometry[-1][1] - geometry[0][1]
+    if abs(latitude_change) >= abs(longitude_change):
+        return "northbound" if latitude_change > 0 else "southbound"
+    return "eastbound" if longitude_change > 0 else "westbound"
+
+
+def refresh_proven_corridors():
+    recorded_routes = [
+        route for route in fetch_routes(include_images=False) if is_recorded_route_record(route)
+    ]
+    with connect_db() as db:
+        for route in recorded_routes:
+            geometry = recorded_route_geometry(route)
+            if len(geometry) < 2:
+                continue
+            corridor_id = f'route-{route["id"]}'
+            db.execute(
+                "DELETE FROM proven_corridors WHERE id = ?",
+                (corridor_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO proven_corridors (
+                  id, name, direction, source_route_id, geometry,
+                  distance_meters, confidence, verification_count, status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proven', CURRENT_TIMESTAMP)
+                """,
+                (
+                    corridor_id,
+                    route.get("name") or "Recorded corridor",
+                    infer_corridor_direction(geometry),
+                    route["id"],
+                    json.dumps(geometry),
+                    sum_geometry_distance(geometry),
+                    1.0,
+                    1,
+                ),
+            )
+    return fetch_proven_corridors()
+
+
+def fetch_proven_corridors():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, name, direction, source_route_id, geometry, distance_meters,
+              confidence, verification_count, status, updated_at
+            FROM proven_corridors ORDER BY confidence DESC, updated_at DESC
+            """
+        ).fetchall()
+    return [{
+        "id": row["id"], "name": row["name"], "direction": row["direction"],
+        "sourceRouteId": row["source_route_id"], "geometry": json.loads(row["geometry"] or "[]"),
+        "distanceMeters": row["distance_meters"], "confidence": row["confidence"],
+        "verificationCount": row["verification_count"], "status": row["status"],
+        "updatedAt": row["updated_at"],
+    } for row in rows]
+
+
+def fetch_hybrid_engine_status(refresh=False):
+    corridors = refresh_proven_corridors() if refresh else fetch_proven_corridors()
+    directions = {}
+    for corridor in corridors:
+        directions[corridor["direction"]] = directions.get(corridor["direction"], 0) + 1
+    return {
+        "engine": "Hybrid Drive Engine",
+        "version": 1,
+        "corridorCount": len(corridors),
+        "directions": directions,
+        "states": ["proven", "hybrid", "draft", "blocked"],
+        "corridors": corridors,
+    }
+
+
+def hybrid_issue_fingerprint(parts):
+    normalized = "|".join(re.sub(r"\s+", " ", str(part or "").strip().lower()) for part in parts)
+    return str(uuid4()) if not normalized.strip("|") else normalized[:500]
+
+
+def log_hybrid_engine_issue(route=None, payload=None):
+    route = route or {}
+    payload = payload or {}
+    engine = route.get("hybridEngine") or {}
+    warnings = route.get("routeWarnings") or []
+    state = str(payload.get("engineState") or engine.get("state") or "draft")
+    severity = str(payload.get("severity") or (
+        "high" if state == "blocked" or any(w.get("severity") == "high" for w in warnings)
+        else "medium"
+    ))
+    issue_type = str(payload.get("issueType") or (
+        "recording-needed" if payload.get("recordingNeeded", engine.get("recordingNeeded"))
+        else "route-review"
+    ))
+    start_label = str(payload.get("start") or route.get("startLabel") or "").strip()
+    destination_label = str(payload.get("destination") or route.get("destinationLabel") or "").strip()
+    via_label = str(payload.get("via") or route.get("viaLabel") or "").strip()
+    title = str(payload.get("title") or (
+        warnings[0].get("title") if warnings else "Route recording needed"
+    )).strip()
+    message = str(payload.get("message") or (
+        "; ".join(w.get("message", "") for w in warnings if w.get("message"))
+        or "No proven corridor covers enough of this route. Record and verify the real drive."
+    )).strip()
+    recording_needed = bool(payload.get("recordingNeeded", engine.get("recordingNeeded", False)))
+    confidence = float(payload.get("confidence", engine.get("confidence", 0)) or 0)
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+    warning_codes = ",".join(sorted(str(w.get("code") or "") for w in warnings))
+    fingerprint = hybrid_issue_fingerprint([
+        issue_type, start_label, destination_label, via_label, state, warning_codes,
+    ])
+    snapshot = {
+        "routeType": route.get("routeType"), "optionLabel": route.get("optionLabel"),
+        "distance": route.get("distance"), "duration": route.get("duration"),
+        "hybridCoverage": route.get("hybridCoverage"), "warnings": warnings,
+        "start": route.get("start"), "destination": route.get("destination"),
+    }
+
+    with connect_db() as db:
+        existing = db.execute(
+            "SELECT id, occurrence_count FROM hybrid_engine_issues WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone()
+        if existing:
+            issue_id = existing["id"]
+            db.execute(
+                """
+                UPDATE hybrid_engine_issues SET title = ?, severity = ?, status = 'open',
+                  message = ?, confidence = ?, recording_needed = ?,
+                  occurrence_count = ?, route_snapshot = ?, updated_at = CURRENT_TIMESTAMP,
+                  resolved_at = NULL WHERE id = ?
+                """,
+                (title, severity, message, confidence, int(recording_needed),
+                 int(existing["occurrence_count"] or 0) + 1, json.dumps(snapshot), issue_id),
+            )
+        else:
+            issue_id = str(uuid4())
+            db.execute(
+                """
+                INSERT INTO hybrid_engine_issues (
+                  id, fingerprint, title, issue_type, severity, start_label,
+                  destination_label, via_label, latitude, longitude, message,
+                  engine_state, confidence, recording_needed, route_snapshot
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (issue_id, fingerprint, title, issue_type, severity, start_label,
+                 destination_label, via_label, latitude, longitude, message, state,
+                 confidence, int(recording_needed), json.dumps(snapshot)),
+            )
+    return fetch_hybrid_engine_issue(issue_id)
+
+
+def fetch_hybrid_engine_issue(issue_id):
+    issues = fetch_hybrid_engine_issues()
+    return next((issue for issue in issues if issue["id"] == issue_id), None)
+
+
+def fetch_hybrid_engine_issues():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, title, issue_type, severity, status, start_label,
+              destination_label, via_label, latitude, longitude, message,
+              engine_state, confidence, recording_needed, occurrence_count,
+              route_snapshot, created_at, updated_at, resolved_at
+            FROM hybrid_engine_issues
+            ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'recording' THEN 1 ELSE 2 END,
+              CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+              updated_at DESC
+            """
+        ).fetchall()
+    return [{
+        "id": row["id"], "title": row["title"], "issueType": row["issue_type"],
+        "severity": row["severity"], "status": row["status"],
+        "start": row["start_label"], "destination": row["destination_label"],
+        "via": row["via_label"], "latitude": row["latitude"], "longitude": row["longitude"],
+        "message": row["message"], "engineState": row["engine_state"],
+        "confidence": row["confidence"], "recordingNeeded": bool(row["recording_needed"]),
+        "occurrenceCount": row["occurrence_count"],
+        "routeSnapshot": json.loads(row["route_snapshot"] or "{}"),
+        "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+        "resolvedAt": row["resolved_at"],
+    } for row in rows]
+
+
+def update_hybrid_engine_issue_status(payload):
+    issue_id = str(payload.get("id") or "").strip()
+    status = str(payload.get("status") or "").strip().lower()
+    if not issue_id or status not in {"open", "recording", "resolved"}:
+        raise ValueError("Issue id and a valid status are required.")
+    with connect_db() as db:
+        db.execute(
+            """
+            UPDATE hybrid_engine_issues SET status = ?, updated_at = CURRENT_TIMESTAMP,
+              resolved_at = CASE WHEN ? = 'resolved' THEN CURRENT_TIMESTAMP ELSE NULL END
+            WHERE id = ?
+            """,
+            (status, status, issue_id),
+        )
+    issue = fetch_hybrid_engine_issue(issue_id)
+    if not issue:
+        raise ValueError("HDE issue was not found.")
+    return issue
+
+
+def add_hybrid_route_option(options):
+    best_hybrid = None
+
+    for generated in options:
+        hybrid = build_best_hybrid_route(generated)
+        if should_promote_hybrid_route(hybrid) and (
+            best_hybrid is None
+            or hybrid.get("hybridCoverage", 0) > best_hybrid.get("hybridCoverage", 0)
+        ):
+            best_hybrid = hybrid
+
+    if not best_hybrid:
+        return {"options": sort_route_options_by_driver_trust(options)}
+
+    coverage_percent = round(best_hybrid["hybridCoverage"] * 100)
+    prepared_hybrid = match_prepared_route(
+        best_hybrid,
+        "hybrid-recorded-segment",
+        f"Hybrid Route — {coverage_percent}% recorded",
+    )
+    return {"options": sort_route_options_by_driver_trust([prepared_hybrid, *options])}
+
+
+def sort_route_options_by_driver_trust(options):
+    return sorted(options, key=route_driver_trust_sort_key)
+
+
+def route_driver_trust_sort_key(route):
+    warnings = route.get("routeWarnings") or []
+    high_warning_count = sum(1 for warning in warnings if warning.get("severity") == "high")
+    medium_warning_count = sum(1 for warning in warnings if warning.get("severity") == "medium")
+    fork_count = int(route.get("routeForkCount") or route_warning_count(warnings, "route-fork"))
+    route_type = str(route.get("routeType") or "generated").lower()
+    recorded_preference = {"recorded": 0, "hybrid": 1, "prepared": 2}.get(route_type, 3)
+    coverage_penalty = 1.0 - max(0.0, min(1.0, float(route.get("hybridCoverage") or 0)))
+    distance = float(route.get("distance") or 0)
+    duration = float(route.get("duration") or 0)
+
+    return (
+        fork_count,
+        high_warning_count,
+        medium_warning_count,
+        recorded_preference,
+        round(coverage_penalty, 3),
+        distance,
+        duration,
+    )
+
+
+def route_warning_count(warnings, code):
+    for warning in warnings or []:
+        if warning.get("code") == code:
+            return int(warning.get("count") or 1)
+    return 0
+
+
+def should_promote_hybrid_route(route):
+    if not route:
+        return False
+
+    warnings = route.get("routeWarnings") or []
+    if any(warning.get("severity") == "high" for warning in warnings):
+        return False
+
+    coverage = float(route.get("hybridCoverage") or 0)
+    if coverage < HYBRID_MIN_PROMOTION_COVERAGE:
+        return False
+
+    recorded_distance = float(route.get("recordedSegmentDistance") or 0)
+    if recorded_distance < 700:
+        return False
+
+    original_distance = route.get("originalGeneratedDistance")
+    hybrid_distance = route.get("distance")
+    if (
+        isinstance(original_distance, (int, float))
+        and original_distance > 0
+        and isinstance(hybrid_distance, (int, float))
+        and hybrid_distance / original_distance > HYBRID_MAX_DISTANCE_RATIO
+    ):
+        return False
+
+    return True
+
+
+def hybrid_connector_has_loop_risk(geometry):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 4:
+        return False
+
+    direct_distance = haversine_distance(geometry[0][0], geometry[0][1], geometry[-1][0], geometry[-1][1])
+    route_distance = sum_geometry_distance(geometry)
+    if direct_distance < 80:
+        return route_distance > 500
+
+    if count_route_revisits(geometry) > 0:
+        return True
+
+    if direct_distance > 250 and route_distance / direct_distance > 2.6:
+        return True
+
+    if direct_distance > 900 and route_distance / direct_distance > 2.1:
+        return True
+
+    return False
+
+
+def geometry_distance_inside_zone(geometry, zone):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return 0.0
+
+    zone_latitude = float(zone["latitude"])
+    zone_longitude = float(zone["longitude"])
+    radius = float(zone["radius_meters"])
+    total = 0.0
+
+    for index in range(1, len(geometry)):
+        previous = geometry[index - 1]
+        current = geometry[index]
+        midpoint = [
+            (previous[0] + current[0]) / 2,
+            (previous[1] + current[1]) / 2,
+        ]
+        if haversine_distance(midpoint[0], midpoint[1], zone_latitude, zone_longitude) <= radius:
+            total += haversine_distance(previous[0], previous[1], current[0], current[1])
+
+    return total
+
+
+def hybrid_connector_has_level_ambiguity_risk(geometry, minimum_distance_meters=120):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return False
+
+    for zone in HDE_COMPLEX_ROAD_ZONES:
+        if geometry_distance_inside_zone(geometry, zone) >= minimum_distance_meters:
+            return True
+
+    return False
+
+
+def angle_difference(first_angle, second_angle):
+    difference = abs((first_angle - second_angle + 180) % 360 - 180)
+    return difference
+
+
+def route_small_angle_branch_risk_count(geometry, touch_radius_meters=55, branch_angle_degrees=35):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 6:
+        return 0
+
+    stride = max(1, len(geometry) // 700)
+    sampled = geometry[::stride]
+    if sampled[-1] != geometry[-1]:
+        sampled.append(geometry[-1])
+
+    segments = []
+    travelled = 0.0
+    for index in range(1, len(sampled)):
+        start = sampled[index - 1]
+        end = sampled[index]
+        distance = haversine_distance(start[0], start[1], end[0], end[1])
+        if distance < 12:
+            continue
+        segments.append({
+            "index": index - 1,
+            "start": start,
+            "end": end,
+            "bearing": initial_bearing(start, end),
+            "travelled": travelled,
+        })
+        travelled += distance
+
+    if len(segments) < 4:
+        return 0
+
+    branch_count = 0
+    for first_index, first in enumerate(segments):
+        for second in segments[first_index + 1:]:
+            if abs(second["index"] - first["index"]) <= 3:
+                continue
+            if abs(second["travelled"] - first["travelled"]) < 250:
+                continue
+
+            same_direction = angle_difference(first["bearing"], second["bearing"])
+            opposite_direction = angle_difference(first["bearing"], (second["bearing"] + 180) % 360)
+
+            if (
+                haversine_distance(first["start"][0], first["start"][1], second["start"][0], second["start"][1]) <= touch_radius_meters
+                and same_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["end"][0], first["end"][1], second["end"][0], second["end"][1]) <= touch_radius_meters
+                and same_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["start"][0], first["start"][1], second["end"][0], second["end"][1]) <= touch_radius_meters
+                and opposite_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+            elif (
+                haversine_distance(first["end"][0], first["end"][1], second["start"][0], second["start"][1]) <= touch_radius_meters
+                and opposite_direction <= branch_angle_degrees
+            ):
+                branch_count += 1
+
+            if branch_count >= 20:
+                return branch_count
+
+    return branch_count
+
+
+def route_has_small_angle_branch_risk(geometry, touch_radius_meters=55, branch_angle_degrees=35):
+    return route_small_angle_branch_risk_count(geometry, touch_radius_meters, branch_angle_degrees) > 0
+
+
+def build_best_hybrid_route(generated):
+    generated_geometry = normalize_geometry(generated.get("geometry"))
+    if len(generated_geometry) < 2:
+        return None
+
+    best = None
+    for route in fetch_routes(include_images=False):
+        if not is_recorded_route_record(route):
+            continue
+
+        candidate = build_hybrid_route_candidate(generated, route)
+        if candidate and (
+            best is None
+            or candidate.get("recordedSegmentDistance", 0) > best.get("recordedSegmentDistance", 0)
+        ):
+            best = candidate
+
+    return best
+
+
+def is_recorded_route_record(route):
+    route_type = str(route.get("routeType") or "").lower()
+    name = str(route.get("name") or "").lower()
+    notes = str(route.get("notes") or "").lower()
+    return route_type == "recorded" or "recorded" in name or "actual drive recorded" in notes
+
+
+def recorded_route_geometry(route):
+    geometry = normalize_geometry(route.get("routeGeometry"))
+    if len(geometry) >= 2:
+        return geometry
+
+    points = route.get("recordedTrackPoints") or []
+    return normalize_geometry([
+        [point.get("latitude"), point.get("longitude")]
+        for point in points
+        if isinstance(point, dict)
+    ])
+
+
+def clean_recorded_route(payload):
+    route_id = str(payload.get("routeId") or payload.get("id") or "").strip()
+    if not route_id:
+        raise ValueError("Route id is required.")
+
+    route = fetch_route(route_id)
+    if not route:
+        raise ValueError("Route was not found in the database.")
+    if not is_recorded_route_record(route):
+        raise ValueError("Clean route is only available for recorded drives.")
+
+    original_geometry = recorded_route_geometry(route)
+    if len(original_geometry) < 3:
+        raise ValueError("This recording does not have enough GPS points to clean.")
+
+    cleaned_geometry, report = clean_recorded_route_geometry(original_geometry)
+    if len(cleaned_geometry) < 3:
+        raise ValueError("The cleaned route would be too short. Original recording was not changed.")
+
+    cleaned_route_id = str(uuid4())
+    base_name = str(route.get("name") or "Recorded drive").strip() or "Recorded drive"
+    cleaned_photos = build_cleaned_route_photos(route, cleaned_geometry)
+    cleaned_track_points = build_cleaned_track_points(route, cleaned_geometry)
+    cleaned_notes = str(route.get("notes") or "").strip()
+    cleaning_note = (
+        f"Clean route copy created by TaxiBo. Removed {report['removedPointCount']} GPS point"
+        f"{'' if report['removedPointCount'] == 1 else 's'} and {report['loopTrimCount']} loop/fork section"
+        f"{'' if report['loopTrimCount'] == 1 else 's'} from the original recording."
+    )
+    if cleaned_notes:
+        cleaned_notes = f"{cleaned_notes}\n\n{cleaning_note}"
+    else:
+        cleaned_notes = cleaning_note
+
+    cleaned_route = {
+        **route,
+        "id": cleaned_route_id,
+        "name": f"{base_name} (cleaned)",
+        "variant": "Clean route",
+        "notes": cleaned_notes,
+        "routeType": "recorded",
+        "routeGeometry": cleaned_geometry,
+        "recordedTrackPoints": cleaned_track_points,
+        "routeSections": [],
+        "routeDistanceMeters": sum_geometry_distance(cleaned_geometry),
+        "photos": cleaned_photos,
+    }
+
+    insert_route(cleaned_route, after_route_id=route_id)
+    saved_route = fetch_route(cleaned_route_id)
+    return {"route": saved_route, "report": report}
+
+
+def clean_recorded_route_geometry(geometry):
+    cleaned = remove_recorded_spikes(normalize_geometry(geometry))
+    loop_trim_count = 0
+
+    while True:
+        trim = find_recorded_loop_trim(cleaned)
+        if not trim:
+            break
+        start_index, end_index = trim
+        cleaned = cleaned[: start_index + 1] + cleaned[end_index:]
+        loop_trim_count += 1
+        if loop_trim_count >= 20:
+            break
+
+    cleaned = remove_recorded_spikes(cleaned)
+    cleaned, road_repair_count = repair_cleaned_route_gaps(cleaned)
+    return cleaned, {
+        "originalPointCount": len(normalize_geometry(geometry)),
+        "cleanedPointCount": len(cleaned),
+        "removedPointCount": max(0, len(normalize_geometry(geometry)) - len(cleaned)),
+        "loopTrimCount": loop_trim_count,
+        "roadRepairCount": road_repair_count,
+    }
+
+
+def remove_recorded_spikes(geometry):
+    if len(geometry) < 3:
+        return geometry
+
+    cleaned = [geometry[0]]
+    for index in range(1, len(geometry) - 1):
+        previous = cleaned[-1]
+        current = geometry[index]
+        following = geometry[index + 1]
+        prev_distance = haversine_distance(previous[0], previous[1], current[0], current[1])
+        next_distance = haversine_distance(current[0], current[1], following[0], following[1])
+        bridge_distance = haversine_distance(previous[0], previous[1], following[0], following[1])
+
+        if prev_distance < 3:
+            continue
+        if prev_distance > 250 and next_distance > 250 and bridge_distance < 120:
+            continue
+        cleaned.append(current)
+
+    cleaned.append(geometry[-1])
+    return cleaned
+
+
+def find_recorded_loop_trim(geometry, touch_radius_meters=150, minimum_loop_meters=180):
+    if len(geometry) < 8:
+        return None
+
+    cumulative = [0.0]
+    for index in range(1, len(geometry)):
+        previous = geometry[index - 1]
+        current = geometry[index]
+        cumulative.append(
+            cumulative[-1] + haversine_distance(previous[0], previous[1], current[0], current[1])
+        )
+
+    best = None
+    best_distance = 0.0
+    for start_index in range(0, len(geometry) - 6):
+        maximum_end = min(len(geometry), start_index + 260)
+        for end_index in range(start_index + 5, maximum_end):
+            travelled = cumulative[end_index] - cumulative[start_index]
+            if travelled < minimum_loop_meters:
+                continue
+
+            direct = haversine_distance(
+                geometry[start_index][0],
+                geometry[start_index][1],
+                geometry[end_index][0],
+                geometry[end_index][1],
+            )
+            if direct > touch_radius_meters:
+                continue
+            if travelled < max(260, direct * 3.5):
+                continue
+
+            if travelled > best_distance:
+                best = (start_index, end_index)
+                best_distance = travelled
+
+    return best
+
+
+def repair_cleaned_route_gaps(geometry, minimum_gap_meters=350, maximum_route_ratio=2.8):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return geometry, 0
+
+    repaired = [geometry[0]]
+    repair_count = 0
+
+    for index in range(1, len(geometry)):
+        previous = repaired[-1]
+        current = geometry[index]
+        gap_distance = haversine_distance(previous[0], previous[1], current[0], current[1])
+        road_geometry = None
+
+        if gap_distance >= minimum_gap_meters:
+            try:
+                road_route = fetch_road_route(
+                    {"latitude": previous[0], "longitude": previous[1]},
+                    {"latitude": current[0], "longitude": current[1]},
+                )
+                candidate = normalize_geometry(road_route.get("geometry"))
+                candidate_distance = sum_geometry_distance(candidate)
+                if (
+                    len(candidate) >= 2
+                    and candidate_distance >= gap_distance * 0.75
+                    and candidate_distance <= gap_distance * maximum_route_ratio
+                ):
+                    road_geometry = candidate
+            except Exception:
+                road_geometry = None
+
+            if not road_geometry:
+                road_geometry = western_tunnel_spine_for_gap(previous, current)
+
+        if road_geometry:
+            repaired.extend(road_geometry[1:])
+            repair_count += 1
+        else:
+            repaired.append(current)
+
+    return repaired, repair_count
+
+
+def western_tunnel_spine_for_gap(start, end):
+    start_to_south = haversine_distance(start[0], start[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1])
+    start_to_north = haversine_distance(start[0], start[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1])
+    end_to_south = haversine_distance(end[0], end[1], WESTERN_TUNNEL_SOUTH_APPROACH[0], WESTERN_TUNNEL_SOUTH_APPROACH[1])
+    end_to_north = haversine_distance(end[0], end[1], WESTERN_TUNNEL_NORTH_APPROACH[0], WESTERN_TUNNEL_NORTH_APPROACH[1])
+
+    south_to_north = start_to_south <= 450 and end_to_north <= 650
+    north_to_south = start_to_north <= 650 and end_to_south <= 450
+    if not south_to_north and not north_to_south:
+        return None
+
+    spine = [list(point) for point in WESTERN_TUNNEL_SPINE]
+    if north_to_south:
+        spine.reverse()
+
+    return [start, *spine[1:-1], end]
+
+
+def build_cleaned_track_points(route, geometry):
+    original_points = route.get("recordedTrackPoints") or []
+    original_by_location = []
+    for point in original_points:
+        if not isinstance(point, dict):
+            continue
+        latitude = optional_float(point.get("latitude"))
+        longitude = optional_float(point.get("longitude"))
+        if latitude is None or longitude is None:
+            continue
+        original_by_location.append((latitude, longitude, point))
+
+    cleaned_points = []
+    for index, point in enumerate(geometry):
+        best = None
+        best_distance = None
+        for latitude, longitude, original in original_by_location:
+            distance = haversine_distance(point[0], point[1], latitude, longitude)
+            if best_distance is None or distance < best_distance:
+                best = original
+                best_distance = distance
+        if best and best_distance is not None and best_distance <= 8:
+            cleaned_points.append(best)
+        else:
+            cleaned_points.append({
+                "latitude": point[0],
+                "longitude": point[1],
+                "timestamp": index + 1,
+            })
+    return cleaned_points
+
+
+def build_cleaned_route_photos(route, geometry):
+    original_photos = route.get("photos") or []
+    kept_photos = []
+    for photo in original_photos:
+        latitude = optional_float(photo.get("latitude"))
+        longitude = optional_float(photo.get("longitude"))
+        if latitude is None or longitude is None:
+            continue
+        if distance_to_geometry([latitude, longitude], geometry) <= 120:
+            kept_photos.append({
+                **photo,
+                "id": str(uuid4()),
+                "step": len(kept_photos) + 1,
+            })
+
+    if kept_photos:
+        return kept_photos
+
+    return [
+        {
+            **cue,
+            "id": str(uuid4()),
+            "image": "",
+        }
+        for cue in generate_geometry_cues(geometry)
+    ]
+
+
+def distance_to_geometry(point, geometry):
+    best = None
+    for route_point in geometry:
+        distance = haversine_distance(point[0], point[1], route_point[0], route_point[1])
+        if best is None or distance < best:
+            best = distance
+    return best if best is not None else float("inf")
+
+
+def build_hybrid_route_candidate(generated, recorded_route, match_radius_meters=55):
+    generated_geometry = normalize_geometry(generated.get("geometry"))
+    recorded_geometry = recorded_route_geometry(recorded_route)
+    if len(generated_geometry) < 2 or len(recorded_geometry) < 2:
+        return None
+
+    recorded_stride = max(1, len(recorded_geometry) // 350)
+    generated_stride = max(1, len(generated_geometry) // 500)
+    generated_samples = list(range(0, len(generated_geometry), generated_stride))
+    if generated_samples[-1] != len(generated_geometry) - 1:
+        generated_samples.append(len(generated_geometry) - 1)
+
+    matches = []
+    for recorded_index in range(0, len(recorded_geometry), recorded_stride):
+        recorded_point = recorded_geometry[recorded_index]
+        nearest_index = None
+        nearest_distance = None
+        for generated_index in generated_samples:
+            generated_point = generated_geometry[generated_index]
+            distance = haversine_distance(
+                recorded_point[0], recorded_point[1], generated_point[0], generated_point[1]
+            )
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_index = generated_index
+                nearest_distance = distance
+
+        if nearest_distance is not None and nearest_distance <= match_radius_meters:
+            matches.append((recorded_index, nearest_index, nearest_distance))
+
+    if len(matches) < 2:
+        return None
+
+    runs = []
+    current = [matches[0]]
+    maximum_generated_jump = max(12, len(generated_geometry) // 5)
+    for match in matches[1:]:
+        previous = current[-1]
+        recorded_continues = match[0] - previous[0] <= recorded_stride * 3
+        generated_continues = 0 <= match[1] - previous[1] <= maximum_generated_jump
+        if recorded_continues and generated_continues:
+            current.append(match)
+        else:
+            runs.append(current)
+            current = [match]
+    runs.append(current)
+
+    best_run = max(
+        runs,
+        key=lambda run: sum_geometry_distance(recorded_geometry[run[0][0]:run[-1][0] + 1])
+        if len(run) >= 2 else 0,
+    )
+    if len(best_run) < 2:
+        return None
+
+    recorded_start_index, generated_start_index, entry_gap = best_run[0]
+    recorded_end_index, generated_end_index, exit_gap = best_run[-1]
+    if generated_end_index <= generated_start_index or recorded_end_index <= recorded_start_index:
+        return None
+
+    recorded_segment = recorded_geometry[recorded_start_index:recorded_end_index + 1]
+    recorded_distance = sum_geometry_distance(recorded_segment)
+    if recorded_distance < 300:
+        return None
+
+    sections = []
+    generated_start_section = generated_geometry[:generated_start_index + 1]
+    generated_end_section = generated_geometry[generated_end_index:]
+    if hybrid_connector_has_loop_risk(generated_start_section) or hybrid_connector_has_loop_risk(generated_end_section):
+        return None
+    if (
+        hybrid_connector_has_level_ambiguity_risk(generated_start_section)
+        or hybrid_connector_has_level_ambiguity_risk(generated_end_section)
+    ):
+        return None
+
+    if len(generated_start_section) >= 2:
+        sections.append({"source": "generated", "role": "start-connector", "geometry": generated_start_section})
+    sections.append({
+        "source": "recorded",
+        "role": "proven-segment",
+        "recordingId": recorded_route.get("id", ""),
+        "recordingName": recorded_route.get("name", "Recorded route"),
+        "geometry": recorded_segment,
+    })
+    if len(generated_end_section) >= 2:
+        sections.append({"source": "generated", "role": "end-connector", "geometry": generated_end_section})
+
+    hybrid_geometry = combine_route_sections(sections)
+    hybrid_distance = sum_geometry_distance(hybrid_geometry)
+    if hybrid_distance <= 0:
+        return None
+    if route_has_small_angle_branch_risk(hybrid_geometry):
+        return None
+
+    coverage = min(1.0, recorded_distance / hybrid_distance)
+    if coverage < HYBRID_MIN_PROMOTION_COVERAGE:
+        return None
+
+    original_distance = generated.get("distance")
+    original_duration = generated.get("duration")
+    duration = original_duration
+    if isinstance(original_distance, (int, float)) and original_distance > 0 and isinstance(original_duration, (int, float)):
+        duration = original_duration * hybrid_distance / original_distance
+
+    warnings = analyze_route_sanity(hybrid_geometry, hybrid_distance)
+    if entry_gap > 35 or exit_gap > 35:
+        warnings.append({
+            "code": "hybrid-connector-review",
+            "severity": "medium",
+            "title": "Hybrid connection needs review",
+            "message": "A generated connector joins the recorded segment more than 35 metres from its GPS line.",
+        })
+
+    return {
+        **generated,
+        "routeType": "hybrid",
+        "geometry": hybrid_geometry,
+        "routeSections": sections,
+        "distance": hybrid_distance,
+        "duration": duration,
+        "cues": generate_geometry_cues(hybrid_geometry, reference_cues=generated.get("cues")),
+        "routeWarnings": warnings,
+        "routeForkCount": route_warning_count(warnings, "route-fork"),
+        "hybridCoverage": coverage,
+        "recordedSegmentDistance": recorded_distance,
+        "originalGeneratedDistance": original_distance,
+        "sourceRecordedRouteId": recorded_route.get("id", ""),
+        "sourceRecordedRouteName": recorded_route.get("name", "Recorded route"),
+        "hybridEntryGapMeters": round(entry_gap, 1),
+        "hybridExitGapMeters": round(exit_gap, 1),
+    }
+
+
+def fetch_location_cues(include_images=True):
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, title, instruction, notes, image, latitude, longitude,
+                   activation_radius_meters, direction_mode, heading_degrees,
+                   confidence, usage_count, created_at, updated_at
+            FROM location_cues
+            ORDER BY updated_at DESC, created_at DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "instruction": row["instruction"],
+            "notes": row["notes"],
+            "image": row["image"] if include_images else "",
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "activationRadiusMeters": row["activation_radius_meters"],
+            "directionMode": row["direction_mode"],
+            "headingDegrees": row["heading_degrees"],
+            "confidence": row["confidence"],
+            "usageCount": row["usage_count"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def create_location_cue(payload):
+    title = str(payload.get("title") or "").strip()
+    instruction = str(payload.get("instruction") or "").strip()
+    notes = str(payload.get("notes") or "").strip()
+    image = str(payload.get("image") or "").strip()
+    latitude = optional_float(payload.get("latitude"))
+    longitude = optional_float(payload.get("longitude"))
+    radius = optional_float(payload.get("activationRadiusMeters"))
+    direction_mode = str(payload.get("directionMode") or "any").strip().lower()
+    heading = optional_float(payload.get("headingDegrees"))
+    confidence = optional_float(payload.get("confidence"))
+
+    if not title:
+        raise ValueError("Location Cue name is required.")
+    if not image:
+        raise ValueError("Location Cue image is required.")
+    if latitude is None or not -90 <= latitude <= 90:
+        raise ValueError("Enter a valid Location Cue latitude.")
+    if longitude is None or not -180 <= longitude <= 180:
+        raise ValueError("Enter a valid Location Cue longitude.")
+    radius = 100 if radius is None else radius
+    if not 20 <= radius <= 1000:
+        raise ValueError("Activation radius must be between 20 and 1000 metres.")
+    if direction_mode not in {"any", "heading"}:
+        raise ValueError("Location Cue direction must be any direction or a heading.")
+    if direction_mode == "heading" and (heading is None or not 0 <= heading < 360):
+        raise ValueError("Enter a heading from 0 up to 359 degrees.")
+    if direction_mode == "any":
+        heading = None
+    confidence = 1 if confidence is None else confidence
+    if not 0 <= confidence <= 1:
+        raise ValueError("Location Cue confidence must be between 0 and 1.")
+
+    cue_id = str(uuid4())
+    with connect_db() as db:
+        db.execute(
+            """
+            INSERT INTO location_cues (
+              id, title, instruction, notes, image, latitude, longitude,
+              activation_radius_meters, direction_mode, heading_degrees,
+              confidence, usage_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+            """,
+            (
+                cue_id, title, instruction, notes, image, latitude, longitude,
+                radius, direction_mode, heading, confidence,
+            ),
+        )
+
+    return next(cue for cue in fetch_location_cues() if cue["id"] == cue_id)
+
+
+def replace_location_cues(cues):
+    if not isinstance(cues, list):
+        raise ValueError("Expected a Location Cue list.")
+
+    prepared = []
+    for cue in cues:
+        cue_id = str(cue.get("id") or uuid4()).strip()
+        title = str(cue.get("title") or "").strip()
+        image = str(cue.get("image") or "").strip()
+        latitude = optional_float(cue.get("latitude"))
+        longitude = optional_float(cue.get("longitude"))
+        radius = optional_float(cue.get("activationRadiusMeters"))
+        direction_mode = str(cue.get("directionMode") or "any").strip().lower()
+        heading = optional_float(cue.get("headingDegrees"))
+        confidence = optional_float(cue.get("confidence"))
+        if not cue_id or not title or not image:
+            raise ValueError("Every Location Cue requires an id, name, and image.")
+        if latitude is None or not -90 <= latitude <= 90 or longitude is None or not -180 <= longitude <= 180:
+            raise ValueError(f'Location Cue "{title}" has invalid coordinates.')
+        radius = 100 if radius is None else radius
+        if not 20 <= radius <= 1000:
+            raise ValueError(f'Location Cue "{title}" has an invalid activation radius.')
+        if direction_mode not in {"any", "heading"}:
+            raise ValueError(f'Location Cue "{title}" has an invalid direction mode.')
+        if direction_mode == "heading" and (heading is None or not 0 <= heading < 360):
+            raise ValueError(f'Location Cue "{title}" has an invalid heading.')
+        if direction_mode == "any":
+            heading = None
+        confidence = 1 if confidence is None else confidence
+        prepared.append((
+            cue_id, title, str(cue.get("instruction") or "").strip(),
+            str(cue.get("notes") or "").strip(), image, latitude, longitude,
+            radius, direction_mode, heading, confidence,
+            int(cue.get("usageCount") or 0),
+        ))
+
+    with connect_db() as db:
+        db.execute("DELETE FROM location_cues")
+        for values in prepared:
+            db.execute(
+                """
+                INSERT INTO location_cues (
+                  id, title, instruction, notes, image, latitude, longitude,
+                  activation_radius_meters, direction_mode, heading_degrees,
+                  confidence, usage_count, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                values,
+            )
+
+    return len(prepared)
+
+
+def delete_location_cue(payload):
+    cue_id = str(payload.get("id") or "").strip()
+    if not cue_id:
+        raise ValueError("Location Cue id is required.")
+
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT id, title FROM location_cues WHERE id = ?", (cue_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Location Cue was not found.")
+        db.execute("DELETE FROM location_cues WHERE id = ?", (cue_id,))
+
+    return {"id": row["id"], "title": row["title"]}
+
+
+def combine_route_sections(sections):
+    combined = []
+    for section in sections:
+        for point in normalize_geometry(section.get("geometry")):
+            if not combined or point != combined[-1]:
+                combined.append(point)
+    return combined
+
+
+def requires_harbour_crossing(start, destination):
+    points = (start, destination)
+    if not all(is_hong_kong_point(point["latitude"], point["longitude"]) for point in points):
+        return False
+
+    return (start["latitude"] - HONG_KONG_HARBOUR_DIVIDE) * (destination["latitude"] - HONG_KONG_HARBOUR_DIVIDE) < 0
+
+
+def is_hong_kong_point(latitude, longitude):
+    return (
+        HONG_KONG_ROUTE_BOUNDS["min_latitude"] <= latitude <= HONG_KONG_ROUTE_BOUNDS["max_latitude"]
+        and HONG_KONG_ROUTE_BOUNDS["min_longitude"] <= longitude <= HONG_KONG_ROUTE_BOUNDS["max_longitude"]
+    )
+
+
+def analyze_route_sanity(geometry, distance_meters=None):
+    geometry = normalize_geometry(geometry)
+    warnings = []
+
+    if len(geometry) < 2 or not all(is_hong_kong_point(point[0], point[1]) for point in geometry[::max(1, len(geometry) // 20)]):
+        return warnings
+
+    harbour_crossings = count_harbour_crossings(geometry)
+    if harbour_crossings > 1:
+        warnings.append(
+            {
+                "code": "repeated-harbour-crossing",
+                "severity": "high",
+                "title": "Route crosses the harbour more than once",
+                "message": "This generated route looks unrealistic for taxi use. Pick one tunnel route or record the real route.",
+                "count": harbour_crossings,
+            }
+        )
+
+    direct_distance = haversine_distance(geometry[0][0], geometry[0][1], geometry[-1][0], geometry[-1][1])
+    route_distance = float(distance_meters) if isinstance(distance_meters, (int, float)) else sum_geometry_distance(geometry)
+
+    if direct_distance > 1500 and route_distance / direct_distance > 4.0:
+        warnings.append(
+            {
+                "code": "inefficient-route",
+                "severity": "medium",
+                "title": "Route is much longer than the direct trip",
+                "message": "The map route may be looping or using a poor road choice. Compare with a recorded route before saving cues.",
+                "ratio": round(route_distance / direct_distance, 1),
+            }
+        )
+
+    if count_route_revisits(geometry) >= 2:
+        warnings.append(
+            {
+                "code": "route-loop",
+                "severity": "high",
+                "title": "Route appears to loop back",
+                "message": "The generated path revisits the same area. Do not build photo cues from this route until a driver reviews it.",
+            }
+        )
+
+    branch_count = route_small_angle_branch_risk_count(geometry)
+    if branch_count:
+        warnings.append(
+            {
+                "code": "route-fork",
+                "severity": "high",
+                "title": "Route appears to branch or merge",
+                "message": "The generated path touches nearby parallel roads at a shallow angle. Prefer a route with fewer forks or a recorded taxi route.",
+                "count": branch_count,
+            }
+        )
+
+    return warnings
+
+
+def count_harbour_crossings(geometry):
+    crossings = 0
+    previous_side = None
+
+    for latitude, _longitude in geometry:
+        if abs(latitude - HONG_KONG_HARBOUR_DIVIDE) < 0.004:
+            continue
+
+        side = 1 if latitude > HONG_KONG_HARBOUR_DIVIDE else -1
+        if previous_side is not None and side != previous_side:
+            crossings += 1
+        previous_side = side
+
+    return crossings
+
+
+def sum_geometry_distance(geometry):
+    total = 0.0
+    for index in range(1, len(geometry)):
+        total += haversine_distance(
+            geometry[index - 1][0],
+            geometry[index - 1][1],
+            geometry[index][0],
+            geometry[index][1],
+        )
+    return total
+
+
+def count_route_revisits(geometry):
+    seen_cells = set()
+    revisits = 0
+    last_cell = None
+
+    for latitude, longitude in geometry[::max(1, len(geometry) // 120)]:
+        cell = (round(latitude, 3), round(longitude, 3))
+        if cell == last_cell:
+            continue
+        if cell in seen_cells:
+            revisits += 1
+        seen_cells.add(cell)
+        last_cell = cell
+
+    return revisits
+
+
+def match_saved_photo_cues(cues, radius_meters=80, geometry=None):
+    saved_cues = fetch_located_photo_stops()
+    saved_cues.extend({
+        "id": cue["id"],
+        "route_id": "",
+        "route_name": "Reusable Location Cue",
+        "step": 0,
+        "title": cue["title"],
+        "instruction": cue["instruction"],
+        "notes": cue["notes"],
+        "image": cue["image"],
+        "latitude": cue["latitude"],
+        "longitude": cue["longitude"],
+        "activation_radius_meters": cue["activationRadiusMeters"],
+        "direction_mode": cue["directionMode"],
+        "heading_degrees": cue["headingDegrees"],
+        "cue_type": "location",
+    } for cue in fetch_location_cues())
+    matched = []
+
+    for cue in cues:
+        cue_latitude = cue.get("latitude")
+        cue_longitude = cue.get("longitude")
+        best = None
+
+        if isinstance(cue_latitude, (int, float)) and isinstance(cue_longitude, (int, float)):
+            for saved in saved_cues:
+                effective_radius = saved.get("activation_radius_meters") or radius_meters
+                if not location_cue_direction_matches(saved, cue):
+                    continue
+                distance = haversine_distance(
+                    cue_latitude,
+                    cue_longitude,
+                    saved["latitude"],
+                    saved["longitude"],
+                )
+
+                if distance <= effective_radius and (best is None or distance < best["distance"]):
+                    best = {
+                        "distance": distance,
+                        "photo": saved,
+                    }
+
+        if best:
+            photo = best["photo"]
+            matched.append(
+                {
+                    **cue,
+                    "title": photo["title"] or cue.get("title", ""),
+                    "instruction": photo["instruction"] or cue.get("instruction", ""),
+                    "notes": photo["notes"] or cue.get("notes", ""),
+                    "image": photo["image"],
+                    "matchedPhoto": True,
+                    "matchDistanceMeters": round(best["distance"], 1),
+                    "sourceRouteId": photo["route_id"],
+                    "sourceRouteName": photo["route_name"],
+                    "sourcePhotoId": photo["id"],
+                    "sourceCueType": photo.get("cue_type", "route"),
+                    "sourceLocationCueId": photo["id"] if photo.get("cue_type") == "location" else "",
+                }
+            )
+        else:
+            matched.append(
+                {
+                    **cue,
+                    "matchedPhoto": False,
+                    "matchDistanceMeters": None,
+                }
+            )
+
+    return merge_location_cues_along_geometry(matched, geometry)
+
+
+def merge_location_cues_along_geometry(cues, geometry):
+    geometry = normalize_geometry(geometry)
+    if len(geometry) < 2:
+        return cues
+
+    existing_ids = {
+        cue.get("sourceLocationCueId") for cue in cues if cue.get("sourceLocationCueId")
+    }
+    additions = []
+
+    for location_cue in fetch_location_cues():
+        if location_cue["id"] in existing_ids:
+            continue
+
+        nearest_index = None
+        nearest_distance = None
+        for index, point in enumerate(geometry):
+            distance = haversine_distance(
+                location_cue["latitude"], location_cue["longitude"], point[0], point[1]
+            )
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_index = index
+                nearest_distance = distance
+
+        if nearest_distance is None or nearest_distance > location_cue["activationRadiusMeters"]:
+            continue
+
+        approach_index = max(0, nearest_index - 1)
+        approach_heading = initial_bearing(geometry[approach_index], geometry[nearest_index]) \
+            if nearest_index > 0 else None
+        direction_probe = {"approachHeading": approach_heading}
+        direction_saved = {
+            "direction_mode": location_cue["directionMode"],
+            "heading_degrees": location_cue["headingDegrees"],
+        }
+        if not location_cue_direction_matches(direction_saved, direction_probe):
+            continue
+
+        additions.append({
+            "id": f'location-cue-{location_cue["id"]}',
+            "title": location_cue["title"],
+            "instruction": location_cue["instruction"],
+            "notes": location_cue["notes"],
+            "image": location_cue["image"],
+            "latitude": location_cue["latitude"],
+            "longitude": location_cue["longitude"],
+            "matchedPhoto": True,
+            "matchDistanceMeters": round(nearest_distance, 1),
+            "sourceRouteId": "",
+            "sourceRouteName": "Reusable Location Cue",
+            "sourcePhotoId": location_cue["id"],
+            "sourceCueType": "location",
+            "sourceLocationCueId": location_cue["id"],
+            "routeGeometryIndex": nearest_index,
+        })
+
+    combined = [*cues, *additions]
+    for cue in combined:
+        if "routeGeometryIndex" in cue:
+            continue
+        cue["routeGeometryIndex"] = nearest_geometry_index(
+            geometry, cue.get("latitude"), cue.get("longitude")
+        )
+
+    combined.sort(key=lambda cue: cue.get("routeGeometryIndex", len(geometry)))
+    for step, cue in enumerate(combined, start=1):
+        cue["step"] = step
+        cue.pop("routeGeometryIndex", None)
+    return combined
+
+
+def nearest_geometry_index(geometry, latitude, longitude):
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return len(geometry)
+    return min(
+        range(len(geometry)),
+        key=lambda index: haversine_distance(
+            latitude, longitude, geometry[index][0], geometry[index][1]
+        ),
+    )
+
+
+def location_cue_direction_matches(saved, generated_cue, tolerance_degrees=50):
+    if saved.get("direction_mode") != "heading":
+        return True
+
+    expected = saved.get("heading_degrees")
+    actual = generated_cue.get("approachHeading")
+    if not isinstance(expected, (int, float)) or not isinstance(actual, (int, float)):
+        return False
+
+    difference = abs((actual - expected + 180) % 360 - 180)
+    return difference <= tolerance_degrees
+
+
+def fetch_located_photo_stops():
+    with connect_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+              photo_stops.id, photo_stops.route_id, routes.name AS route_name,
+              photo_stops.step, photo_stops.title, photo_stops.instruction,
+              photo_stops.notes, photo_stops.image, photo_stops.latitude,
+              photo_stops.longitude
+            FROM photo_stops
+            JOIN routes ON routes.id = photo_stops.route_id
+            WHERE photo_stops.latitude IS NOT NULL
+              AND photo_stops.longitude IS NOT NULL
+              AND photo_stops.image IS NOT NULL
+              AND photo_stops.image != ''
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "route_id": row["route_id"],
+            "route_name": row["route_name"],
+            "step": row["step"],
+            "title": row["title"],
+            "instruction": row["instruction"],
+            "notes": row["notes"],
+            "image": row["image"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+        }
+        for row in rows
+    ]
+
+
+def haversine_distance(first_latitude, first_longitude, second_latitude, second_longitude):
+    earth_radius = 6371000
+    lat1 = math.radians(first_latitude)
+    lat2 = math.radians(second_latitude)
+    delta_lat = math.radians(second_latitude - first_latitude)
+    delta_lng = math.radians(second_longitude - first_longitude)
+    a = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
+    )
+
+    return earth_radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def initial_bearing(first_point, second_point):
+    first_latitude = math.radians(first_point[0])
+    second_latitude = math.radians(second_point[0])
+    delta_longitude = math.radians(second_point[1] - first_point[1])
+    y = math.sin(delta_longitude) * math.cos(second_latitude)
+    x = (
+        math.cos(first_latitude) * math.sin(second_latitude)
+        - math.sin(first_latitude) * math.cos(second_latitude) * math.cos(delta_longitude)
+    )
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def normalize_point(point, label):
+    if not isinstance(point, dict):
+        raise ValueError(f"Missing {label} coordinates.")
+
+    latitude = point.get("latitude")
+    longitude = point.get("longitude")
+
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        raise ValueError(f"Missing {label} coordinates.")
+
+    return {
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+    }
+
+
+def normalize_geometry(geometry):
+    if not isinstance(geometry, list):
+        return []
+
+    normalized = []
+
+    for point in geometry:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+
+        latitude, longitude = point[0], point[1]
+
+        if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+            normalized.append([float(latitude), float(longitude)])
+
+    return normalized
+
+
+def geocode_place(query):
+    known_place = resolve_known_hong_kong_place(query)
+    if known_place:
+        return known_place
+
+    variants = build_query_variants(query)
+    network_errors = []
+    prefer_hong_kong = looks_like_hong_kong_query(query)
+
+    for variant in variants:
+        for provider in (try_nominatim, try_photon):
+            try:
+                result = provider(variant)
+            except URLError as error:
+                network_errors.append(str(error.reason))
+                continue
+
+            if result and (not prefer_hong_kong or is_in_hong_kong_bounds(result["latitude"], result["longitude"])):
+                return result
+
+    if network_errors:
+        raise ValueError("Map lookup could not reach the internet. Check the connection, then try again.")
+
+    if prefer_hong_kong:
+        raise ValueError(f'Could not find "{query}" inside Hong Kong. Try adding the district or "Hong Kong".')
+
+    raise ValueError(f'Could not find "{query}". Try adding city/state, for example "2 Shepherd Ln, Chapel Hill, NC".')
+
+
+def resolve_known_hong_kong_place(query):
+    text = str(query or "").strip().lower()
+    if not text:
+        return None
+
+    for place in KNOWN_HONG_KONG_PLACES:
+        for alias in place["aliases"]:
+            if alias.lower() in text:
+                return {
+                    "latitude": place["latitude"],
+                    "longitude": place["longitude"],
+                    "label": place["label"],
+                }
+    return None
+
+
+def build_query_variants(query):
+    variants = [query]
+    lower = query.lower()
+
+    if looks_like_hong_kong_query(query):
+        variants.extend([
+            f"{query}, Hong Kong",
+            f"{query}, New Territories, Hong Kong",
+            f"{query}, Kowloon, Hong Kong",
+            f"{query}, Hong Kong Island, Hong Kong",
+        ])
+        return dedupe_query_variants(variants)
+
+    if "chapel hill" not in lower:
+        variants.append(f"{query}, Chapel Hill, NC, USA")
+
+    if "usa" not in lower and "united states" not in lower:
+        variants.append(f"{query}, NC, USA")
+        variants.append(f"{query}, USA")
+
+    return dedupe_query_variants(variants)
+
+
+def dedupe_query_variants(variants):
+    deduped = []
+    for variant in variants:
+        if variant not in deduped:
+            deduped.append(variant)
+
+    return deduped
+
+
+def looks_like_hong_kong_query(query):
+    text = str(query or "").strip().lower()
+    if not text:
+        return False
+
+    if re.search(r"[\u3400-\u9fff]", text):
+        return True
+
+    return bool(re.search(
+        r"\b(hong kong|hk|kowloon|new territories|tsuen wan|sha tin|shatin|tai wai|"
+        r"wan chai|wanchai|central|causeway bay|kwai chung|tuen mun|yuen long|"
+        r"mong kok|kwun tong|wong tai sin|hung hom|mei foo|lai chi kok|tin shui wai)\b",
+        text,
+    ))
+
+
+def is_in_hong_kong_bounds(latitude, longitude):
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError):
+        return False
+
+    return (
+        HONG_KONG_ROUTE_BOUNDS["min_latitude"] <= latitude <= HONG_KONG_ROUTE_BOUNDS["max_latitude"]
+        and HONG_KONG_ROUTE_BOUNDS["min_longitude"] <= longitude <= HONG_KONG_ROUTE_BOUNDS["max_longitude"]
+    )
+
+
+def try_nominatim(query):
+    url = "https://nominatim.openstreetmap.org/search?" + urlencode(
+        {
+            "q": query,
+            "format": "jsonv2",
+            "limit": "1",
+        }
+    )
+
+    data = fetch_json(url)
+
+    if not isinstance(data, list) or not data:
+        return None
+
+    result = data[0]
+    try:
+        latitude = float(result["lat"])
+        longitude = float(result["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "label": str(result.get("display_name") or query),
+    }
+
+
+def try_photon(query):
+    url = "https://photon.komoot.io/api/?" + urlencode(
+        {
+            "q": query,
+            "limit": "1",
+        }
+    )
+    data = fetch_json(url)
+    feature = (data.get("features") or [None])[0]
+
+    if not feature:
+        return None
+
+    coordinates = ((feature.get("geometry") or {}).get("coordinates")) or []
+
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        return None
+
+    longitude, latitude = coordinates[0], coordinates[1]
+
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return None
+
+    properties = feature.get("properties") or {}
+    label = ", ".join(
+        str(part)
+        for part in (
+            properties.get("name"),
+            properties.get("street"),
+            properties.get("city"),
+            properties.get("state"),
+            properties.get("country"),
+        )
+        if part
+    )
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "label": label or query,
+    }
+
+
+def fetch_road_route(start, destination, waypoints=None):
+    route_points = [start, *(waypoints or []), destination]
+    coordinates = ";".join(
+        f'{point["longitude"]},{point["latitude"]}' for point in route_points
+    )
+    url = f"https://router.project-osrm.org/route/v1/driving/{coordinates}?" + urlencode(
+        {
+            "overview": "full",
+            "geometries": "geojson",
+            "steps": "true",
+        }
+    )
+    data = fetch_json(url)
+    route = (data.get("routes") or [None])[0]
+
+    if not route:
+        raise ValueError("Routing service did not return a driving route.")
+
+    coordinates_list = (((route.get("geometry") or {}).get("coordinates")) or [])
+    geometry = []
+
+    for point in coordinates_list:
+        if isinstance(point, list) and len(point) >= 2:
+            longitude, latitude = point[0], point[1]
+            if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+                geometry.append([latitude, longitude])
+
+    if not geometry:
+        raise ValueError("Routing service did not return route geometry.")
+
+    return {
+        "geometry": geometry,
+        "distance": route.get("distance"),
+        "duration": route.get("duration"),
+        "cues": extract_turn_cues(route),
+    }
+
+
+def extract_turn_cues(route):
+    cues = []
+    step_number = 1
+
+    for leg in route.get("legs") or []:
+        for step in leg.get("steps") or []:
+            maneuver = step.get("maneuver") or {}
+            cue = build_turn_cue(step, maneuver, step_number)
+
+            if cue:
+                cues.append(cue)
+                step_number += 1
+
+    return cues
+
+
+def build_turn_cue(step, maneuver, step_number):
+    maneuver_type = str(maneuver.get("type") or "").replace("_", " ")
+    modifier = str(maneuver.get("modifier") or "").replace("_", " ")
+    location = maneuver.get("location") or []
+
+    if maneuver_type in {"depart", "arrive"}:
+        return None
+
+    if not isinstance(location, list) or len(location) < 2:
+        return None
+
+    longitude, latitude = location[0], location[1]
+
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return None
+
+    road_name = str(step.get("name") or "").strip()
+    title = format_cue_title(maneuver_type, modifier, road_name)
+    instruction = format_cue_instruction(maneuver_type, modifier, road_name)
+    approach_heading = maneuver.get("bearing_before")
+
+    return {
+        "id": f"generated-cue-{step_number}",
+        "step": step_number,
+        "title": title,
+        "instruction": instruction,
+        "notes": "Generated from the driving route. Replace with your own photo when ready.",
+        "latitude": latitude,
+        "longitude": longitude,
+        "roadName": road_name,
+        "approachHeading": approach_heading if isinstance(approach_heading, (int, float)) else None,
+        "image": "",
+    }
+
+
+def format_cue_title(maneuver_type, modifier, road_name):
+    direction = modifier.title() if modifier else maneuver_type.title()
+
+    if road_name:
+        return f"{direction} onto {road_name}"
+
+    return direction
+
+
+def format_cue_instruction(maneuver_type, modifier, road_name):
+    parts = []
+
+    if maneuver_type:
+        parts.append(maneuver_type)
+
+    if modifier:
+        parts.append(modifier)
+
+    instruction = " ".join(parts).strip().capitalize() or "Continue"
+
+    if road_name:
+        instruction = f"{instruction} onto {road_name}"
+
+    return instruction + "."
+
+
+def generate_geometry_cues(geometry, reference_cues=None):
+    cues = []
+
+    if len(geometry) < 3:
+        return cues
+
+    step_number = 1
+    last_index = 0
+    stride = max(5, len(geometry) // 80)
+
+    for index in range(stride, len(geometry) - stride, stride):
+        previous_point = geometry[index - stride]
+        current_point = geometry[index]
+        next_point = geometry[index + stride]
+        turn_angle = calculate_turn_angle(previous_point, current_point, next_point)
+
+        if abs(turn_angle) < 28:
+            continue
+
+        if index - last_index < stride * 3:
+            continue
+
+        direction = "Left" if turn_angle > 0 else "Right"
+        road_name = nearest_reference_road_name(current_point, reference_cues)
+        cues.append(
+            {
+                "id": f"geometry-cue-{step_number}",
+                "step": step_number,
+                "title": f"{direction} turn cue{f' near {road_name}' if road_name else ''}",
+                "instruction": f"Prepare for a {direction.lower()} turn or bend near {road_name}." if road_name else f"Prepare for a {direction.lower()} turn or bend in the route.",
+                "notes": "Estimated from saved route geometry. Replace with your own junction photo when ready.",
+                "latitude": current_point[0],
+                "longitude": current_point[1],
+                "roadName": road_name,
+                "approachHeading": initial_bearing(previous_point, current_point),
+                "image": "",
+            }
+        )
+        step_number += 1
+        last_index = index
+
+        if len(cues) >= 30:
+            break
+
+    if not cues:
+        for point in sample_geometry_points(geometry, 5):
+            road_name = nearest_reference_road_name(point, reference_cues)
+            cues.append(
+                {
+                    "id": f"geometry-cue-{step_number}",
+                    "step": step_number,
+                    "title": f"Route checkpoint {step_number}{f' near {road_name}' if road_name else ''}",
+                    "instruction": f"Continue along {road_name}." if road_name else "Continue along the generated route.",
+                    "notes": "Estimated checkpoint from saved route geometry. Replace with your own junction photo when ready.",
+                    "latitude": point[0],
+                    "longitude": point[1],
+                    "roadName": road_name,
+                    "image": "",
+                }
+            )
+            step_number += 1
+
+    return cues
+
+
+def nearest_reference_road_name(point, reference_cues=None, radius_meters=220):
+    if not reference_cues:
+        return ""
+
+    best = None
+    for cue in reference_cues:
+        if not isinstance(cue, dict):
+            continue
+        road_name = extract_reference_road_name(cue)
+        latitude = cue.get("latitude")
+        longitude = cue.get("longitude")
+        if not road_name or not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+            continue
+        distance = haversine_distance(point[0], point[1], latitude, longitude)
+        if distance <= radius_meters and (best is None or distance < best["distance"]):
+            best = {"distance": distance, "roadName": road_name}
+
+    return best["roadName"] if best else ""
+
+
+def extract_reference_road_name(cue):
+    road_name = str(cue.get("roadName") or "").strip()
+    if road_name:
+        return road_name
+
+    text = " ".join([
+        str(cue.get("title") or ""),
+        str(cue.get("instruction") or ""),
+    ])
+    match = re.search(r"\b(?:onto|on|near|toward)\s+([^.;]+)", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+
+    road_name = match.group(1).strip()
+    if not road_name or road_name.lower() in {"the generated route", "the route"}:
+        return ""
+    return road_name
+
+
+def calculate_turn_angle(previous_point, current_point, next_point):
+    first_lat = current_point[0] - previous_point[0]
+    first_lng = current_point[1] - previous_point[1]
+    second_lat = next_point[0] - current_point[0]
+    second_lng = next_point[1] - current_point[1]
+    cross = first_lng * second_lat - first_lat * second_lng
+    dot = first_lng * second_lng + first_lat * second_lat
+
+    return math.degrees(math.atan2(cross, dot))
+
+
+def sample_geometry_points(geometry, count):
+    if len(geometry) <= 2:
+        return []
+
+    samples = []
+    usable = geometry[1:-1]
+
+    for index in range(1, count + 1):
+        sample_index = round(index * (len(usable) - 1) / (count + 1))
+        samples.append(usable[sample_index])
+
+    return samples
+
+
+def fetch_json(url):
+    request = Request(url, headers=HTTP_HEADERS)
+
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = ""
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+            parsed = json.loads(body)
+            detail = str(parsed.get("message") or parsed.get("code") or "").strip()
+        except Exception:
+            detail = ""
+        message = f"Routing service rejected these road points ({error.code})."
+        if detail:
+            message = f"{message} {detail}."
+        raise ValueError(message) from error
+
+
+class TaxiBoHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def get_storage_mode(self):
+        requested = self.headers.get("X-TaxiBo-Storage-Mode", "").strip().lower()
+
+        if requested in {"local", "sqlite", "in-house", "inhouse"}:
+            return "local"
+        if requested in {"cloud", "postgres", "postgresql", "drive"}:
+            return "cloud" if USING_POSTGRES else "local"
+        return "cloud" if USING_POSTGRES else "local"
+
+    def end_headers(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Accept, X-TaxiBo-Storage-Mode")
+        if not path.startswith("/api/") and (
+            path.endswith((".html", ".js", ".css")) or path in {"/", "/sw.js"}
+        ):
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_get()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_get(self):
+        path = urlparse(self.path).path
+
+        if path == "/api/health":
+            storage_mode = ACTIVE_STORAGE_MODE.get()
+            self.send_json(
+                {
+                    "ok": True,
+                    "database": "sqlite" if storage_mode == "local" else "postgresql",
+                    "storageMode": storage_mode,
+                    "cloudConfigured": USING_POSTGRES,
+                    "databaseReady": storage_mode == "local" or not STARTUP_DATABASE_ERROR,
+                    "databaseError": "" if storage_mode == "local" else STARTUP_DATABASE_ERROR,
+                }
+            )
+            return
+
+        if path == "/api/routes":
+            query = parse_qs(urlparse(self.path).query)
+            include_images = query.get("images", ["1"])[0] != "0"
+            self.send_json(fetch_routes(include_images=include_images))
+            return
+
+        if path == "/api/location-cues":
+            query = parse_qs(urlparse(self.path).query)
+            include_images = query.get("images", ["1"])[0] != "0"
+            self.send_json({"ok": True, "cues": fetch_location_cues(include_images=include_images)})
+            return
+
+        if path == "/api/hybrid-engine/status":
+            query = parse_qs(urlparse(self.path).query)
+            refresh = query.get("refresh", ["0"])[0] == "1"
+            self.send_json({"ok": True, "status": fetch_hybrid_engine_status(refresh=refresh)})
+            return
+
+        if path == "/api/hybrid-engine/issues":
+            self.send_json({"ok": True, "issues": fetch_hybrid_engine_issues()})
+            return
+
+        if path.startswith("/api/routes/"):
+            route_id = unquote(path[len("/api/routes/"):]).strip()
+            if not route_id or "/" in route_id:
+                self.send_json({"ok": False, "error": "A valid route ID is required."}, status=400)
+                return
+            route = fetch_route(route_id)
+            if not route:
+                self.send_json({"ok": False, "error": "Route not found."}, status=404)
+                return
+            self.send_json({"ok": True, "route": route})
+            return
+
+        if path == "/api/incoming-order":
+            orders = fetch_pending_orders()
+            self.send_json({"ok": True, "orders": orders, "order": orders[0] if orders else None})
+            return
+
+        if path == "/api/accepted-trip":
+            self.send_json({"ok": True, "trip": fetch_pending_accepted_trip()})
+            return
+
+        if path == "/api/route-recording/active":
+            self.send_json({"ok": True, "recording": fetch_active_route_recording()})
+            return
+
+        if path == "/api/speed-warnings":
+            self.send_json({"ok": True, "warnings": fetch_speed_warnings()})
+            return
+
+        if path == "/api/academy/question":
+            query = parse_qs(urlparse(self.path).query)
+            excluded_question_id = query.get("exclude", [""])[0]
+            self.send_json({"ok": True, **fetch_academy_question(excluded_question_id)})
+            return
+
+        if path == "/api/academy/stats":
+            self.send_json({"ok": True, "stats": fetch_academy_stats()})
+            return
+
+        if path == "/api/academy/repairs":
+            self.send_json({"ok": True, "repairs": fetch_academy_repairs()})
+            return
+
+        super().do_GET()
+
+    def do_PUT(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_put()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_put(self):
+        path = urlparse(self.path).path
+
+        if path.startswith("/api/photo-stops/"):
+            try:
+                photo_id = unquote(path[len("/api/photo-stops/"):]).strip()
+                payload = self.read_json_body()
+                photo = update_photo_stop(photo_id, payload)
+                self.send_json({"ok": True, "photo": photo})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if path == "/api/location-cues":
+            try:
+                payload = self.read_json_body()
+                count = replace_location_cues(payload)
+                self.send_json({"ok": True, "locationCues": count})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if path != "/api/routes":
+            self.send_error(404, "Not found")
+            return
+
+        try:
+            payload = self.read_json_body()
+
+            if not isinstance(payload, list):
+                raise ValueError("Expected a route list.")
+
+            replace_routes(payload)
+            self.send_json({"ok": True, "routes": len(payload)})
+        except Exception as error:
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def do_DELETE(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_delete()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_delete(self):
+        path = urlparse(self.path).path
+        route_prefix = "/api/routes/"
+
+        if not path.startswith(route_prefix):
+            self.send_error(404, "Not found")
+            return
+
+        route_id = unquote(path[len(route_prefix):]).strip()
+
+        if not route_id or "/" in route_id:
+            self.send_json({"ok": False, "error": "A valid route ID is required."}, status=400)
+            return
+
+        try:
+            deleted = delete_route(route_id)
+            self.send_json({"ok": True, "deleted": deleted, "routeId": route_id})
+        except Exception as error:
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def do_POST(self):
+        token = ACTIVE_STORAGE_MODE.set(self.get_storage_mode())
+        try:
+            self.handle_post()
+        finally:
+            ACTIVE_STORAGE_MODE.reset(token)
+
+    def handle_post(self):
+        path = urlparse(self.path).path
+        route_photo_prefix = "/api/routes/"
+        route_photo_suffix = "/photo-stops"
+
+        if path.startswith(route_photo_prefix) and path.endswith(route_photo_suffix):
+            try:
+                route_id = unquote(path[len(route_photo_prefix):-len(route_photo_suffix)]).strip()
+                if not route_id or "/" in route_id:
+                    raise ValueError("A valid route ID is required.")
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                self.send_json({"ok": True, "photo": create_route_photo_stop(route_id, payload)})
+            except Exception as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/routes/clean", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
+            self.send_error(404, "Not found")
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+
+            if path == "/api/incoming-order":
+                self.send_json({"ok": True, "order": create_incoming_order(payload)})
+                return
+
+            if path == "/api/incoming-order/ack":
+                self.send_json({"ok": True, "order": acknowledge_incoming_order(payload)})
+                return
+
+            if path == "/api/incoming-order/verify":
+                self.send_json({"ok": True, **verify_incoming_order(payload)})
+                return
+
+            if path == "/api/accepted-trip":
+                self.send_json({"ok": True, "trip": create_accepted_trip(payload)})
+                return
+
+            if path == "/api/accepted-trip/ack":
+                self.send_json({"ok": True, "trip": acknowledge_accepted_trip(payload)})
+                return
+
+            if path == "/api/ocr-order":
+                self.send_json({"ok": True, "ocr": recognize_order_image(payload)})
+                return
+
+            if path == "/api/route-recording/start":
+                self.send_json({"ok": True, "recording": create_route_recording(payload)})
+                return
+
+            if path == "/api/route-recording/update":
+                self.send_json({"ok": True, "recording": update_route_recording(payload)})
+                return
+
+            if path == "/api/route-recording/finish":
+                self.send_json({"ok": True, "recording": update_route_recording(payload, finish=True)})
+                return
+
+            if path == "/api/route-recording/discard":
+                self.send_json({"ok": True, "recording": discard_route_recording(payload)})
+                return
+
+            if path == "/api/speed-warnings":
+                self.send_json({"ok": True, "warning": create_speed_warning(payload)})
+                return
+
+            if path == "/api/speed-warnings/delete":
+                self.send_json({"ok": True, "warning": delete_speed_warning(payload)})
+                return
+
+            if path == "/api/hybrid-engine/issues":
+                self.send_json({"ok": True, "issue": log_hybrid_engine_issue(payload=payload)})
+                return
+
+            if path == "/api/hybrid-engine/issues/status":
+                self.send_json({"ok": True, "issue": update_hybrid_engine_issue_status(payload)})
+                return
+
+            if path == "/api/location-cues":
+                self.send_json({"ok": True, "cue": create_location_cue(payload)})
+                return
+
+            if path == "/api/location-cues/delete":
+                self.send_json({"ok": True, "cue": delete_location_cue(payload)})
+                return
+
+            if path == "/api/academy/attempt":
+                self.send_json({"ok": True, "attempt": record_academy_attempt(payload)})
+                return
+
+            if path == "/api/routes/clean":
+                self.send_json({"ok": True, **clean_recorded_route(payload)})
+                return
+
+            if path == "/api/generate-route":
+                generated = generate_route(payload)
+            elif path == "/api/prepare-route":
+                generated = prepare_route(payload)
+            elif path == "/api/prepare-route-options":
+                self.send_json({"ok": True, **prepare_route_options(payload)})
+                return
+            else:
+                generated = generate_cues(payload)
+
+            self.send_json({"ok": True, "route": generated})
+        except Exception as error:
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+
+    def send_json(self, payload, status=200):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+if __name__ == "__main__":
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
+    try:
+        initialize_db("local")
+    except Exception as error:
+        STARTUP_DATABASE_ERROR = str(error)
+        print(f"Local database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
+
+    if USING_POSTGRES:
+        try:
+            initialize_db("cloud")
+        except Exception as error:
+            STARTUP_DATABASE_ERROR = str(error)
+            print(f"Cloud database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
+    else:
+        STARTUP_DATABASE_ERROR = ""
+
+    try:
+        ACTIVE_STORAGE_MODE.set("cloud" if USING_POSTGRES and not STARTUP_DATABASE_ERROR else "local")
+    except Exception as error:
+        STARTUP_DATABASE_ERROR = str(error)
+        print(f"Database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
+    server = ThreadingHTTPServer(("0.0.0.0", port), TaxiBoHandler)
+    print(f"Taxi Bo is running locally at http://127.0.0.1:{port}/index.html")
+    print(f"On another device, open http://YOUR-WIFI-IP:{port}/index.html")
+    print("Database: PostgreSQL" if USING_POSTGRES else f"SQLite database: {DB_PATH}")
+    server.serve_forever()

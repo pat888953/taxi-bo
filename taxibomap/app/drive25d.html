@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaxiBoStreetMap 2.5D Test Drive</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="drive25d.css">
+</head>
+<body>
+  <main class="drive-shell">
+    <div id="driveMap" aria-label="2.5D Hong Kong taxi route test drive map"></div>
+
+    <header class="drive-topbar">
+      <div>
+        <p>TaxiBoStreetMap</p>
+        <h1>2.5D test drive</h1>
+      </div>
+      <a href="index.html">Recorder</a>
+    </header>
+
+    <section class="drive-panel" aria-label="2.5D test drive controls">
+      <label>
+        Route
+        <select id="routeSelect"></select>
+      </label>
+      <label>
+        Camera
+        <select id="cameraMode">
+          <option value="simulator">Simulator close</option>
+          <option value="street">Street review</option>
+          <option value="overview">Overview</option>
+        </select>
+      </label>
+      <div class="button-row">
+        <button id="loadRoute" type="button">Load</button>
+        <button id="playDrive" type="button">Drive</button>
+        <button id="pauseDrive" type="button">Pause</button>
+        <button id="resetDrive" type="button">Reset</button>
+      </div>
+      <div class="toggle-row">
+        <label><input id="followCamera" type="checkbox" checked> Follow</label>
+        <label><input id="showRaw" type="checkbox" checked> Raw</label>
+        <label><input id="showMatched" type="checkbox" checked> Matched</label>
+        <label><input id="showBuildings" type="checkbox" checked> 3D buildings</label>
+      </div>
+      <div class="metric-row">
+        <span><strong id="driveProgress">0%</strong> progress</span>
+        <span><strong id="driveSpeed">0</strong> km/h</span>
+      </div>
+      <p id="driveStatus">Load a saved route to test 2.5D review.</p>
+    </section>
+
+    <div class="windshield-shade" aria-hidden="true"></div>
+    <div class="road-focus" aria-hidden="true"></div>
+    <div class="cockpit" aria-hidden="true">
+      <div class="car-nose"></div>
+    </div>
+
+    <section class="instruction-banner">
+      <strong id="routeTitle">No route loaded</strong>
+      <span id="routeMeta">Raw and matched lines will appear when route data is available.</span>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/maplibre-gl/dist/maplibre-gl.js"></script>
+  <script src="drive25d.js"></script>
+</body>
+</html>

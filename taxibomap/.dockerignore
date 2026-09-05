@@ -1,0 +1,11 @@
+**
+!package.json
+!package-lock.json
+!app/**
+!server/**
+!db/**
+!deploy/**
+deploy/**/*.db
+deploy/**/*.sqlite*
+deploy/**/__pycache__/**
+deploy/**/*.env

@@ -1,0 +1,267 @@
+:root {
+  --surface: #ffffff;
+  --surface-soft: #f3f8f5;
+  --text: #10251d;
+  --muted: #52665d;
+  --accent: #087450;
+  --line: #cbd8d0;
+  --danger: #b33939;
+  --raw: #d78a1f;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: #dce9e1;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+.drive-shell {
+  min-height: 100vh;
+}
+
+#driveMap {
+  position: fixed;
+  inset: 0;
+}
+
+.windshield-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(238, 243, 239, 0.78) 0%, rgba(238, 243, 239, 0.24) 18%, rgba(238, 243, 239, 0) 42%),
+    radial-gradient(ellipse at 50% 116%, rgba(16, 37, 29, 0.44) 0%, rgba(16, 37, 29, 0.14) 28%, rgba(16, 37, 29, 0) 58%);
+}
+
+.road-focus {
+  position: fixed;
+  left: 50%;
+  bottom: 14%;
+  z-index: 1;
+  width: min(42vw, 440px);
+  height: 58vh;
+  pointer-events: none;
+  transform: translateX(-50%);
+  border-left: 2px solid rgba(255, 255, 255, 0.44);
+  border-right: 2px solid rgba(255, 255, 255, 0.44);
+  clip-path: polygon(44% 0, 56% 0, 100% 100%, 0 100%);
+  opacity: 0.5;
+}
+
+.cockpit {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 2;
+  width: min(560px, 72vw);
+  height: 118px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  border-radius: 48% 48% 0 0;
+  background: linear-gradient(180deg, rgba(17, 25, 22, 0.12), rgba(17, 25, 22, 0.78) 56%, rgba(8, 15, 13, 0.92));
+  box-shadow: 0 -16px 38px rgba(16, 37, 29, 0.18);
+}
+
+.car-nose {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  width: 66px;
+  height: 42px;
+  transform: translateX(-50%);
+  border: 3px solid rgba(255, 255, 255, 0.88);
+  border-radius: 28px 28px 12px 12px;
+  background: linear-gradient(180deg, #0a7a55, #07573d);
+}
+
+.drive-topbar,
+.drive-panel,
+.instruction-banner {
+  position: fixed;
+  z-index: 2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 32px rgba(16, 37, 29, 0.14);
+}
+
+.drive-topbar {
+  top: 12px;
+  left: 12px;
+  right: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+}
+
+.drive-topbar p,
+.drive-topbar h1 {
+  margin: 0;
+}
+
+.drive-topbar p {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.drive-topbar h1 {
+  font-size: 1.35rem;
+}
+
+.drive-topbar a {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.drive-panel {
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 10px;
+  width: min(330px, calc(100vw - 24px));
+  padding: 12px;
+}
+
+.drive-panel label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+select {
+  width: 100%;
+  border: 1px solid #b8cac0;
+  border-radius: 6px;
+  padding: 10px 11px;
+  background: #fff;
+  color: var(--text);
+}
+
+.button-row,
+.toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toggle-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: var(--surface-soft);
+}
+
+button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#playDrive {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.metric-row span {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.metric-row span + span {
+  border-left: 1px solid var(--line);
+}
+
+.metric-row strong {
+  color: var(--text);
+}
+
+#driveStatus {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.instruction-banner {
+  left: 12px;
+  bottom: 126px;
+  display: grid;
+  gap: 4px;
+  max-width: min(470px, calc(100vw - 400px));
+  padding: 14px 16px;
+}
+
+.instruction-banner strong {
+  font-size: 1.05rem;
+}
+
+.instruction-banner span {
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .drive-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .drive-panel {
+    left: 12px;
+    bottom: 12px;
+  }
+
+  .instruction-banner {
+    left: 12px;
+    right: 12px;
+    bottom: 282px;
+    max-width: none;
+  }
+
+  .cockpit {
+    width: 88vw;
+    height: 94px;
+  }
+}

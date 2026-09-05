@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaxiBoStreetMap Navigation Mode</title>
+  <link rel="stylesheet" href="navigate.css">
+</head>
+<body>
+  <main class="nav-shell">
+    <div id="navMap" aria-label="TaxiBo navigation map"></div>
+
+    <section class="turn-card">
+      <span id="nextDistance">Ready</span>
+      <strong id="nextInstruction">Select a route to start navigation</strong>
+      <small id="routeStatus">No route loaded</small>
+    </section>
+
+    <section class="route-picker">
+      <label>
+        Route
+        <select id="routeSelect"></select>
+      </label>
+      <button id="loadRoute" type="button">Load</button>
+    </section>
+
+    <nav class="float-actions" aria-label="Navigation controls">
+      <button id="voiceButton" type="button" aria-label="Voice">&#127908;</button>
+      <button id="searchButton" type="button" aria-label="Search">&#8981;</button>
+      <button id="soundButton" type="button" aria-label="Sound">&#9673;</button>
+      <button id="recenterButton" type="button" aria-label="Recenter">&#9678;</button>
+    </nav>
+
+    <section class="nav-bottom">
+      <div class="trip-stats">
+        <span><strong id="etaValue">--</strong> min</span>
+        <span><strong id="distanceValue">--</strong> km</span>
+        <span><strong id="speedValue">0</strong> km/h</span>
+      </div>
+      <div class="drive-controls">
+        <button id="startNav" type="button">Start</button>
+        <button id="pauseNav" type="button">Pause</button>
+        <button id="liveDrive" type="button">Live Drive</button>
+        <button id="saveDrive" type="button">Save</button>
+        <button id="reportTraffic" type="button">Traffic</button>
+      </div>
+    </section>
+
+    <a class="recorder-link" href="index.html">Recorder</a>
+  </main>
+
+  <script src="maplibre-loader.js"></script>
+</body>
+</html>

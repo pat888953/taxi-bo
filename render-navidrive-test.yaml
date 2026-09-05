@@ -1,0 +1,58 @@
+# Separate paid test stack. Review Render's cost estimate before creation.
+services:
+  - type: web
+    name: taxibo-navidrive-test
+    runtime: docker
+    rootDir: taxibomap
+    dockerfilePath: ./deploy/Dockerfile
+    region: singapore
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taxibo-navidrive-test-db
+          property: connectionString
+      - key: VALHALLA_HOSTPORT
+        fromService:
+          type: pserv
+          name: taxibo-valhalla-test
+          property: hostport
+      - key: NAVIDRIVE_TEST_PASSWORD
+        sync: false
+  - type: pserv
+    name: taxibo-valhalla-test
+    runtime: image
+    image:
+      url: ghcr.io/valhalla/valhalla-scripted:latest
+    region: singapore
+    plan: standard
+    disk:
+      name: hk-routing-data
+      mountPath: /custom_files
+      sizeGB: 10
+    envVars:
+      - key: tile_urls
+        value: https://download.geofabrik.de/asia/china/hong-kong-latest.osm.pbf
+      - key: server_threads
+        value: "2"
+      - key: build_admins
+        value: "True"
+      - key: build_time_zones
+        value: "True"
+      - key: build_elevation
+        value: "False"
+      - key: build_transit
+        value: "False"
+      - key: build_tar
+        value: "True"
+      - key: force_rebuild
+        value: "False"
+      - key: tileset_name
+        value: hong_kong
+databases:
+  - name: taxibo-navidrive-test-db
+    region: singapore
+    plan: basic-256mb
+    databaseName: taxibo_test
+    ipAllowList: []

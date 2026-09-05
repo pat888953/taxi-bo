@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaxiBoStreetMap Recorder V2</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="top-bar">
+      <div>
+        <p class="eyebrow">TaxiBoStreetMap</p>
+        <h1>Hong Kong taxi route recorder</h1>
+      </div>
+      <div class="header-actions">
+        <a class="secondary-button compact-button nav-link" href="navidrive.html">TaxiBo NaviDrive</a>
+        <a class="secondary-button compact-button nav-link" href="navigate.html">Navigation mode</a>
+        <a class="secondary-button compact-button nav-link" href="drive25d.html">2.5D test drive</a>
+        <button id="drivingModeToggle" class="secondary-button compact-button" type="button">Driving mode</button>
+        <span id="storageMode" class="scope-pill">Checking storage</span>
+        <span class="scope-pill">HK only</span>
+      </div>
+    </header>
+
+    <section class="map-stage">
+      <div id="map" aria-label="Hong Kong taxi route map"></div>
+      <aside class="control-panel" aria-label="Route recorder controls">
+        <div class="panel-section">
+          <h2>Record a taxi route</h2>
+          <label>
+            Route name
+            <input id="routeName" type="text" placeholder="Wong Tai Sin to Wan Chai via Hung Hom">
+          </label>
+          <div class="input-grid">
+            <label>
+              Start
+              <input id="routeStart" type="text" placeholder="Current pickup or area">
+            </label>
+            <label>
+              Destination
+              <input id="routeDestination" type="text" placeholder="Passenger destination">
+            </label>
+          </div>
+          <label>
+            Notes
+            <textarea id="routeNotes" rows="3" placeholder="Tunnel, junction, passenger shortcut, road condition"></textarea>
+          </label>
+          <div class="button-row">
+            <button id="startRecording" class="primary-button" type="button">Start recording</button>
+            <button id="stopRecording" class="secondary-button" type="button">Stop</button>
+            <button id="saveRoute" class="secondary-button" type="button">Save route</button>
+          </div>
+          <p id="recordingStatus" class="status-line">Ready to record inside Hong Kong.</p>
+          <div class="metric-row">
+            <span><strong id="pointCount">0</strong> GPS points</span>
+            <span><strong id="distanceCount">0.0</strong> km</span>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Route library</h2>
+          <div class="button-row">
+            <button id="loadSample" class="secondary-button" type="button">Load sample</button>
+            <button id="exportRoutes" class="secondary-button" type="button">Export JSON</button>
+            <label class="file-button">
+              Import JSON
+              <input id="importRoutes" type="file" accept="application/json">
+            </label>
+          </div>
+          <div id="routeList" class="route-list"></div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Valhalla route test</h2>
+          <div class="input-grid">
+            <label>
+              Start lat
+              <input id="routeStartLat" type="number" step="0.000001" placeholder="22.341600">
+            </label>
+            <label>
+              Start lon
+              <input id="routeStartLon" type="number" step="0.000001" placeholder="114.193800">
+            </label>
+            <label>
+              Destination lat
+              <input id="routeEndLat" type="number" step="0.000001" placeholder="22.280400">
+            </label>
+            <label>
+              Destination lon
+              <input id="routeEndLon" type="number" step="0.000001" placeholder="114.176900">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="setRouteStart" class="secondary-button" type="button">Set start at center</button>
+            <button id="setRouteEnd" class="secondary-button" type="button">Set destination at center</button>
+            <button id="calculateRoute" class="primary-button" type="button">Calculate taxi route</button>
+          </div>
+          <p id="routePlannerStatus" class="status-line">Valhalla route testing is ready when the Valhalla service is running.</p>
+          <div id="routeDirections" class="route-list"></div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Live reports</h2>
+          <div class="input-grid">
+            <label>
+              Type
+              <select id="reportType">
+                <option value="traffic">Traffic</option>
+                <option value="accident">Accident</option>
+                <option value="road_closure">Road closure</option>
+                <option value="tunnel_delay">Tunnel delay</option>
+                <option value="pickup_hotspot">Pickup hotspot</option>
+                <option value="checkpoint">Checkpoint</option>
+              </select>
+            </label>
+            <label>
+              Confidence
+              <input id="reportConfidence" type="number" min="0" max="100" value="50">
+            </label>
+          </div>
+          <label>
+            Title
+            <input id="reportTitle" type="text" placeholder="Hung Hom tunnel queue">
+          </label>
+          <label>
+            Notes
+            <textarea id="reportNotes" rows="2" placeholder="Short driver note"></textarea>
+          </label>
+          <div class="button-row">
+            <button id="addReport" class="primary-button" type="button">Add at map center</button>
+            <button id="clearLocalReports" class="secondary-button" type="button">Clear local</button>
+          </div>
+          <div id="reportList" class="route-list"></div>
+        </div>
+      </aside>
+    </section>
+
+    <nav class="drive-dock" aria-label="Driving quick actions">
+      <button id="driveRecord" class="primary-button" type="button">Record</button>
+      <button id="driveTraffic" class="secondary-button" type="button">Traffic</button>
+      <button id="driveTunnel" class="secondary-button" type="button">Tunnel</button>
+      <button id="drivePickup" class="secondary-button" type="button">Pickup</button>
+    </nav>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>
