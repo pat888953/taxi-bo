@@ -208,6 +208,7 @@ async function loadSelectedRoute() {
   } else { await enrichRouteFromValhalla(); }
   updateNavigationHud(0);
   updateCamera(0, true);
+  setJourneyCollapsed(true);
 }
 
 async function enrichRouteFromValhalla() {
@@ -399,6 +400,7 @@ function addNavigationLayers() {
 
 function startNavigation(rate = 1) {
   if (!mapReady || !activeLine.length) return;
+  setJourneyCollapsed(true);
   pauseNavigation();
   stopLiveDrive();
   if (latestProgress >= 1) latestProgress = 0;
@@ -1102,3 +1104,18 @@ function createNavigationId() {
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   return [hex.slice(0,8), hex.slice(8,12), hex.slice(12,16), hex.slice(16,20), hex.slice(20)].join('-');
 }
+
+function setJourneyCollapsed(collapsed) {
+ document.body.classList.toggle('journey-collapsed', collapsed);
+ const toggle=document.querySelector('#toggleJourney');
+ toggle.textContent=collapsed ? 'Edit route ↑' : 'Hide planner ↓';
+ toggle.setAttribute('aria-expanded', String(!collapsed));
+ // Leave the vehicle in the unobscured map area above the driving controls.
+ CAMERA.padding.bottom=collapsed ? 170 : 245;
+ if(mapReady && activeLine.length) updateCamera(latestProgress,true);
+}
+document.querySelector('#toggleJourney').addEventListener('click',()=>{
+ const collapsed=document.body.classList.contains('journey-collapsed');
+ setJourneyCollapsed(!collapsed);
+ if(collapsed) document.querySelector('#journeyStart').focus({preventScroll:true});
+});

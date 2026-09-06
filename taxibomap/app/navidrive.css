@@ -4,3 +4,21 @@
 .planner{display:grid;grid-template-columns:1fr auto;gap:8px;margin:8px 0 12px}.planner label{display:grid;gap:4px;font-size:12px}.planner input{font:inherit;font-size:14px;padding:12px;border:1px solid #ccd9d3;border-radius:10px;width:100%;min-width:0}.planner button{align-self:end}#planGo{background:#d7f5a8}#planStatus{grid-column:1/-1;font-size:12px;line-height:1.4}.saved-journeys summary{cursor:pointer;font-size:12px;padding:6px 0}.journey-panel{max-height:65dvh;overflow:auto}.planner button:disabled{opacity:.5;cursor:wait}
 
 #briefNav{background:#e4f0ff;border-color:#b8d3ee}@media(max-width:620px){.drive-controls{display:grid;grid-template-columns:repeat(3,1fr)}}
+
+/* Keep the map visible once a route has been selected. */
+.journey-toggle{display:block;margin-left:auto;min-height:44px;padding:8px 12px;font-size:12px}
+.journey-collapsed .journey-panel .planner,
+.journey-collapsed .journey-panel .journey-heading,
+.journey-collapsed .journey-panel .saved-journeys,
+.journey-collapsed .journey-panel .hint{display:none}
+.journey-collapsed .journey-panel{padding:8px 12px}
+.journey-collapsed .trip-stats{padding:6px 0}
+.journey-collapsed .trip-stats strong{font-size:23px}
+.journey-collapsed .journey-toggle{min-height:36px;padding:6px 10px}
+@media(max-width:620px){
+ .journey-collapsed .journey-panel{bottom:max(24px,env(safe-area-inset-bottom));max-height:35dvh}
+ .journey-collapsed .drive-controls{display:flex;overflow-x:auto;padding-bottom:2px}
+ .journey-collapsed .drive-controls button{flex:0 0 auto;min-height:44px;padding:8px 12px}
+ .journey-collapsed .map-actions{top:auto;bottom:calc(190px + env(safe-area-inset-bottom));left:auto;right:12px;display:grid}
+ .journey-collapsed .map-actions button{min-height:44px}
+}
