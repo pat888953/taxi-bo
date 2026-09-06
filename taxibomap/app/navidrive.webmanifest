@@ -2,6 +2,7 @@
   "name": "TaxiBo NaviDrive",
   "short_name": "NaviDrive",
   "description": "TaxiBo navigation powered by Valhalla and HDE.",
+  "id": "/navidrive.html",
   "start_url": "/navidrive.html",
   "scope": "/",
   "display": "standalone",
