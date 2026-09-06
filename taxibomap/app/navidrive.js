@@ -42,6 +42,7 @@ let pausedAt = 0;
 let durationMs = 26000;
 let playbackRate = 1;
 let latestProgress = 0;
+let vehicleMarker = null;
 
 initializeNavigation();
 
@@ -396,6 +397,15 @@ function addNavigationLayers() {
       "text-halo-width": 3
     }
   });
+
+  const markerElement = document.createElement("div");
+  markerElement.className = "navidrive-vehicle-marker";
+  markerElement.setAttribute("aria-label", "Vehicle position");
+  vehicleMarker = new maplibregl.Marker({
+    element: markerElement,
+    rotationAlignment: "map",
+    pitchAlignment: "map"
+  }).setLngLat(HK_CENTER).addTo(map);
 }
 
 function startNavigation(rate = 1) {
@@ -507,6 +517,7 @@ function handleLivePosition(position) {
   latestProgress = snapped.progress;
   map.getSource("vehicle").setData(pointFeature(snapped.point, bearing));
   map.getSource("vehicleDot").setData(pointFeature(snapped.point, bearing));
+  vehicleMarker?.setLngLat([snapped.point.longitude, snapped.point.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(pointFeature(point, bearing));
   map.getSource("snapTether").setData(snapped.distance > 8 ? lineFeature([point, snapped.point]) : lineFeature([]));
   map.easeTo({
@@ -588,6 +599,7 @@ function updateCamera(progress, immediate) {
 
   map.getSource("vehicle").setData(pointFeature(current, bearing));
   map.getSource("vehicleDot").setData(pointFeature(current, bearing));
+  vehicleMarker?.setLngLat([current.longitude, current.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(rawCurrent ? pointFeature(rawCurrent, bearing) : emptyPointFeature());
   map.getSource("snapTether").setData(rawCurrent && driftMeters > 12 ? lineFeature([rawCurrent, current]) : lineFeature([]));
   map.easeTo({
@@ -1111,7 +1123,8 @@ function setJourneyCollapsed(collapsed) {
  toggle.textContent=collapsed ? 'Edit route ↑' : 'Hide planner ↓';
  toggle.setAttribute('aria-expanded', String(!collapsed));
  // Leave the vehicle in the unobscured map area above the driving controls.
- CAMERA.padding.bottom=collapsed ? 170 : 245;
+ CAMERA.padding.bottom=collapsed ? 88 : 245;
+ CAMERA.lookAheadProgress=collapsed ? 0.008 : 0.018;
  if(mapReady && activeLine.length) updateCamera(latestProgress,true);
 }
 document.querySelector('#toggleJourney').addEventListener('click',()=>{

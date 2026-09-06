@@ -16,9 +16,15 @@
 .journey-collapsed .trip-stats strong{font-size:23px}
 .journey-collapsed .journey-toggle{min-height:36px;padding:6px 10px}
 @media(max-width:620px){
- .journey-collapsed .journey-panel{bottom:max(24px,env(safe-area-inset-bottom));max-height:35dvh}
+ .journey-collapsed .journey-panel{bottom:max(8px,env(safe-area-inset-bottom));max-height:none;display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:13px;overflow:hidden}
+ .journey-collapsed .trip-stats{display:none}
+ .journey-collapsed .journey-toggle{order:2;flex:0 0 auto;min-height:40px;padding:6px 9px}
  .journey-collapsed .drive-controls{display:flex;overflow-x:auto;padding-bottom:2px}
- .journey-collapsed .drive-controls button{flex:0 0 auto;min-height:44px;padding:8px 12px}
- .journey-collapsed .map-actions{top:auto;bottom:calc(190px + env(safe-area-inset-bottom));left:auto;right:12px;display:grid}
+ .journey-collapsed .drive-controls button{flex:0 0 auto;min-height:40px;padding:6px 10px}
+ .journey-collapsed .map-actions{top:auto;bottom:calc(72px + env(safe-area-inset-bottom));left:auto;right:12px;display:grid}
  .journey-collapsed .map-actions button{min-height:44px}
 }
+
+.navidrive-vehicle-marker{position:relative;width:34px;height:42px;filter:drop-shadow(0 3px 3px rgba(0,0,0,.42));transform-origin:50% 58%}
+.navidrive-vehicle-marker::before{content:"";display:block;width:0;height:0;margin:auto;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:42px solid #087cff}
+.navidrive-vehicle-marker::after{content:"";position:absolute;left:12px;top:17px;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #075ab7}
