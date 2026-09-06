@@ -1,0 +1,25 @@
+{
+  "name": "TaxiBo NaviDrive",
+  "short_name": "NaviDrive",
+  "description": "TaxiBo navigation powered by Valhalla and HDE.",
+  "start_url": "/navidrive.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#102b27",
+  "theme_color": "#102b27",
+  "icons": [
+    {
+      "src": "/icons/navidrive-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/navidrive-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
