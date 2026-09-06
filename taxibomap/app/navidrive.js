@@ -193,8 +193,7 @@ async function loadSelectedRoute() {
 
   map.getSource("activeRoute").setData(lineFeature(activeLine));
   map.getSource("rawRoute").setData(lineFeature(rawLine));
-  map.getSource("vehicle").setData(pointFeature(activeLine[0], 0));
-  map.getSource("vehicleDot").setData(pointFeature(activeLine[0], 0));
+  vehicleMarker?.setLngLat([activeLine[0].longitude, activeLine[0].latitude]).setRotation(0);
   map.getSource("rawVehicle").setData(rawLine.length ? pointFeature(rawLine[0], 0) : emptyPointFeature());
   map.getSource("snapTether").setData(lineFeature([]));
   reports = await loadReports();
@@ -259,8 +258,6 @@ function addNavigationLayers() {
   map.addSource("liveGpsTrail", emptyLineSource());
   map.addSource("reportMarkers", emptyFeatureCollectionSource());
   map.addSource("rawVehicle", pointSource(HK_CENTER));
-  map.addSource("vehicleDot", pointSource(HK_CENTER));
-  map.addSource("vehicle", pointSource(HK_CENTER));
 
   map.addLayer({
     id: "rawRoute",
@@ -365,36 +362,6 @@ function addNavigationLayers() {
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 2,
       "circle-opacity": 0.86
-    }
-  });
-
-  map.addLayer({
-    id: "vehicleDot",
-    type: "circle",
-    source: "vehicleDot",
-    paint: {
-      "circle-color": "#1478ff",
-      "circle-radius": 8,
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 3,
-      "circle-opacity": 0.98
-    }
-  });
-
-  map.addLayer({
-    id: "vehicle",
-    type: "symbol",
-    source: "vehicle",
-    layout: {
-      "text-field": "\u25b2",
-      "text-size": 30,
-      "text-allow-overlap": true,
-      "text-rotate": ["get", "bearing"]
-    },
-    paint: {
-      "text-color": "#1478ff",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 3
     }
   });
 
@@ -515,8 +482,6 @@ function handleLivePosition(position) {
   const onRoute = snapped.distance <= Math.max(35, point.accuracy * 2);
 
   latestProgress = snapped.progress;
-  map.getSource("vehicle").setData(pointFeature(snapped.point, bearing));
-  map.getSource("vehicleDot").setData(pointFeature(snapped.point, bearing));
   vehicleMarker?.setLngLat([snapped.point.longitude, snapped.point.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(pointFeature(point, bearing));
   map.getSource("snapTether").setData(snapped.distance > 8 ? lineFeature([point, snapped.point]) : lineFeature([]));
@@ -597,8 +562,6 @@ function updateCamera(progress, immediate) {
   const rawCurrent = rawLine.length ? pointAtProgress(rawLine, rawCumulative, progress) : null;
   const driftMeters = rawCurrent ? distanceMeters(rawCurrent, current) : 0;
 
-  map.getSource("vehicle").setData(pointFeature(current, bearing));
-  map.getSource("vehicleDot").setData(pointFeature(current, bearing));
   vehicleMarker?.setLngLat([current.longitude, current.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(rawCurrent ? pointFeature(rawCurrent, bearing) : emptyPointFeature());
   map.getSource("snapTether").setData(rawCurrent && driftMeters > 12 ? lineFeature([rawCurrent, current]) : lineFeature([]));
