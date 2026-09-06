@@ -43,6 +43,9 @@ let durationMs = 26000;
 let playbackRate = 1;
 let latestProgress = 0;
 let vehicleMarker = null;
+let offRouteReadings = 0;
+let rerouteInFlight = false;
+let lastRerouteAt = 0;
 
 initializeNavigation();
 
@@ -448,6 +451,7 @@ function stopLiveDrive(clearStatus = true) {
   }
   liveDriveButton.textContent = "Live Drive";
   liveDriveButton.classList.remove("live");
+  offRouteReadings = 0;
   if (clearStatus && livePoints.length) {
     routeStatus.textContent = `Live drive stopped. ${livePoints.length} GPS points captured.`;
   }
@@ -480,6 +484,12 @@ function handleLivePosition(position) {
   const bearing = activeLine.length ? bearingBetween(snapped.point, ahead) : Number(position.coords.heading || 0);
   const driftText = formatMeters(snapped.distance);
   const onRoute = snapped.distance <= Math.max(35, point.accuracy * 2);
+  const reliableOffRoute = !onRoute && point.accuracy <= 60 && snapped.progress < 0.99;
+
+  offRouteReadings = reliableOffRoute ? offRouteReadings + 1 : 0;
+  if (offRouteReadings >= 3 && !rerouteInFlight && Date.now() - lastRerouteAt >= 20000) {
+    void rerouteFromCurrentPosition(point);
+  }
 
   latestProgress = snapped.progress;
   vehicleMarker?.setLngLat([snapped.point.longitude, snapped.point.latitude]).setRotation(bearing);
@@ -500,7 +510,66 @@ function handleLivePosition(position) {
   speedValue.textContent = point.speed === null ? "0" : String(Math.max(0, Math.round(point.speed * 3.6)));
   distanceValue.textContent = activeLine.length ? (totalLineDistance(activeLine) * (1 - snapped.progress) / 1000).toFixed(1) : "--";
   etaValue.textContent = activeLine.length && point.speed > 0 ? String(Math.ceil(totalLineDistance(activeLine) * (1 - snapped.progress) / point.speed / 60)) : "--";
-  routeStatus.textContent = `GPS drift ${driftText}. Accuracy ${Math.round(point.accuracy)} m. ${livePoints.length} points.`;
+  if (!rerouteInFlight) {
+    const rerouteNotice = reliableOffRoute ? ` Reroute check ${Math.min(offRouteReadings, 3)}/3.` : "";
+    routeStatus.textContent = `GPS drift ${driftText}. Accuracy ${Math.round(point.accuracy)} m. ${livePoints.length} points.${rerouteNotice}`;
+  }
+}
+
+async function rerouteFromCurrentPosition(point) {
+  const destination = activeRoute?.planned?.destination || activeLine.at(-1);
+  if (!destination || !isInsideHongKong(destination)) return;
+
+  rerouteInFlight = true;
+  lastRerouteAt = Date.now();
+  offRouteReadings = 0;
+  nextDistance.textContent = "Rerouting";
+  nextInstruction.textContent = "Finding a new route";
+  routeStatus.textContent = "Off route. Recalculating with Valhalla + HDE…";
+
+  try {
+    const response = await fetch("/api/navidrive/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start: point, destination }),
+      signal: AbortSignal.timeout(120000)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Reroute failed.");
+
+    const reroutedLine = normalizePoints(result.geometry);
+    if (reroutedLine.length < 2) throw new Error("Valhalla returned an empty reroute.");
+
+    activeRoute = {
+      ...activeRoute,
+      name: `${result.start.label || "Current location"} → ${result.destination.label || "Destination"}`,
+      points: reroutedLine,
+      matchedPoints: [],
+      planned: result
+    };
+    activeLine = reroutedLine;
+    rawLine = [];
+    cumulative = buildCumulativeDistances(activeLine);
+    rawCumulative = [];
+    maneuvers = normalizeManeuvers(result.maneuvers, totalLineDistance(activeLine));
+    durationMs = Math.max(1000, Number(result.summary?.durationSeconds || 0) * 1000);
+    latestProgress = 0;
+    map.getSource("activeRoute").setData(lineFeature(activeLine));
+    map.getSource("rawRoute").setData(lineFeature([]));
+    map.getSource("rawVehicle").setData(emptyPointFeature());
+    map.getSource("snapTether").setData(lineFeature([]));
+    renderReportOverlays();
+    document.querySelector("#journeyName").textContent = activeRoute.name;
+    nextDistance.textContent = "New route";
+    nextInstruction.textContent = instructionForProgress(0, totalLineDistance(activeLine)).text;
+    routeStatus.textContent = `${result.engine}. Route recalculated from your current position.`;
+  } catch (error) {
+    nextDistance.textContent = "Off route";
+    nextInstruction.textContent = "Continue safely while NaviDrive retries";
+    routeStatus.textContent = `Reroute unavailable: ${error.message}`;
+  } finally {
+    rerouteInFlight = false;
+  }
 }
 
 async function saveLiveDrive() {
