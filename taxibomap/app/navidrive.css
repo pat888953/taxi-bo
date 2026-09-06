@@ -28,3 +28,7 @@
 .navidrive-vehicle-marker{position:relative;width:34px;height:42px;filter:drop-shadow(0 3px 3px rgba(0,0,0,.42));transform-origin:50% 58%}
 .navidrive-vehicle-marker::before{content:"";display:block;width:0;height:0;margin:auto;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:42px solid #087cff}
 .navidrive-vehicle-marker::after{content:"";position:absolute;left:12px;top:17px;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #075ab7}
+.voice-field{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:6px;align-items:stretch}
+.planner .voice-field .mic-button{min-height:46px;padding:6px;border-color:#a9c9bc;background:#edf7f1;font-size:21px;line-height:1}
+.planner .voice-field .mic-button.listening{background:#d7f5a8;border-color:#6ba447;box-shadow:0 0 0 3px rgba(107,164,71,.2)}
+.planner .voice-field .mic-button:disabled{filter:grayscale(1)}

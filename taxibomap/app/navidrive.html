@@ -29,9 +29,9 @@
       <button id="toggleJourney" class="journey-toggle" type="button" aria-expanded="true" aria-controls="planJourney">Hide planner ↓</button>
       <div class="journey-heading"><div><small>YOUR JOURNEY</small><h1 id="journeyName">Ready when you are.</h1></div><a href="index.html">Recorder ↗</a></div>
       <form id="planJourney" class="planner">
- <label>Start<input id="journeyStart" placeholder="Place name or latitude, longitude" required maxlength="200"></label>
+ <label>Start<span class="voice-field"><input id="journeyStart" placeholder="Place name or latitude, longitude" required maxlength="200"><button class="mic-button" type="button" data-voice-target="journeyStart" aria-label="Speak start location" title="Speak start location">🎤</button></span></label>
  <button id="useMyLocation" type="button">Use my location</button>
- <label>Destination<input id="journeyDestination" placeholder="Where are you going?" required maxlength="200"></label>
+ <label>Destination<span class="voice-field"><input id="journeyDestination" placeholder="Where are you going?" required maxlength="200"><button class="mic-button" type="button" data-voice-target="journeyDestination" aria-label="Speak destination" title="Speak destination">🎤</button></span></label>
  <button id="planGo" type="submit">Go →</button>
  <small id="planStatus" role="status">Plan a Hong Kong journey with Valhalla and local HDE.</small>
  </form><details class="saved-journeys"><summary>Saved routes / Import JSON</summary><label class="import-label">Import Cue JSON <input id="importCueFile" type="file" accept=".json,application/json"></label><small id="importResult" role="status"></small><div class="route-picker"><label for="routeSelect">Saved route</label><select id="routeSelect"><option>Loading routes…</option></select><button id="loadRoute" type="button">Load route</button></div>
@@ -40,7 +40,7 @@
       <p class="hint">Brief previews at 10× speed. Replay uses normal speed. Live Drive uses GPS and reroutes automatically.</p>
     </section>
   </main>
-  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=5"></script>
+  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=6"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/navidrive-sw.js"));

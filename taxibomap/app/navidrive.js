@@ -57,6 +57,58 @@ liveDriveButton.addEventListener("click", toggleLiveDrive);
 saveDriveButton.addEventListener("click", saveLiveDrive);
 recenterButton.addEventListener("click", () => updateCamera(latestProgress, true));
 reportTrafficButton.addEventListener("click", reportTraffic);
+document.querySelectorAll("[data-voice-target]").forEach((button) => {
+  button.addEventListener("click", () => captureVoiceLocation(button));
+});
+
+let activeRecognition = null;
+
+function captureVoiceLocation(button) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    planStatus.textContent = "Voice input is not supported by this browser. Try Chrome on the phone.";
+    return;
+  }
+  if (activeRecognition) {
+    activeRecognition.stop();
+    return;
+  }
+
+  const input = document.querySelector(`#${button.dataset.voiceTarget}`);
+  const recognition = new SpeechRecognition();
+  activeRecognition = recognition;
+  recognition.lang = navigator.language || "en-HK";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  button.classList.add("listening");
+  button.textContent = "●";
+  document.querySelectorAll("[data-voice-target]").forEach((item) => { item.disabled = item !== button; });
+  planStatus.textContent = `Listening for ${button.dataset.voiceTarget === "journeyStart" ? "start location" : "destination"}…`;
+
+  recognition.addEventListener("result", (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+    if (!transcript) return;
+    input.value = transcript;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    planStatus.textContent = `Voice entered: ${transcript}. Check it, then press Go.`;
+  });
+  recognition.addEventListener("error", (event) => {
+    const messages = {
+      "not-allowed": "Allow microphone permission for NaviDrive, then try again.",
+      "no-speech": "No speech heard. Tap the microphone and try again.",
+      "audio-capture": "The phone microphone is unavailable."
+    };
+    planStatus.textContent = messages[event.error] || `Voice input failed: ${event.error}.`;
+  });
+  recognition.addEventListener("end", () => {
+    activeRecognition = null;
+    button.classList.remove("listening");
+    button.textContent = "🎤";
+    document.querySelectorAll("[data-voice-target]").forEach((item) => { item.disabled = false; });
+  });
+  recognition.start();
+}
 
 async function initializeNavigation() {
   nextDistance.textContent = "Loading";
