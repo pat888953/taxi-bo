@@ -2498,23 +2498,19 @@ def build_hde_selected_draft_route(start, destination, start_label, via_points=N
         error_text = "; ".join(f'{item["engine"]}: {item["error"]}' for item in errors)
         raise ValueError(error_text or "No routing engine could prepare this route.")
 
-    assessed = []
-    for generated in candidates:
-        hybrid = build_best_hybrid_route(generated)
-        candidate = hybrid if should_promote_hybrid_route(hybrid) else generated
-        candidate["routeEngine"] = generated.get("routeEngine", candidate.get("routeEngine", "osrm"))
-        candidate["hdeComparedEngines"] = [
-            {
-                "engine": route.get("routeEngine", "unknown"),
-                "forks": int(route.get("routeForkCount") or route_warning_count(route.get("routeWarnings"), "route-fork")),
-                "warnings": len(route.get("routeWarnings") or []),
-                "distance": route.get("distance"),
-            }
-            for route in candidates
-        ]
-        assessed.append(candidate)
+    comparison = [
+        {
+            "engine": route.get("routeEngine", "unknown"),
+            "forks": int(route.get("routeForkCount") or route_warning_count(route.get("routeWarnings"), "route-fork")),
+            "warnings": len(route.get("routeWarnings") or []),
+            "distance": route.get("distance"),
+        }
+        for route in candidates
+    ]
+    for candidate in candidates:
+        candidate["hdeComparedEngines"] = comparison
 
-    selected = sort_route_options_by_driver_trust(assessed)[0]
+    selected = sort_route_options_by_driver_trust(candidates)[0]
     annotate_hde_engine_choice(selected, candidates)
     return selected
 
