@@ -2482,17 +2482,24 @@ def build_hde_selected_draft_route(start, destination, start_label, via_points=N
     candidates = []
     errors = []
 
-    for engine, fetcher in (
-        ("osrm", fetch_road_route),
-        ("valhalla", fetch_valhalla_road_route),
-    ):
-        try:
-            road_route = fetcher(start, destination, via_points)
-            generated = format_generated_route(start, destination, start_label, road_route)
-            generated["routeEngine"] = engine
-            candidates.append(generated)
-        except Exception as error:
-            errors.append({"engine": engine, "error": str(error)})
+    try:
+        valhalla_route = fetch_valhalla_road_route(start, destination, via_points)
+        valhalla = format_generated_route(start, destination, start_label, valhalla_route)
+        valhalla["routeEngine"] = "valhalla"
+        candidates.append(valhalla)
+        if not hde_draft_needs_fallback(valhalla):
+            annotate_hde_engine_choice(valhalla, candidates, "Valhalla route is clean, so OSRM was not needed.")
+            return valhalla
+    except Exception as error:
+        errors.append({"engine": "valhalla", "error": str(error)})
+
+    try:
+        osrm_route = fetch_road_route(start, destination, via_points)
+        osrm = format_generated_route(start, destination, start_label, osrm_route)
+        osrm["routeEngine"] = "osrm"
+        candidates.append(osrm)
+    except Exception as error:
+        errors.append({"engine": "osrm", "error": str(error)})
 
     if not candidates:
         error_text = "; ".join(f'{item["engine"]}: {item["error"]}' for item in errors)
@@ -2515,7 +2522,18 @@ def build_hde_selected_draft_route(start, destination, start_label, via_points=N
     return selected
 
 
-def annotate_hde_engine_choice(route, candidates):
+def hde_draft_needs_fallback(route):
+    warnings = route.get("routeWarnings") or []
+    if any(warning.get("severity") == "high" for warning in warnings):
+        return True
+    if route_warning_count(warnings, "route-fork") > 0 or route_warning_count(warnings, "route-loop") > 0:
+        return True
+    if route_warning_count(warnings, "repeated-harbour-crossing") > 0:
+        return True
+    return False
+
+
+def annotate_hde_engine_choice(route, candidates, note=""):
     selected_engine = route.get("routeEngine", "osrm")
     comparison = [
         {
@@ -2533,10 +2551,12 @@ def annotate_hde_engine_choice(route, candidates):
     warnings = route.setdefault("routeWarnings", [])
     fork_count = int(route.get("routeForkCount") or route_warning_count(warnings, "route-fork"))
     coverage = round(float(route.get("hybridCoverage") or 0) * 100)
-    reason = f"HDE compared {compared} and chose {selected_engine.upper()}."
+    reason = note or f"HDE compared {compared} and chose {selected_engine.upper()}."
     if coverage:
         reason += f" Saved-route coverage is {coverage}%."
     reason += f" Fork count is {fork_count}."
+    if not note and len(candidates) == 1:
+        reason = f"HDE chose {selected_engine.upper()} as the only available draft. Fork count is {fork_count}."
     route["hdeEngineChoice"] = {
         "selected": selected_engine,
         "compared": comparison,
