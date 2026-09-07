@@ -1657,8 +1657,7 @@ def generate_route(payload):
     if via_label == "Hung Hom Tunnel southbound":
         return build_hung_hom_route_for_direction(start, destination, start_label, via_label)
     try:
-        road_route = fetch_road_route(start, destination, via_points or None)
-        generated = format_generated_route(start, destination, start_label, road_route)
+        generated = build_hde_selected_draft_route(start, destination, start_label, via_points or None)
         if via_label:
             generated["viaLabel"] = via_label
         reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
@@ -2459,6 +2458,7 @@ def format_generated_route(start, destination, start_label, road_route):
     warnings = analyze_route_sanity(road_route["geometry"], road_route.get("distance"))
 
     return {
+        "routeEngine": road_route.get("engine", "osrm"),
         "start": {
             "latitude": start["latitude"],
             "longitude": start["longitude"],
@@ -2476,6 +2476,82 @@ def format_generated_route(start, destination, start_label, road_route):
         "routeWarnings": warnings,
         "routeForkCount": route_warning_count(warnings, "route-fork"),
     }
+
+
+def build_hde_selected_draft_route(start, destination, start_label, via_points=None):
+    candidates = []
+    errors = []
+
+    for engine, fetcher in (
+        ("osrm", fetch_road_route),
+        ("valhalla", fetch_valhalla_road_route),
+    ):
+        try:
+            road_route = fetcher(start, destination, via_points)
+            generated = format_generated_route(start, destination, start_label, road_route)
+            generated["routeEngine"] = engine
+            candidates.append(generated)
+        except Exception as error:
+            errors.append({"engine": engine, "error": str(error)})
+
+    if not candidates:
+        error_text = "; ".join(f'{item["engine"]}: {item["error"]}' for item in errors)
+        raise ValueError(error_text or "No routing engine could prepare this route.")
+
+    assessed = []
+    for generated in candidates:
+        hybrid = build_best_hybrid_route(generated)
+        candidate = hybrid if should_promote_hybrid_route(hybrid) else generated
+        candidate["routeEngine"] = generated.get("routeEngine", candidate.get("routeEngine", "osrm"))
+        candidate["hdeComparedEngines"] = [
+            {
+                "engine": route.get("routeEngine", "unknown"),
+                "forks": int(route.get("routeForkCount") or route_warning_count(route.get("routeWarnings"), "route-fork")),
+                "warnings": len(route.get("routeWarnings") or []),
+                "distance": route.get("distance"),
+            }
+            for route in candidates
+        ]
+        assessed.append(candidate)
+
+    selected = sort_route_options_by_driver_trust(assessed)[0]
+    annotate_hde_engine_choice(selected, candidates)
+    return selected
+
+
+def annotate_hde_engine_choice(route, candidates):
+    selected_engine = route.get("routeEngine", "osrm")
+    comparison = [
+        {
+            "engine": candidate.get("routeEngine", "unknown"),
+            "forks": int(candidate.get("routeForkCount") or route_warning_count(candidate.get("routeWarnings"), "route-fork")),
+            "warnings": len(candidate.get("routeWarnings") or []),
+            "distance": candidate.get("distance"),
+        }
+        for candidate in candidates
+    ]
+    compared = ", ".join(
+        f'{item["engine"].upper()} {item["forks"]} fork{"" if item["forks"] == 1 else "s"}'
+        for item in comparison
+    )
+    warnings = route.setdefault("routeWarnings", [])
+    fork_count = int(route.get("routeForkCount") or route_warning_count(warnings, "route-fork"))
+    coverage = round(float(route.get("hybridCoverage") or 0) * 100)
+    reason = f"HDE compared {compared} and chose {selected_engine.upper()}."
+    if coverage:
+        reason += f" Saved-route coverage is {coverage}%."
+    reason += f" Fork count is {fork_count}."
+    route["hdeEngineChoice"] = {
+        "selected": selected_engine,
+        "compared": comparison,
+        "reason": reason,
+    }
+    warnings.append({
+        "code": "hde-engine-choice",
+        "severity": "low",
+        "title": f"HDE chose {selected_engine.upper()} draft",
+        "message": reason,
+    })
 
 
 def generate_cues(payload):
@@ -2550,8 +2626,7 @@ def prepare_route_options(payload):
             )
         else:
             try:
-                road_route = fetch_road_route(start, destination, via_points)
-                generated = format_generated_route(start, destination, start_label, road_route)
+                generated = build_hde_selected_draft_route(start, destination, start_label, via_points)
                 generated["viaLabel"] = via_label
                 reject_unsafe_tunnel_route(generated, via_label, allow_route_shape_review=True)
                 if via_label and "western" in via_label.lower():
@@ -2568,8 +2643,7 @@ def prepare_route_options(payload):
         return add_hybrid_route_option([match_prepared_route(generated, "via-road", label)])
 
     if not requires_harbour_crossing(start, destination):
-        road_route = fetch_road_route(start, destination)
-        generated = format_generated_route(start, destination, start_label, road_route)
+        generated = build_hde_selected_draft_route(start, destination, start_label)
         return add_hybrid_route_option([match_prepared_route(generated, "fastest", "Fastest route")])
 
     options = []
@@ -2580,8 +2654,7 @@ def prepare_route_options(payload):
                 generated = build_hung_hom_route_for_direction(start, destination, start_label, via_label)
             else:
                 try:
-                    road_route = fetch_road_route(start, destination, [waypoint])
-                    generated = format_generated_route(start, destination, start_label, road_route)
+                    generated = build_hde_selected_draft_route(start, destination, start_label, [waypoint])
                     generated["viaLabel"] = label
                     reject_unsafe_tunnel_route(generated, label)
                 except Exception as error:
@@ -2593,8 +2666,7 @@ def prepare_route_options(payload):
             continue
 
     if not options:
-        road_route = fetch_road_route(start, destination)
-        generated = format_generated_route(start, destination, start_label, road_route)
+        generated = build_hde_selected_draft_route(start, destination, start_label)
         options.append(match_prepared_route(generated, "fastest", "Fastest route"))
 
     return add_hybrid_route_option(options)
@@ -4280,6 +4352,47 @@ def fetch_road_route(start, destination, waypoints=None):
         "distance": route.get("distance"),
         "duration": route.get("duration"),
         "cues": extract_turn_cues(route),
+    }
+
+
+def fetch_valhalla_road_route(start, destination, waypoints=None):
+    route_points = [start, *(waypoints or []), destination]
+    locations = []
+
+    for index, point in enumerate(route_points):
+        locations.append({
+            "lat": float(point["latitude"]),
+            "lon": float(point["longitude"]),
+            "type": "break" if index in {0, len(route_points) - 1} else "through",
+        })
+
+    data = fetch_json_post(
+        VALHALLA_ROUTE_URL,
+        {
+            "locations": locations,
+            "costing": "taxi",
+            "directions_options": {"units": "kilometers"},
+            "format": "osrm",
+            "shape_format": "geojson",
+        },
+        VALHALLA_HEADERS,
+    )
+    route = (data.get("routes") or [None])[0]
+
+    if not route:
+        raise ValueError("Valhalla did not return a driving route.")
+
+    geometry = extract_valhalla_osrm_geometry(route)
+
+    if not geometry:
+        raise ValueError("Valhalla did not return route geometry.")
+
+    return {
+        "engine": "valhalla",
+        "geometry": geometry,
+        "distance": route.get("distance"),
+        "duration": route.get("duration"),
+        "cues": extract_valhalla_osrm_cues(route),
     }
 
 

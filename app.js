@@ -4224,8 +4224,9 @@ function applyPreparedRoute(generatedRoute, destination, locationContext = "") {
     ? `<div class="route-generation-warning"><strong>Do not save cue photos from this route yet</strong><span>This map route needs driver review. Prefer a recorded route or record the actual taxi path first.</span></div>`
     : "";
   const engine = generatedRoute.hybridEngine || {};
+  const engineChoice = generatedRoute.hdeEngineChoice || {};
   const engineSummary = engine.state
-    ? `<div class="hybrid-engine-summary is-${escapeHtml(engine.state)}"><strong>Hybrid Drive Engine: ${escapeHtml(engine.state)}</strong><span>${Math.round(Number(engine.confidence || 0) * 100)}% confidence · ${Number(engine.provenCorridorCount || 0)} proven corridor · ${Number(engine.generatedConnectorCount || 0)} generated connector${engine.recordingNeeded ? " · recording recommended" : ""}</span></div>`
+    ? `<div class="hybrid-engine-summary is-${escapeHtml(engine.state)}"><strong>Hybrid Drive Engine: ${escapeHtml(engine.state)}</strong><span>${Math.round(Number(engine.confidence || 0) * 100)}% confidence · ${Number(engine.provenCorridorCount || 0)} proven corridor · ${Number(engine.generatedConnectorCount || 0)} generated connector${engine.recordingNeeded ? " · recording recommended" : ""}${engineChoice.reason ? ` · ${escapeHtml(engineChoice.reason)}` : ""}</span></div>`
     : "";
 
   preparedRoute = normalizeImportedRoute({
