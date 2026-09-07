@@ -461,3 +461,47 @@ cloudTargetUrl.value = localStorage.getItem(TAXIBO_CLOUD_TARGET_KEY) || "https:/
 renderSettings();
 checkDatabaseHealth();
 loadHybridEngine();
+
+// Photo-free route packages for the local NaviDrive app.
+const naviExportSelect = document.querySelector('#naviExportRoute');
+const naviExportButton = document.querySelector('#exportNaviDrive');
+const naviExportStatus = document.querySelector('#naviExportStatus');
+let naviExportRoutes = [];
+let naviExportLoad = 0;
+async function loadNaviExportRoutes() {
+ const request = ++naviExportLoad;
+ naviExportButton.disabled = true;
+ naviExportStatus.textContent = 'Loading saved routes...';
+ try {
+  const response = await fetch('/api/routes?images=0', {cache:'no-store', headers:{'X-TaxiBo-Storage-Mode':getStorageMode()}});
+  if (!response.ok) throw new Error('Could not load routes. Use Refresh routes to retry.');
+  const data = await response.json();
+  if (!Array.isArray(data)) throw new Error('Invalid route list.');
+  if (request !== naviExportLoad) return;
+  naviExportRoutes = data;
+  naviExportSelect.replaceChildren();
+  for (const route of data) {
+   const option = document.createElement('option'); option.value=route.id; option.textContent=route.name || route.destination || 'Untitled route'; naviExportSelect.append(option);
+  }
+  naviExportButton.disabled = !data.length;
+  naviExportStatus.textContent = data.length ? 'Choose a route to export.' : 'No saved routes in this storage mode. Save a route in Cue first.';
+ } catch(error) { if(request === naviExportLoad) { naviExportRoutes=[]; naviExportSelect.replaceChildren(); naviExportStatus.textContent=error.message; } }
+}
+document.querySelector('#refreshNaviRoutes').addEventListener('click',loadNaviExportRoutes);
+inHouseMaintenanceSwitch.addEventListener('change',loadNaviExportRoutes);
+naviExportButton.addEventListener('click',()=>{
+ try {
+  const selected=naviExportRoutes.find(r=>String(r.id)===naviExportSelect.value);
+  if(!selected) throw Error('Choose a saved route first.');
+  const {photos,...route}=selected;
+  const geometry=route.routeGeometry?.length>=2 ? route.routeGeometry : route.recordedTrackPoints;
+  if(!geometry || geometry.length<2) throw Error('This route has no geometry. Prepare and save it in Cue first.');
+  const blob=new Blob([JSON.stringify({format:'taxibo-cue-route',version:1,exportedAt:new Date().toISOString(),route})],{type:'application/json'});
+  if(blob.size>40*1024*1024) throw Error('Route package exceeds 40 MB.');
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download='taxibo-cue-route-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  naviExportStatus.textContent='Exported. Open local NaviDrive and use Import Cue JSON to load the downloaded file.';
+ } catch(error) {naviExportStatus.textContent=error.message;}
+});
+loadNaviExportRoutes();

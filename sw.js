@@ -1,17 +1,20 @@
-const CACHE_NAME = "taxi-bo-v157";
+const CACHE_NAME = "taxi-bo-v162";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./academy.html",
   "./settings.html",
   "./four-in-one.html",
+  "./navidrive.html",
+  "./navidrive.css?v=1",
+  "./navidrive.js?v=1",
   "./four-in-one.css?v=2",
   "./four-in-one.js?v=2",
   "./phone.html",
   "./styles.css?v=157",
-  "./app.js?v=156",
+  "./app.js?v=159",
   "./academy.js?v=95",
-  "./settings.js?v=96",
+  "./settings.js?v=97",
   "./phone.js",
   "./manifest.json",
   "./icons/icon.svg",

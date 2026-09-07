@@ -16,12 +16,21 @@
       <div><span>System mode</span><strong>TaxiBo Settings</strong></div>
       <nav class="module-links" aria-label="TaxiBo modules">
         <a href="index.html">Open TaxiBo Cue</a>
+        <a href="navidrive.html">Open NaviDrive</a>
         <a href="academy.html">Open TaxiBo Academy</a>
         <a href="four-in-one.html">Open TaxiBo 4-in-One</a>
       </nav>
     </header>
 
     <main class="settings-layout">
+      <section class="panel settings-panel">
+        <div class="panel-header"><div><p class="section-label">NaviDrive</p><h2>Export a route to local NaviDrive</h2></div></div>
+        <p>Choose a saved route from the current storage mode. The JSON contains route geometry and metadata, without photos. Save prepared routes in Cue before exporting.</p>
+        <label class="field"><span>Route</span><select id="naviExportRoute"><option value="">Loading routes...</option></select></label>
+        <button id="refreshNaviRoutes" class="secondary-button" type="button">Refresh routes</button>
+        <button id="exportNaviDrive" class="primary-button" type="button" disabled>Export NaviDrive JSON</button>
+        <div id="naviExportStatus" class="form-state empty-state" role="status"></div>
+      </section>
       <section class="panel settings-panel">
         <div class="panel-header">
           <div>
@@ -140,7 +149,7 @@
     </main>
   </div>
 
-  <script src="settings.js?v=96"></script>
+  <script src="settings.js?v=97"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {

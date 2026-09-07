@@ -29,6 +29,12 @@ HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
 }
+VALHALLA_ROUTE_URL = os.environ.get("VALHALLA_ROUTE_URL", "https://valhalla1.openstreetmap.de/route").strip()
+VALHALLA_HEADERS = {
+    **HTTP_HEADERS,
+    "Content-Type": "application/json",
+    "X-Client-Id": os.environ.get("VALHALLA_CLIENT_ID", "taxibo.onrender.com"),
+}
 
 HONG_KONG_TUNNEL_OPTIONS = (
     ("hung-hom", "Hung Hom Tunnel", {"latitude": 22.3029, "longitude": 114.1815}),
@@ -4277,6 +4283,143 @@ def fetch_road_route(start, destination, waypoints=None):
     }
 
 
+def fetch_navidrive_route(payload):
+    points = normalize_navidrive_points(payload.get("points") or [])
+
+    if len(points) < 2:
+        raise ValueError("NaviDrive Valhalla route needs at least a start and destination point.")
+
+    locations = []
+    for index, point in enumerate(points):
+        locations.append({
+            "lat": point["latitude"],
+            "lon": point["longitude"],
+            "type": "break" if index in {0, len(points) - 1} else "through",
+        })
+
+    data = fetch_json_post(
+        VALHALLA_ROUTE_URL,
+        {
+            "locations": locations,
+            "costing": payload.get("costing") or "taxi",
+            "directions_options": {"units": "kilometers"},
+            "format": "osrm",
+            "shape_format": "geojson",
+        },
+        VALHALLA_HEADERS,
+    )
+    route = (data.get("routes") or [None])[0]
+
+    if not route:
+        raise ValueError("Valhalla did not return a NaviDrive route.")
+
+    geometry = extract_valhalla_osrm_geometry(route)
+
+    if len(geometry) < 2:
+        raise ValueError("Valhalla did not return NaviDrive route geometry.")
+
+    return {
+        "engine": "valhalla",
+        "geometry": geometry,
+        "distance": route.get("distance"),
+        "duration": route.get("duration"),
+        "cues": extract_valhalla_osrm_cues(route),
+    }
+
+
+def normalize_navidrive_points(raw_points):
+    points = []
+
+    for raw in raw_points:
+        if isinstance(raw, dict):
+            latitude = raw.get("latitude", raw.get("lat"))
+            longitude = raw.get("longitude", raw.get("lng", raw.get("lon")))
+        elif isinstance(raw, (list, tuple)) and len(raw) >= 2:
+            latitude, longitude = raw[0], raw[1]
+        else:
+            continue
+
+        try:
+            latitude = float(latitude)
+            longitude = float(longitude)
+        except (TypeError, ValueError):
+            continue
+
+        if is_in_hong_kong_bounds(latitude, longitude):
+            points.append({"latitude": latitude, "longitude": longitude})
+
+    deduped = []
+    for point in points:
+        if not deduped or haversine_distance(
+            deduped[-1]["latitude"],
+            deduped[-1]["longitude"],
+            point["latitude"],
+            point["longitude"],
+        ) >= 20:
+            deduped.append(point)
+
+    return deduped
+
+
+def extract_valhalla_osrm_geometry(route):
+    geometry = []
+    coordinates = ((route.get("geometry") or {}).get("coordinates")) or []
+
+    for point in coordinates:
+        if isinstance(point, list) and len(point) >= 2:
+            longitude, latitude = point[0], point[1]
+            if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+                geometry.append([latitude, longitude])
+
+    if geometry:
+        return geometry
+
+    for leg in route.get("legs") or []:
+        for step in leg.get("steps") or []:
+            step_coordinates = (((step.get("geometry") or {}).get("coordinates")) or [])
+            for point in step_coordinates:
+                if isinstance(point, list) and len(point) >= 2:
+                    longitude, latitude = point[0], point[1]
+                    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+                        if not geometry or geometry[-1] != [latitude, longitude]:
+                            geometry.append([latitude, longitude])
+
+    return geometry
+
+
+def extract_valhalla_osrm_cues(route):
+    cues = []
+    step_number = 1
+
+    for leg in route.get("legs") or []:
+        for step in leg.get("steps") or []:
+            maneuver = step.get("maneuver") or {}
+            location = maneuver.get("location") or []
+            instruction = str(maneuver.get("instruction") or "").strip()
+
+            if len(location) < 2 or not instruction:
+                continue
+
+            longitude, latitude = location[0], location[1]
+
+            if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+                continue
+
+            cues.append({
+                "step": step_number,
+                "title": instruction,
+                "instruction": instruction,
+                "latitude": latitude,
+                "longitude": longitude,
+                "distance": step.get("distance"),
+                "duration": step.get("duration"),
+                "source": "valhalla",
+            })
+            step_number += 1
+
+    return cues
+
+
 def extract_turn_cues(route):
     cues = []
     step_number = 1
@@ -4498,6 +4641,27 @@ def fetch_json(url):
         except Exception:
             detail = ""
         message = f"Routing service rejected these road points ({error.code})."
+        if detail:
+            message = f"{message} {detail}."
+        raise ValueError(message) from error
+
+
+def fetch_json_post(url, payload, headers=None):
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(url, data=body, headers=headers or HTTP_HEADERS, method="POST")
+
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = ""
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+            parsed = json.loads(body)
+            detail = str(parsed.get("error") or parsed.get("message") or parsed.get("code") or "").strip()
+        except Exception:
+            detail = ""
+        message = f"Valhalla rejected these NaviDrive points ({error.code})."
         if detail:
             message = f"{message} {detail}."
         raise ValueError(message) from error
@@ -4727,7 +4891,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(error)}, status=400)
             return
 
-        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/routes/clean", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
+        if path not in {"/api/generate-route", "/api/generate-cues", "/api/prepare-route", "/api/prepare-route-options", "/api/navidrive-route", "/api/routes/clean", "/api/incoming-order", "/api/incoming-order/ack", "/api/incoming-order/verify", "/api/accepted-trip", "/api/accepted-trip/ack", "/api/ocr-order", "/api/route-recording/start", "/api/route-recording/update", "/api/route-recording/finish", "/api/route-recording/discard", "/api/speed-warnings", "/api/speed-warnings/delete", "/api/location-cues", "/api/location-cues/delete", "/api/academy/attempt", "/api/hybrid-engine/issues", "/api/hybrid-engine/issues/status"}:
             self.send_error(404, "Not found")
             return
 
@@ -4805,6 +4969,10 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
             if path == "/api/routes/clean":
                 self.send_json({"ok": True, **clean_recorded_route(payload)})
+                return
+
+            if path == "/api/navidrive-route":
+                self.send_json({"ok": True, "route": fetch_navidrive_route(payload)})
                 return
 
             if path == "/api/generate-route":

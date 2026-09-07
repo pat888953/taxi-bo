@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaxiBo NaviDrive</title>
+  <meta name="theme-color" content="#10251d">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link rel="stylesheet" href="navidrive.css?v=1">
+</head>
+<body>
+  <main class="navi-shell">
+    <section class="navi-topbar" aria-label="NaviDrive status">
+      <div class="speed-box">
+        <span>Speed</span>
+        <strong id="naviSpeed">--</strong>
+        <small>km/h</small>
+      </div>
+      <div class="cue-box">
+        <span id="naviMode">Idle</span>
+        <strong id="naviInstruction">Choose a saved route to begin.</strong>
+        <small id="naviDistance">No cue selected</small>
+      </div>
+      <div class="action-box">
+        <button id="naviStart" type="button">Drive</button>
+        <button id="naviBrief" type="button">Brief</button>
+        <button id="naviStop" type="button" disabled>Stop</button>
+      </div>
+    </section>
+
+    <section class="navi-gauges" aria-label="Route progress">
+      <div>
+        <span>Approach cue</span>
+        <div class="segmented-gauge" id="cueApproachGauge" aria-hidden="true"></div>
+      </div>
+      <div>
+        <span>Trip progress</span>
+        <div class="progress-track"><div id="tripProgressFill"></div></div>
+      </div>
+    </section>
+
+    <section class="navi-map-wrap">
+      <div id="naviMap" aria-label="NaviDrive map"></div>
+      <aside class="navi-panel" aria-label="Route controls">
+        <label>
+          <span>Saved route knowledge</span>
+          <select id="naviRouteSelect"></select>
+        </label>
+        <div class="route-meta" id="naviRouteMeta">Loading saved routes...</div>
+        <div class="cue-preview" id="naviCuePreview">
+          <div class="empty-cue">Next cue photo appears here.</div>
+        </div>
+        <div class="panel-actions">
+          <button id="naviFitRoute" type="button">Fit route</button>
+          <a href="index.html">TaxiBo Cue</a>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="navidrive.js?v=1"></script>
+</body>
+</html>
