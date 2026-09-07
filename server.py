@@ -22,7 +22,9 @@ DB_PATH = ROOT / "taxi_bo.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USING_POSTGRES = bool(DATABASE_URL)
 STARTUP_DATABASE_ERROR = ""
-ACTIVE_STORAGE_MODE = ContextVar("ACTIVE_STORAGE_MODE", default="cloud" if USING_POSTGRES else "local")
+DEFAULT_STORAGE_MODE = "cloud" if USING_POSTGRES else "local"
+ACTIVE_STORAGE_MODE = ContextVar("ACTIVE_STORAGE_MODE", default=DEFAULT_STORAGE_MODE)
+POSTGRES_CONNECT_TIMEOUT_SECONDS = int(os.environ.get("POSTGRES_CONNECT_TIMEOUT_SECONDS", "8"))
 HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "TaxiBoRouteRecall/1.0 (local app)",
@@ -192,7 +194,11 @@ def connect_db(mode=None):
                 "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
             ) from error
 
-        connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        connection = psycopg.connect(
+            DATABASE_URL,
+            row_factory=dict_row,
+            connect_timeout=POSTGRES_CONNECT_TIMEOUT_SECONDS,
+        )
         return DatabaseConnection(connection, postgres=True)
 
     connection = sqlite3.connect(DB_PATH)
@@ -4507,8 +4513,8 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
         if requested in {"local", "sqlite", "in-house", "inhouse"}:
             return "local"
         if requested in {"cloud", "postgres", "postgresql", "drive"}:
-            return "cloud" if USING_POSTGRES else "local"
-        return "cloud" if USING_POSTGRES else "local"
+            return "cloud" if USING_POSTGRES and not STARTUP_DATABASE_ERROR else "local"
+        return DEFAULT_STORAGE_MODE
 
     def end_headers(self):
         path = urlparse(self.path).path
@@ -4540,7 +4546,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == "/api/health":
-            storage_mode = ACTIVE_STORAGE_MODE.get()
+            storage_mode = DEFAULT_STORAGE_MODE
             self.send_json(
                 {
                     "ok": True,
@@ -4826,6 +4832,7 @@ class TaxiBoHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    global_default_storage_mode = DEFAULT_STORAGE_MODE
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
     try:
         initialize_db("local")
@@ -4843,12 +4850,14 @@ if __name__ == "__main__":
         STARTUP_DATABASE_ERROR = ""
 
     try:
-        ACTIVE_STORAGE_MODE.set("cloud" if USING_POSTGRES and not STARTUP_DATABASE_ERROR else "local")
+        global_default_storage_mode = "cloud" if USING_POSTGRES and not STARTUP_DATABASE_ERROR else "local"
+        DEFAULT_STORAGE_MODE = global_default_storage_mode
+        ACTIVE_STORAGE_MODE.set(global_default_storage_mode)
     except Exception as error:
         STARTUP_DATABASE_ERROR = str(error)
         print(f"Database startup warning: {STARTUP_DATABASE_ERROR}", file=sys.stderr)
     server = ThreadingHTTPServer(("0.0.0.0", port), TaxiBoHandler)
     print(f"Taxi Bo is running locally at http://127.0.0.1:{port}/index.html")
     print(f"On another device, open http://YOUR-WIFI-IP:{port}/index.html")
-    print("Database: PostgreSQL" if USING_POSTGRES else f"SQLite database: {DB_PATH}")
+    print("Database: PostgreSQL" if global_default_storage_mode == "cloud" else f"SQLite database: {DB_PATH}")
     server.serve_forever()
