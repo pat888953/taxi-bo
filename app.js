@@ -6651,8 +6651,10 @@ function recoverLocalRouteRecordingBackup() {
 
 function stopLiveDrive(updateStatus = true) {
   const wasCruiseOnly = isCruiseMonitoringActive();
+  const wasBriefOnly = isLiveDriveSimulationRunning || liveDriveSimulationId !== null;
   const manualRoadRecordingActive = isManualRoadRecordingActive();
-  if (routeRecordingWatchId === null) {
+  const liveDriveAutoRecordingActive = Boolean(activeRouteRecording?.sourceRouteId && liveDriveWatchId !== null);
+  if (liveDriveAutoRecordingActive) {
     finishRouteRecording();
   }
   clearLiveDriveTimeout();
@@ -6685,7 +6687,7 @@ function stopLiveDrive(updateStatus = true) {
       ? "Live drive stopped. Record road is still recording."
       : "Live drive stopped.");
     setMapDriverMode(false);
-    if (wasCruiseOnly || !completedRouteRecording) {
+    if (wasBriefOnly || wasCruiseOnly || !completedRouteRecording) {
       setPhoneDriveScreen("input");
     }
   }
@@ -6723,6 +6725,7 @@ function startLiveDriveSimulation() {
   resetLiveDriveRouteProgress();
   clearPendingLiveCueSpeech();
   isLiveDriveSimulationRunning = true;
+  setPhoneDriveScreen("cue");
   liveDriveStartButton.disabled = true;
   cruiseMonitorButton.disabled = true;
   liveDriveSimulateButton.disabled = true;
@@ -6749,6 +6752,10 @@ function startLiveDriveSimulation() {
       liveDriveSimulateButton.disabled = false;
       liveDriveStopButton.disabled = true;
       setDriveControlMode("idle");
+      liveDrivePosition = null;
+      liveDriveUpcoming.innerHTML = "";
+      setMapDriverMode(false);
+      setPhoneDriveScreen("input");
       updateScreenWakeLock("brief route ended");
       updateSpeedMonitoringToggle();
       return;
