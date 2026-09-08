@@ -25,9 +25,23 @@
  .journey-collapsed .map-actions button{min-height:44px}
 }
 
-.navidrive-vehicle-marker{position:relative;width:34px;height:42px;filter:drop-shadow(0 3px 3px rgba(0,0,0,.42));transform-origin:50% 58%}
-.navidrive-vehicle-marker::before{content:"";display:block;width:0;height:0;margin:auto;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:42px solid #087cff}
-.navidrive-vehicle-marker::after{content:"";position:absolute;left:12px;top:17px;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #075ab7}
+.navidrive-vehicle-marker{position:relative;width:136px;height:168px;filter:drop-shadow(0 3px 3px rgba(0,0,0,.42));pointer-events:none}
+.navidrive-vehicle-marker::before,.navidrive-vehicle-marker::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0,100% 100%,50% 76%,0 100%);background:#fff}
+.navidrive-vehicle-marker::after{inset:9px;background:#087cff}
+.brand{gap:8px}.brand a{letter-spacing:0;white-space:nowrap}
+#nightMode{min-height:36px;padding:6px 10px;font-size:12px;flex-shrink:0}
+.night-mode{color:#dbe1e4;background:#171b20;color-scheme:dark}
+.night-mode .brand{background:#171b20}
+.night-mode .turn-card,.night-mode .journey-panel,.night-mode button,.night-mode select,.night-mode input{background:#22292e;color:#dbe1e4;border-color:#505b63;box-shadow:none}
+.night-mode .direction,.night-mode #startNav,.night-mode #planGo{background:#365a3c;color:#d5e5d8;border-color:#527253}
+.night-mode #briefNav{background:#294454;border-color:#456170}
+.night-mode #reportTraffic{background:#514629;border-color:#726540}
+.night-mode #nextDistance{color:#8ac899}
+.night-mode #routeStatus,.night-mode .hint,.night-mode .trip-stats span,.night-mode .journey-heading small,.night-mode .route-picker label{color:#b1bec1}
+.night-mode a{color:#b4d1c2}
+.night-mode .maplibregl-ctrl-attrib{background:#22292e;color:#b1bec1}
+.night-mode .planner .voice-field .mic-button{background:#303d38;color:#dbe1e4}
+@media(max-width:420px){.brand{padding:10px}.brand a{font-size:18px}.brand a span{font-size:14px;margin-left:5px}#driveMode{font-size:10px;padding:5px 6px;max-width:95px;overflow-wrap:anywhere}}
 .voice-field{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:6px;align-items:stretch}
 .planner .voice-field .mic-button{min-height:46px;padding:6px;border-color:#a9c9bc;background:#edf7f1;font-size:21px;line-height:1}
 .planner .voice-field .mic-button.listening{background:#d7f5a8;border-color:#6ba447;box-shadow:0 0 0 3px rgba(107,164,71,.2)}

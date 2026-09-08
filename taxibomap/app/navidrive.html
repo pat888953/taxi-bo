@@ -10,12 +10,12 @@
   <link rel="manifest" href="navidrive.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/navidrive-192.png">
   <link rel="apple-touch-icon" href="icons/navidrive-192.png">
-  <link rel="stylesheet" href="navidrive.css?v=3">
+  <link rel="stylesheet" href="navidrive.css?v=4">
 </head>
 <body>
   <main>
     <div id="navMap" aria-label="Hong Kong driving map"></div>
-    <header class="brand"><a href="index.html" aria-label="Back to TaxiBo recorder">TaxiBo<span>NaviDrive</span></a><span id="driveMode">Ready / replay</span></header>
+    <header class="brand"><a href="index.html" aria-label="Back to TaxiBo recorder">TaxiBo<span>NaviDrive</span></a><span id="driveMode">Ready / replay</span><button id="nightMode" type="button" aria-pressed="false">Night</button></header>
     <section class="turn-card" aria-label="Route guidance">
       <span class="direction" aria-hidden="true">↗</span>
       <div><span id="nextDistance">Ready</span><strong id="nextInstruction">Choose your next journey</strong><small id="routeStatus" role="status">Loading TaxiBo services…</small></div>
@@ -40,7 +40,7 @@
       <p class="hint">Brief previews at 10× speed. Replay uses normal speed. Live Drive uses GPS and reroutes automatically.</p>
     </section>
   </main>
-  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=6"></script>
+  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=8"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/navidrive-sw.js"));

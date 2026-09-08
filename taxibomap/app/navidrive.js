@@ -46,6 +46,61 @@ let vehicleMarker = null;
 let offRouteReadings = 0;
 let rerouteInFlight = false;
 let lastRerouteAt = 0;
+let followingVehicle = true;
+let liveMotionFrame = null;
+let displayedVehicle = null;
+let lastFixTime = null;
+let nightMode = false;
+try { nightMode = localStorage.getItem('taxibomap-night') === 'true'; } catch {}
+const nightButton = document.querySelector('#nightMode');
+
+function applyNightMode() {
+  document.body.classList.toggle('night-mode', nightMode);
+  nightButton.textContent = nightMode ? 'Day' : 'Night';
+  nightButton.setAttribute('aria-pressed', String(nightMode));
+  document.querySelector('meta[name="theme-color"]').content = nightMode ? '#171b20' : '#102b27';
+  if (mapReady) {
+    map.setPaintProperty('osmRaster', 'raster-brightness-max', nightMode ? 0.25 : 1);
+    map.setPaintProperty('osmRaster', 'raster-saturation', nightMode ? -0.65 : 0);
+    map.setPaintProperty('activeRouteCasing', 'line-color', nightMode ? '#577268' : '#ffffff');
+  }
+}
+nightButton.addEventListener('click', () => {
+  nightMode = !nightMode;
+  applyNightMode();
+  try { localStorage.setItem('taxibomap-night', String(nightMode)); } catch {}
+});
+applyNightMode();
+
+function followVehicle(point, bearing) {
+  if (!followingVehicle) return;
+  const height = map.getContainer().clientHeight;
+  const guidanceBottom = document.querySelector('.turn-card').getBoundingClientRect().bottom;
+  const panelTop = document.querySelector('.journey-panel').getBoundingClientRect().top;
+  const anchorY = guidanceBottom + (panelTop - guidanceBottom) * 0.62;
+  const offset = Math.max(-height + 1, Math.min(height - 1, 2 * anchorY - height));
+  map.jumpTo({ center: [point.longitude, point.latitude], bearing,
+    zoom: CAMERA.zoom, pitch: CAMERA.pitch,
+    padding: { top: Math.max(0, offset), bottom: Math.max(0, -offset), left: 0, right: 0 } });
+}
+
+function animateLiveVehicle(target, bearing) {
+  const now = performance.now();
+  const duration = lastFixTime === null ? 0 : Math.max(300, Math.min(1500, now - lastFixTime));
+  lastFixTime = now;
+  if (liveMotionFrame !== null) cancelAnimationFrame(liveMotionFrame);
+  const from = displayedVehicle || { ...target, bearing };
+  const turn = ((bearing - from.bearing + 540) % 360) - 180;
+  const frame = time => {
+    const t = duration ? Math.max(0, Math.min(1, (time - now) / duration)) : 1;
+    displayedVehicle = { latitude: from.latitude + (target.latitude - from.latitude) * t,
+      longitude: from.longitude + (target.longitude - from.longitude) * t, bearing: from.bearing + turn * t };
+    vehicleMarker?.setLngLat([displayedVehicle.longitude, displayedVehicle.latitude]).setRotation(displayedVehicle.bearing);
+    followVehicle(displayedVehicle, displayedVehicle.bearing);
+    liveMotionFrame = t < 1 ? requestAnimationFrame(frame) : null;
+  };
+  liveMotionFrame = requestAnimationFrame(frame);
+}
 
 initializeNavigation();
 
@@ -55,7 +110,11 @@ document.querySelector("#briefNav").addEventListener("click", () => startNavigat
 pauseNavButton.addEventListener("click", pauseNavigation);
 liveDriveButton.addEventListener("click", toggleLiveDrive);
 saveDriveButton.addEventListener("click", saveLiveDrive);
-recenterButton.addEventListener("click", () => updateCamera(latestProgress, true));
+recenterButton.addEventListener("click", () => {
+  followingVehicle = true;
+  if (displayedVehicle && liveWatchId !== null) followVehicle(displayedVehicle, displayedVehicle.bearing);
+  else updateCamera(latestProgress, true);
+});
 reportTrafficButton.addEventListener("click", reportTraffic);
 document.querySelectorAll("[data-voice-target]").forEach((button) => {
   button.addEventListener("click", () => captureVoiceLocation(button));
@@ -127,6 +186,7 @@ async function initializeNavigation() {
   }
 
   map = createNavigationMap();
+  map.on('dragstart', () => { followingVehicle = false; });
   map.on("error", (event) => {
     const message = event?.error?.message || "Map tile/source error.";
     routeStatus.textContent = message.includes("tile") ? "Map tiles are not loading. Check internet access." : message;
@@ -134,6 +194,7 @@ async function initializeNavigation() {
   map.on("load", async () => {
     mapReady = true;
     addNavigationLayers();
+    applyNightMode();
     nextDistance.textContent = 'Ready';
     nextInstruction.textContent = 'Enter a start and destination, then Go';
     routeStatus.textContent = 'Plan a Hong Kong journey.';
@@ -432,6 +493,7 @@ function addNavigationLayers() {
 
 function startNavigation(rate = 1) {
   if (!mapReady || !activeLine.length) return;
+  followingVehicle = true;
   setJourneyCollapsed(true);
   pauseNavigation();
   stopLiveDrive();
@@ -475,6 +537,8 @@ function startLiveDrive() {
 
   pauseNavigation();
   document.querySelector("#driveMode").textContent = "Live GPS";
+  followingVehicle = true;
+  setJourneyCollapsed(true);
   livePoints = [];
   liveDriveButton.textContent = "Stop Live";
   liveDriveButton.classList.add("live");
@@ -497,6 +561,10 @@ function startLiveDrive() {
 }
 
 function stopLiveDrive(clearStatus = true) {
+  if (liveMotionFrame !== null) cancelAnimationFrame(liveMotionFrame);
+  liveMotionFrame = null;
+  displayedVehicle = null;
+  lastFixTime = null;
   if (liveWatchId !== null) {
     navigator.geolocation.clearWatch(liveWatchId);
     liveWatchId = null;
@@ -514,7 +582,7 @@ function handleLivePosition(position) {
     latitude: Number(position.coords.latitude),
     longitude: Number(position.coords.longitude),
     accuracy: Number(position.coords.accuracy || 0),
-    speed: Number.isFinite(Number(position.coords.speed)) ? Number(position.coords.speed) : null,
+    speed: Number.isFinite(position.coords.speed) ? position.coords.speed : null,
     recordedAt: new Date().toISOString()
   };
 
@@ -544,18 +612,11 @@ function handleLivePosition(position) {
   }
 
   latestProgress = snapped.progress;
-  vehicleMarker?.setLngLat([snapped.point.longitude, snapped.point.latitude]).setRotation(bearing);
+  const target = onRoute ? snapped.point : point;
+  const stationary = point.speed !== null && point.speed < 0.8 && displayedVehicle && distanceMeters(displayedVehicle, target) < 5;
+  animateLiveVehicle(stationary ? displayedVehicle : target, bearing);
   map.getSource("rawVehicle").setData(pointFeature(point, bearing));
   map.getSource("snapTether").setData(snapped.distance > 8 ? lineFeature([point, snapped.point]) : lineFeature([]));
-  map.easeTo({
-    center: activeLine.length ? [ahead.longitude, ahead.latitude] : [point.longitude, point.latitude],
-    zoom: CAMERA.zoom,
-    pitch: CAMERA.pitch,
-    bearing,
-    padding: CAMERA.padding,
-    duration: CAMERA.duration,
-    easing: (t) => t
-  });
 
   nextDistance.textContent = onRoute ? "On route" : "Off route";
   nextInstruction.textContent = activeLine.length ? instructionForProgress(snapped.progress, totalLineDistance(activeLine)).text : "Recording live GPS";
@@ -678,7 +739,6 @@ function updateCamera(progress, immediate) {
   if (!activeLine.length) return;
   const current = pointAtProgress(activeLine, cumulative, progress);
   const ahead = pointAtProgress(activeLine, cumulative, Math.min(1, progress + 0.024));
-  const cameraTarget = pointAtProgress(activeLine, cumulative, Math.min(1, progress + CAMERA.lookAheadProgress));
   const bearing = bearingBetween(current, ahead);
   const rawCurrent = rawLine.length ? pointAtProgress(rawLine, rawCumulative, progress) : null;
   const driftMeters = rawCurrent ? distanceMeters(rawCurrent, current) : 0;
@@ -686,15 +746,7 @@ function updateCamera(progress, immediate) {
   vehicleMarker?.setLngLat([current.longitude, current.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(rawCurrent ? pointFeature(rawCurrent, bearing) : emptyPointFeature());
   map.getSource("snapTether").setData(rawCurrent && driftMeters > 12 ? lineFeature([rawCurrent, current]) : lineFeature([]));
-  map.easeTo({
-    center: [cameraTarget.longitude, cameraTarget.latitude],
-    zoom: CAMERA.zoom,
-    pitch: CAMERA.pitch,
-    bearing,
-    padding: CAMERA.padding,
-    duration: immediate ? 0 : CAMERA.duration,
-    easing: (t) => t
-  });
+  followVehicle(current, bearing);
 }
 
 function updateNavigationHud(progress) {
@@ -1114,6 +1166,7 @@ function isInsideHongKong(point) {
 }
 
 document.querySelector('#overviewButton').addEventListener('click', () => {
+ followingVehicle = false;
  pauseNavigation();
  if (!mapReady || !activeLine.length) return;
  const bounds = new maplibregl.LngLatBounds();
