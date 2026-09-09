@@ -36,11 +36,11 @@
  <small id="planStatus" role="status">Plan a Hong Kong journey with Valhalla and local HDE.</small>
  </form><details class="saved-journeys"><summary>Saved routes / Import JSON</summary><label class="import-label">Import Cue JSON <input id="importCueFile" type="file" accept=".json,application/json"></label><small id="importResult" role="status"></small><div class="route-picker"><label for="routeSelect">Saved route</label><select id="routeSelect"><option>Loading routes…</option></select><button id="loadRoute" type="button">Load route</button></div>
       </details><div class="trip-stats"><div><strong id="etaValue">--</strong><span>min remaining</span></div><div><strong id="distanceValue">--</strong><span>km remaining</span></div><div><strong id="speedValue">0</strong><span>km/h</span></div></div>
-      <div class="drive-controls"><button id="startNav" type="button">▶ Replay</button><button id="briefNav" type="button" title="Preview the route at 10 times normal speed">≫ Brief</button><button id="pauseNav" type="button">Pause</button><button id="liveDrive" type="button">Live Drive</button><button id="saveDrive" type="button">Save GPS</button><button id="reportTraffic" type="button">Traffic</button></div>
+      <div class="drive-controls"><button id="startNav" type="button">▶ Replay</button><button id="briefNav" type="button" title="Preview the route at 10 times normal speed">≫ Brief</button><button id="simulateGps" type="button" aria-pressed="false" title="Simulate GPS updates at 40 km/h without recording">Sim GPS</button><button id="pauseNav" type="button">Pause</button><button id="liveDrive" type="button">Live Drive</button><button id="saveDrive" type="button">Save GPS</button><button id="reportTraffic" type="button">Traffic</button></div>
       <p class="hint">Brief previews at 10× speed. Replay uses normal speed. Live Drive uses GPS and reroutes automatically.</p>
     </section>
   </main>
-  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=8"></script>
+  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=10"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/navidrive-sw.js"));

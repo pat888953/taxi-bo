@@ -14,6 +14,7 @@ const loadRouteButton = document.querySelector("#loadRoute");
 const startNavButton = document.querySelector("#startNav");
 const pauseNavButton = document.querySelector("#pauseNav");
 const liveDriveButton = document.querySelector("#liveDrive");
+const simulateGpsButton = document.querySelector("#simulateGps");
 const saveDriveButton = document.querySelector("#saveDrive");
 const recenterButton = document.querySelector("#recenterButton");
 const reportTrafficButton = document.querySelector("#reportTraffic");
@@ -50,6 +51,8 @@ let followingVehicle = true;
 let liveMotionFrame = null;
 let displayedVehicle = null;
 let lastFixTime = null;
+let simulationTimer = null;
+let simulationPoints = [];
 let nightMode = false;
 try { nightMode = localStorage.getItem('taxibomap-night') === 'true'; } catch {}
 const nightButton = document.querySelector('#nightMode');
@@ -84,20 +87,48 @@ function followVehicle(point, bearing) {
     padding: { top: Math.max(0, offset), bottom: Math.max(0, -offset), left: 0, right: 0 } });
 }
 
-function animateLiveVehicle(target, bearing) {
+function routeBearing(progress, points = activeLine, distances = cumulative) {
+  const total = distances.at(-1) || 1;
+  const before = pointAtProgress(points, distances, Math.max(0, progress - 2 / total));
+  const after = pointAtProgress(points, distances, Math.min(1, progress + 4 / total));
+  return bearingBetween(before, after);
+}
+
+function animateLiveVehicle(target, bearing, progress = null) {
   const now = performance.now();
-  const duration = lastFixTime === null ? 0 : Math.max(300, Math.min(1500, now - lastFixTime));
+  const gap = lastFixTime === null ? Infinity : now - lastFixTime;
+  const line = activeLine;
+  const distances = cumulative;
+  const total = distances.at(-1) || 0;
+  const onRoute = Number.isFinite(progress) && line.length > 1;
+  const previous = displayedVehicle;
+  const sameRoute = onRoute && previous?.line === line && Number.isFinite(previous.progress);
+  // A reacquired GPS fix must not animate a fictitious drive through a long gap.
+  const discontinuity = gap > 5000 || (previous && distanceMeters(previous, target) > 250)
+    || (sameRoute && Math.abs(progress - previous.progress) * total > 250)
+    || (previous && (onRoute ? !sameRoute : previous.line !== null));
+  const duration = discontinuity ? 0 : Math.max(300, Math.min(1500, gap));
   lastFixTime = now;
   if (liveMotionFrame !== null) cancelAnimationFrame(liveMotionFrame);
-  const from = displayedVehicle || { ...target, bearing };
+  const from = duration ? previous : { ...target, bearing, progress };
   const turn = ((bearing - from.bearing + 540) % 360) - 180;
+  let cameraBearing = duration ? map.getBearing() : bearing;
+  let lastFrame = now;
   const frame = time => {
     const t = duration ? Math.max(0, Math.min(1, (time - now) / duration)) : 1;
-    displayedVehicle = { latitude: from.latitude + (target.latitude - from.latitude) * t,
-      longitude: from.longitude + (target.longitude - from.longitude) * t, bearing: from.bearing + turn * t };
+    const currentProgress = onRoute ? from.progress + (progress - from.progress) * t : null;
+    const point = onRoute ? pointAtProgress(line, distances, currentProgress) : {
+      latitude: from.latitude + (target.latitude - from.latitude) * t,
+      longitude: from.longitude + (target.longitude - from.longitude) * t
+    };
+    displayedVehicle = { ...point, progress: currentProgress, line: onRoute ? line : null,
+      bearing: onRoute ? routeBearing(currentProgress, line, distances) : from.bearing + turn * t };
     vehicleMarker?.setLngLat([displayedVehicle.longitude, displayedVehicle.latitude]).setRotation(displayedVehicle.bearing);
-    followVehicle(displayedVehicle, displayedVehicle.bearing);
-    liveMotionFrame = t < 1 ? requestAnimationFrame(frame) : null;
+    const cameraTurn = ((displayedVehicle.bearing - cameraBearing + 540) % 360) - 180;
+    cameraBearing += cameraTurn * (1 - Math.exp(-Math.max(0, time - lastFrame) / 180));
+    lastFrame = time;
+    followVehicle(displayedVehicle, cameraBearing);
+    liveMotionFrame = t < 1 || (followingVehicle && Math.abs(cameraTurn) > 0.1) ? requestAnimationFrame(frame) : null;
   };
   liveMotionFrame = requestAnimationFrame(frame);
 }
@@ -109,10 +140,11 @@ startNavButton.addEventListener("click", () => startNavigation(1));
 document.querySelector("#briefNav").addEventListener("click", () => startNavigation(10));
 pauseNavButton.addEventListener("click", pauseNavigation);
 liveDriveButton.addEventListener("click", toggleLiveDrive);
+simulateGpsButton.addEventListener("click", toggleSimulatedGps);
 saveDriveButton.addEventListener("click", saveLiveDrive);
 recenterButton.addEventListener("click", () => {
   followingVehicle = true;
-  if (displayedVehicle && liveWatchId !== null) followVehicle(displayedVehicle, displayedVehicle.bearing);
+  if (displayedVehicle && (liveWatchId !== null || simulationTimer !== null)) followVehicle(displayedVehicle, displayedVehicle.bearing);
   else updateCamera(latestProgress, true);
 });
 reportTrafficButton.addEventListener("click", reportTraffic);
@@ -506,6 +538,7 @@ function startNavigation(rate = 1) {
 }
 
 function pauseNavigation() {
+  if (simulationTimer !== null) stopLiveDrive();
   if (animationId) {
     cancelAnimationFrame(animationId);
     animationId = null;
@@ -536,6 +569,7 @@ function startLiveDrive() {
   }
 
   pauseNavigation();
+  stopLiveDrive(false);
   document.querySelector("#driveMode").textContent = "Live GPS";
   followingVehicle = true;
   setJourneyCollapsed(true);
@@ -560,7 +594,62 @@ function startLiveDrive() {
   );
 }
 
+function toggleSimulatedGps() {
+  if (simulationTimer !== null) {
+    stopLiveDrive();
+    return;
+  }
+  if (!mapReady || activeLine.length < 2 || !(cumulative.at(-1) > 0)) {
+    routeStatus.textContent = "Load or plan a route first.";
+    return;
+  }
+  if (rerouteInFlight) {
+    routeStatus.textContent = "Wait for the current reroute to finish.";
+    return;
+  }
+  pauseNavigation();
+  stopLiveDrive(false);
+  followingVehicle = true;
+  if (latestProgress >= 1) latestProgress = 0;
+  setJourneyCollapsed(true);
+  simulationPoints = [];
+  const total = cumulative.at(-1);
+  let progress = latestProgress;
+  simulateGpsButton.textContent = "Stop Sim";
+  simulateGpsButton.setAttribute("aria-pressed", "true");
+  saveDriveButton.disabled = true;
+  document.querySelector('#driveMode').textContent = "Simulated GPS";
+  const sendFix = () => {
+    const point = pointAtProgress(activeLine, cumulative, progress);
+    handleLivePosition({ coords: { ...point, accuracy: 5, speed: progress < 1 ? 40 / 3.6 : 0,
+      heading: routeBearing(progress) } });
+  };
+  // Feed discrete fixes through Live Drive; the renderer fills the gaps, not this timer.
+  simulationTimer = setInterval(() => {
+    if (progress >= 1) {
+      stopLiveDrive(false);
+      document.querySelector('#driveMode').textContent = "Simulation complete";
+      routeStatus.textContent = "Simulated GPS reached the destination.";
+      return;
+    }
+    progress = Math.min(1, progress + (40 / 3.6) / total);
+    sendFix();
+  }, 1000);
+  sendFix();
+}
+
 function stopLiveDrive(clearStatus = true) {
+  const wasSimulation = simulationTimer !== null;
+  if (wasSimulation) {
+    clearInterval(simulationTimer);
+    simulationTimer = null;
+    simulationPoints = [];
+    simulateGpsButton.textContent = "Sim GPS";
+    simulateGpsButton.setAttribute("aria-pressed", "false");
+    saveDriveButton.disabled = false;
+    map.getSource("liveGpsTrail").setData(lineFeature(livePoints));
+    document.querySelector('#driveMode').textContent = "Simulation stopped";
+  }
   if (liveMotionFrame !== null) cancelAnimationFrame(liveMotionFrame);
   liveMotionFrame = null;
   displayedVehicle = null;
@@ -572,7 +661,9 @@ function stopLiveDrive(clearStatus = true) {
   liveDriveButton.textContent = "Live Drive";
   liveDriveButton.classList.remove("live");
   offRouteReadings = 0;
-  if (clearStatus && livePoints.length) {
+  if (clearStatus && wasSimulation) {
+    routeStatus.textContent = "Simulated GPS stopped. No simulated recording was saved.";
+  } else if (clearStatus && livePoints.length) {
     routeStatus.textContent = `Live drive stopped. ${livePoints.length} GPS points captured.`;
   }
 }
@@ -591,30 +682,31 @@ function handleLivePosition(position) {
     return;
   }
 
-  const previous = livePoints.at(-1);
+  const points = simulationTimer !== null ? simulationPoints : livePoints;
+  const previous = points.at(-1);
   if (!previous || distanceMeters(previous, point) >= 5) {
-    livePoints.push(point);
-    map.getSource("liveGpsTrail").setData(lineFeature(livePoints));
+    points.push(point);
+    map.getSource("liveGpsTrail").setData(lineFeature(points));
   }
 
   const snapped = activeLine.length ? nearestPointOnLine(point, activeLine, cumulative) : { point, progress: 0, distance: 0 };
-  const ahead = activeLine.length
-    ? pointAtProgress(activeLine, cumulative, Math.min(1, snapped.progress + 0.018))
-    : point;
-  const bearing = activeLine.length ? bearingBetween(snapped.point, ahead) : Number(position.coords.heading || 0);
   const driftText = formatMeters(snapped.distance);
-  const onRoute = snapped.distance <= Math.max(35, point.accuracy * 2);
+  const onRoute = activeLine.length > 1 && snapped.distance <= Math.min(60, Math.max(35, point.accuracy * 2));
+  const gpsBearing = Number.isFinite(position.coords.heading) ? position.coords.heading
+    : previous && distanceMeters(previous, point) >= 5 ? bearingBetween(previous, point) : displayedVehicle?.bearing || 0;
+  const bearing = onRoute ? routeBearing(snapped.progress) : gpsBearing;
   const reliableOffRoute = !onRoute && point.accuracy <= 60 && snapped.progress < 0.99;
 
   offRouteReadings = reliableOffRoute ? offRouteReadings + 1 : 0;
-  if (offRouteReadings >= 3 && !rerouteInFlight && Date.now() - lastRerouteAt >= 20000) {
+  if (simulationTimer === null && offRouteReadings >= 3 && !rerouteInFlight && Date.now() - lastRerouteAt >= 20000) {
     void rerouteFromCurrentPosition(point);
   }
 
   latestProgress = snapped.progress;
   const target = onRoute ? snapped.point : point;
   const stationary = point.speed !== null && point.speed < 0.8 && displayedVehicle && distanceMeters(displayedVehicle, target) < 5;
-  animateLiveVehicle(stationary ? displayedVehicle : target, bearing);
+  animateLiveVehicle(stationary ? displayedVehicle : target, stationary ? displayedVehicle.bearing : bearing,
+    stationary ? (displayedVehicle.line === activeLine ? displayedVehicle.progress : null) : onRoute ? snapped.progress : null);
   map.getSource("rawVehicle").setData(pointFeature(point, bearing));
   map.getSource("snapTether").setData(snapped.distance > 8 ? lineFeature([point, snapped.point]) : lineFeature([]));
 
@@ -625,7 +717,7 @@ function handleLivePosition(position) {
   etaValue.textContent = activeLine.length && point.speed > 0 ? String(Math.ceil(totalLineDistance(activeLine) * (1 - snapped.progress) / point.speed / 60)) : "--";
   if (!rerouteInFlight) {
     const rerouteNotice = reliableOffRoute ? ` Reroute check ${Math.min(offRouteReadings, 3)}/3.` : "";
-    routeStatus.textContent = `GPS drift ${driftText}. Accuracy ${Math.round(point.accuracy)} m. ${livePoints.length} points.${rerouteNotice}`;
+    routeStatus.textContent = `${simulationTimer !== null ? 'Simulated GPS' : 'GPS'} drift ${driftText}. Accuracy ${Math.round(point.accuracy)} m. ${points.length} points.${rerouteNotice}`;
   }
 }
 
@@ -686,6 +778,7 @@ async function rerouteFromCurrentPosition(point) {
 }
 
 async function saveLiveDrive() {
+  if (simulationTimer !== null) return;
   if (livePoints.length < 2) {
     routeStatus.textContent = "Drive first. At least 2 GPS points are needed.";
     return;
