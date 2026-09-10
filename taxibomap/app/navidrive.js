@@ -831,8 +831,7 @@ function tick(now) {
 function updateCamera(progress, immediate) {
   if (!activeLine.length) return;
   const current = pointAtProgress(activeLine, cumulative, progress);
-  const ahead = pointAtProgress(activeLine, cumulative, Math.min(1, progress + 0.024));
-  const bearing = bearingBetween(current, ahead);
+  const bearing = routeBearing(progress);
   const rawCurrent = rawLine.length ? pointAtProgress(rawLine, rawCumulative, progress) : null;
   const driftMeters = rawCurrent ? distanceMeters(rawCurrent, current) : 0;
 

@@ -51,3 +51,27 @@ const oldLine=activeLine;activeLine=oldLine.map(p=>({...p}));fix(.8);advance(16)
 assert.equal(displayedVehicle.line,activeLine);assert.equal(displayedVehicle.progress,.8);
 console.log('PASS GPS reacquisition and replacement route do not animate false journeys');
 `, context);
+
+// Replay/Brief must face the current road on long routes, not a distant bend.
+const replayContext = vm.createContext({ assert, console });
+vm.runInContext(`
+${geometry}
+${extract('routeBearing')}
+let activeLine=[{latitude:22.3,longitude:114.2},{latitude:22.3005,longitude:114.2},{latitude:22.3005,longitude:114.3}];
+let cumulative=buildCumulativeDistances(activeLine),rawLine=[],rawCumulative=[];
+let markerPoint,markerBearing,cameraPoint,cameraBearing;
+const vehicleMarker={setLngLat(p){markerPoint=p;return this},setRotation(b){markerBearing=b;return this}};
+const map={getSource(){return {setData(){}}}};
+function emptyPointFeature(){return {}}
+function lineFeature(){return {}}
+function followVehicle(p,b){cameraPoint=p;cameraBearing=b}
+${extract('updateCamera')}
+const progress=20/cumulative.at(-1);
+updateCamera(progress,false);
+assert.ok(Math.abs(markerBearing)<1,'Replay must face north before the eastbound bend');
+assert.equal(cameraBearing,markerBearing);
+assert.ok(Math.abs(markerPoint[0]-114.2)<1e-9,'Replay remains on the road');
+updateCamera(1,false);
+assert.ok(Math.abs(markerBearing-90)<1,'Replay retains road heading at arrival');
+console.log('PASS Replay/Brief local road heading on long routes and arrival');
+`,replayContext);
