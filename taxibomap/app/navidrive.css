@@ -16,12 +16,12 @@
 .journey-collapsed .trip-stats strong{font-size:23px}
 .journey-collapsed .journey-toggle{min-height:36px;padding:6px 10px}
 @media(max-width:620px){
- .journey-collapsed .journey-panel{bottom:max(8px,env(safe-area-inset-bottom));max-height:none;display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:13px;overflow:hidden}
+ .journey-collapsed .journey-panel{bottom:max(8px,env(safe-area-inset-bottom));max-height:none;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:6px 7px;border-radius:13px;overflow:visible}
  .journey-collapsed .trip-stats{display:none}
  .journey-collapsed .journey-toggle{order:2;flex:0 0 auto;min-height:40px;padding:6px 9px}
- .journey-collapsed .drive-controls{display:flex;overflow-x:auto;padding-bottom:2px}
+ .journey-collapsed .drive-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
  .journey-collapsed .drive-controls button{flex:0 0 auto;min-height:40px;padding:6px 10px}
- .journey-collapsed .map-actions{top:auto;bottom:calc(72px + env(safe-area-inset-bottom));left:auto;right:12px;display:grid}
+ .journey-collapsed .map-actions{top:auto;bottom:calc(204px + env(safe-area-inset-bottom));left:auto;right:12px;display:grid}
  .journey-collapsed .map-actions button{min-height:44px}
 }
 
@@ -46,3 +46,8 @@
 .planner .voice-field .mic-button{min-height:46px;padding:6px;border-color:#a9c9bc;background:#edf7f1;font-size:21px;line-height:1}
 .planner .voice-field .mic-button.listening{background:#d7f5a8;border-color:#6ba447;box-shadow:0 0 0 3px rgba(107,164,71,.2)}
 .planner .voice-field .mic-button:disabled{filter:grayscale(1)}
+
+/* Keep real GPS navigation prominent in both planner and compact controls. */
+#liveDrive{background:#d7f5a8;border-color:#c3e98b}
+.night-mode #liveDrive{background:#365a3c;color:#d5e5d8;border-color:#527253}
+#liveDrive.live,.night-mode #liveDrive.live{background:#173c32;color:#fff}
