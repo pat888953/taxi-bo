@@ -16,6 +16,43 @@ const databaseUrl = process.env.DATABASE_URL || "postgres://taxibo:taxibo_dev_pa
 const valhallaUrl = process.env.VALHALLA_URL || "http://localhost:8002";
 
 const pool = new Pool({ connectionString: databaseUrl });
+const signalCache = new Map();
+
+async function handleTrafficSignals(url, response) {
+  const south = Number(url.searchParams.get('south'));
+  const west = Number(url.searchParams.get('west'));
+  if (!Number.isFinite(south) || !Number.isFinite(west) || south < 22.1 || south > 22.6 || west < 113.8 || west > 114.5) {
+    sendJson(response, 400, { error: 'Invalid Hong Kong signal tile.' }); return;
+  }
+  const lat = Math.floor((south + 1e-8) * 50) / 50;
+  const lon = Math.floor((west + 1e-8) * 50) / 50;
+  const key = `${lat},${lon}`;
+  let entry = signalCache.get(key);
+  if (!entry || entry.expires < Date.now()) {
+    if (signalCache.size >= 64) signalCache.delete(signalCache.keys().next().value);
+    entry = { expires: Date.now() + 3600000 };
+    entry.promise = (async () => {
+      try {
+        const query = `[out:json][timeout:12];node[highway=traffic_signals](${lat},${lon},${lat + .02},${lon + .02});out body 2000;`;
+        const result = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST', headers: {'User-Agent': 'TaxiBoMap/0.2 (+https://github.com/pat888953/taxi-bo)', 'Accept': 'application/json'},
+          body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(15000)
+        });
+        if (!result.ok) throw new Error('Signal provider unavailable');
+        const data = await result.json();
+        if (!Array.isArray(data.elements) || data.remark) throw new Error('Incomplete signal data');
+        return { available: true, signals: data.elements.filter(n => Number.isFinite(n.lat) && Number.isFinite(n.lon)).map(n => ({
+          id: n.id, latitude: n.lat, longitude: n.lon
+        })) };
+      } catch {
+        entry.expires = Date.now() + 60000;
+        return { available: false, signals: [] };
+      }
+    })();
+    signalCache.set(key, entry);
+  }
+  sendJson(response, 200, await entry.promise);
+}
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -42,6 +79,9 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/api/navidrive/plan' && request.method === 'POST') {
       await handleNaviPlan(request, response); return;
+    }
+    if (url.pathname === '/api/traffic-signals' && request.method === 'GET') {
+      await handleTrafficSignals(url, response); return;
     }
     if (url.pathname === '/api/health') {
       await handleHealth(response);
@@ -643,6 +683,11 @@ function normalizeValhallaRouteResponse(payload) {
       modifier: step.maneuver?.modifier || "",
       bearingAfter: step.maneuver?.bearing_after ?? null,
       bearingBefore: step.maneuver?.bearing_before ?? null,
+      lanes: step.intersections?.[0]?.lanes || [],
+      destinations: step.destinations || "",
+      exits: step.exits || "",
+      ref: step.ref || "",
+      location: step.maneuver?.location || null,
       distance: step.distance || 0,
       duration: step.duration || 0
     })) || [],
@@ -864,6 +909,18 @@ async function handleNaviPlan(request, response) {
     if(!Array.isArray(geometry)||geometry.length>15000||!geometry.every(p=>validPoint({latitude:p[0],longitude:p[1]}))) throw Error('HDE candidate geometry is invalid.');
     const checked=await requestValhalla('trace_route',{shape:geometry.map(p=>({lat:p[0],lon:p[1]})),shape_match:'map_snap',trace_options:{search_radius:30,gps_accuracy:10}});
     if(!routeFollows(geometry,checked.geometry.map(p=>[p.latitude,p.longitude])) || checked.summary.distanceMeters>candidate.distance*1.15) throw Error('HDE corridor did not pass road validation.');
+    // Only explicitly verified cues at the same junction may override map advice.
+    // Corridor validation alone does not verify lane or sign instructions.
+    for (const step of checked.maneuvers) {
+      if (!Array.isArray(step.location)) continue;
+      const cues = (Array.isArray(candidate.cues) ? candidate.cues : []).filter(cue =>
+        cue.verified === true && validPoint(cue) &&
+        distanceMeters(cue, {latitude: step.location[1], longitude: step.location[0]}) <= 20);
+      if (cues.length === 1) {
+        const cue = cues[0];
+        step.hdeGuidance = {verified: true, instruction: cue.instruction, lanes: cue.lanes, signs: cue.signs};
+      }
+    }
     route=checked;engine='Valhalla + HDE';explanation='Recorded corridor selected by HDE and matched by Valhalla.';
    }
   } catch(error) { explanation='HDE unavailable or not validated; using Valhalla. '+error.message; }

@@ -35,6 +35,12 @@ let cumulative = [];
 let rawLine = [];
 let rawCumulative = [];
 let maneuvers = [];
+let junctionMarkers = [];
+let junctionManeuvers = null;
+let highlightedJunction = -2;
+const signalTiles = new Map();
+let signalRenderKey = '';
+let signalRoute = null;
 let animationId = null;
 let liveWatchId = null;
 let livePoints = [];
@@ -389,6 +395,7 @@ async function enrichRouteFromValhalla() {
       renderReportOverlays();
     }
     maneuvers = normalizeManeuvers(payload.maneuvers, totalLineDistance(activeLine));
+    updateJunctionGuidance(latestProgress, totalLineDistance(activeLine));
     const minutes = Math.max(1, Math.round(Number(payload.summary?.durationSeconds || durationMs / 1000) / 60));
     durationMs = Math.max(18000, minutes * 60000);
     routeStatus.textContent = statusText(activeRoute, reportsNearRoute().length);
@@ -398,6 +405,7 @@ async function enrichRouteFromValhalla() {
 }
 
 function addNavigationLayers() {
+  map.addSource('trafficSignals', emptyFeatureCollectionSource());
   map.addSource("rawRoute", emptyLineSource());
   map.addSource("activeRoute", emptyLineSource());
   map.addSource("trafficSlow", emptyLineSource());
@@ -511,6 +519,62 @@ function addNavigationLayers() {
       "circle-stroke-width": 2,
       "circle-opacity": 0.86
     }
+  });
+
+  // Point right in image space; line placement rotates this into route order.
+  const arrowCanvas = document.createElement('canvas');
+  arrowCanvas.width = 32;
+  arrowCanvas.height = 24;
+  const arrowContext = arrowCanvas.getContext('2d');
+  arrowContext.beginPath();
+  arrowContext.moveTo(9, 4);
+  arrowContext.lineTo(23, 12);
+  arrowContext.lineTo(9, 20);
+  arrowContext.lineJoin = 'round';
+  arrowContext.lineCap = 'round';
+  arrowContext.strokeStyle = '#14683a';
+  arrowContext.lineWidth = 8;
+  arrowContext.stroke();
+  arrowContext.strokeStyle = '#ffffff';
+  arrowContext.lineWidth = 5;
+  arrowContext.stroke();
+  map.addImage('route-direction', arrowContext.getImageData(0, 0, 32, 24), { pixelRatio: 2 });
+  map.addLayer({
+    id: 'routeDirections',
+    type: 'symbol',
+    source: 'activeRoute',
+    minzoom: 13,
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 75,
+      'icon-image': 'route-direction',
+      'icon-size': 1,
+      'icon-rotation-alignment': 'map',
+      'icon-pitch-alignment': 'map',
+      'icon-keep-upright': false,
+      'icon-allow-overlap': false,
+      'icon-ignore-placement': true,
+      'icon-padding': 4
+    }
+  });
+
+  const signalCanvas = document.createElement('canvas');
+  signalCanvas.width = 40; signalCanvas.height = 72;
+  const signalContext = signalCanvas.getContext('2d');
+  signalContext.fillStyle = '#fff'; signalContext.fillRect(2, 2, 36, 68);
+  signalContext.fillStyle = '#24292c'; signalContext.fillRect(5, 5, 30, 62);
+  ['#e17878', '#dbc66d', '#7fb38d'].forEach((color, index) => {
+    signalContext.beginPath(); signalContext.arc(20, 17 + index * 19, 6, 0, Math.PI * 2);
+    signalContext.fillStyle = color; signalContext.fill();
+  });
+  map.addImage('traffic-signal', signalContext.getImageData(0, 0, 40, 72), {pixelRatio: 2});
+  map.addLayer({ id: 'trafficSignals', type: 'symbol', source: 'trafficSignals', minzoom: 14,
+    layout: {'icon-image': 'traffic-signal', 'icon-anchor': 'bottom', 'icon-offset': [14, -8],
+      'icon-allow-overlap': false, 'icon-pitch-alignment': 'viewport'} });
+  map.on('moveend', refreshTrafficSignals);
+  map.on('click', 'trafficSignals', event => {
+    new maplibregl.Popup().setLngLat(event.lngLat)
+      .setText('Mapped traffic light nearby. Not live signal status or confirmation of road level.').addTo(map);
   });
 
   const markerElement = document.createElement("div");
@@ -831,7 +895,8 @@ function tick(now) {
 function updateCamera(progress, immediate) {
   if (!activeLine.length) return;
   const current = pointAtProgress(activeLine, cumulative, progress);
-  const bearing = routeBearing(progress);
+  const ahead = pointAtProgress(activeLine, cumulative, Math.min(1, progress + 0.024));
+  const bearing = bearingBetween(current, ahead);
   const rawCurrent = rawLine.length ? pointAtProgress(rawLine, rawCumulative, progress) : null;
   const driftMeters = rawCurrent ? distanceMeters(rawCurrent, current) : 0;
 
@@ -943,15 +1008,19 @@ function reportsNearRoute() {
 }
 
 function instructionForProgress(progress, totalMeters) {
+  updateJunctionGuidance(progress, totalMeters);
   if (!maneuvers.length) {
+    renderRoadGuidance(null);
     return { text: "Follow the highlighted taxi route", distanceText: formatMeters(totalMeters * (1 - progress)) };
   }
 
   const currentMeters = totalMeters * progress;
-  const next = maneuvers.find((maneuver) => maneuver.endMeters >= currentMeters) || maneuvers.at(-1);
+  const next = maneuvers.find((maneuver) => junctionSymbol(maneuver) && maneuver.startMeters >= currentMeters - 12)
+    || maneuvers.find((maneuver) => maneuver.endMeters >= currentMeters) || maneuvers.at(-1);
   const distanceToNext = Math.max(0, next.startMeters - currentMeters);
+  renderRoadGuidance(progress < 1 ? next : null);
   return {
-    text: next.instruction || "Continue",
+    text: next.hdeGuidance?.instruction || next.instruction || "Continue",
     distanceText: distanceToNext > 25 ? formatMeters(distanceToNext) : "Now"
   };
 }
@@ -964,7 +1033,14 @@ function normalizeManeuvers(value, totalMeters) {
     const startMeters = Math.min(totalMeters, cursor);
     cursor += distance;
     return {
+      type: step.type || step.maneuver?.type || '',
+      modifier: step.modifier || step.maneuver?.modifier || '',
       instruction: cleanInstruction(step.instruction || describeClientStep(step, index)),
+      lanes: Array.isArray(step.lanes) ? step.lanes : [],
+      destinations: typeof step.destinations === 'string' ? step.destinations : '',
+      exits: typeof step.exits === 'string' ? step.exits : '',
+      ref: typeof step.ref === 'string' ? step.ref : '',
+      hdeGuidance: step.hdeGuidance?.verified === true ? step.hdeGuidance : null,
       startMeters,
       endMeters: Math.min(totalMeters, Math.max(cursor, startMeters + 1))
     };
@@ -973,6 +1049,159 @@ function normalizeManeuvers(value, totalMeters) {
     normalized.at(-1).endMeters = totalMeters;
   }
   return normalized;
+}
+
+function renderRoadGuidance(maneuver) {
+  const panel = document.querySelector("#roadGuidance");
+  if (!panel) return;
+  const lanes = maneuver?.lanes || [];
+  const signs = { exits: maneuver?.exits, ref: maneuver?.ref, destinations: maneuver?.destinations };
+  const hasSigns = signs.exits || signs.destinations || signs.ref;
+  const hde = maneuver?.hdeGuidance?.verified === true ? maneuver.hdeGuidance : null;
+  const key = JSON.stringify([lanes, signs, hde, maneuver?.modifier]);
+  if (panel.dataset.guidance === key) return;
+  panel.dataset.guidance = key;
+  panel.replaceChildren();
+  panel.hidden = !hde && !lanes.length && !hasSigns;
+  const direction = document.querySelector(".direction");
+  const arrows = { left: "←", "slight left": "↖", "sharp left": "↙", straight: "↑", right: "→", "slight right": "↗", "sharp right": "↘", uturn: "↶", none: "–" };
+  if (direction) direction.textContent = arrows[maneuver?.modifier?.replaceAll("_", " ")] || "↑";
+  if (panel.hidden) return;
+  const add = (parent, tag, className, text) => {
+    const element = document.createElement(tag);
+    element.className = className;
+    if (text) element.textContent = text;
+    parent.append(element);
+    return element;
+  };
+  
+  add(panel, "span", `guidance-source${hde ? " is-hde" : ""}`, hde ? "TaxiBo HDE · Priority guidance" : "Valhalla · Road guidance");
+  if (hde) {
+    if (typeof hde.lanes === 'string' && hde.lanes.trim()) {
+      add(panel, 'strong', 'detail-label', 'Lane guidance');
+      add(panel, 'p', 'hde-lane-guidance', hde.lanes);
+    }
+    if (typeof hde.signs === 'string' && hde.signs.trim()) {
+      const sign = add(panel, 'div', 'guidance-sign');
+      add(sign, 'span', 'sign-label', 'Follow signs for');
+      add(sign, 'strong', 'sign-destination', hde.signs);
+    }
+    return;
+  }
+  if (lanes.length) {
+    const section = add(panel, "div", "lane-section");
+    const recommended = lanes.map((lane, index) => lane.active === true || (lane.active == null && lane.valid === true) ? index : -1).filter((index) => index >= 0);
+    let label = "Lane choices";
+    if (recommended.length) {
+      const side = recommended.every((index, i) => index === i) ? "left" : recommended.every((index, i) => index === lanes.length - recommended.length + i) ? "right" : "";
+      label = side ? `Use ${recommended.length === 1 ? `the ${side} lane` : `the ${recommended.length} ${side} lanes`}` : `Use marked ${recommended.length === 1 ? "lane" : "lanes"}`;
+    }
+    add(section, "strong", "detail-label", label);
+    const row = add(section, "div", "guidance-lanes");
+    row.setAttribute("aria-label", "Lane choices from left to right");
+    lanes.forEach((lane, index) => {
+      const indications = Array.isArray(lane.indications) ? lane.indications : [];
+      const selected = recommended.includes(index);
+      const item = add(row, "span", `guidance-lane${selected ? " is-selected" : ""}`);
+      item.setAttribute("aria-label", `Lane ${index + 1}: ${indications.join(", ") || "unspecified"}${selected ? ", recommended" : ""}`);
+      add(item, "span", "lane-arrow", indications.map((value) => arrows[value.replaceAll("_", " ")] || "–").join(" ") || "–");
+    });
+  }
+  if (hasSigns) {
+    const sign = add(panel, "div", "guidance-sign");
+    add(sign, "span", "sign-label", "Follow signs for");
+    if (signs.exits) add(sign, "strong", "exit-badge", `Exit ${signs.exits}`);
+    if (signs.destinations) add(sign, "strong", "sign-destination", signs.destinations);
+    if (signs.ref) add(sign, "span", "sign-reference", signs.ref);
+  }
+}
+
+
+function junctionSymbol(step) {
+  const type = String(step.type || '').toLowerCase();
+  const modifier = String(step.modifier || '').toLowerCase();
+  if (!['turn', 'fork', 'end of road', 'merge', 'on ramp', 'off ramp', 'continue', 'roundabout', 'rotary', 'exit roundabout', 'exit rotary'].includes(type)) return null;
+  if (type === 'roundabout' || type === 'rotary') return { glyph: '\u21bb', label: 'Roundabout' };
+  if (modifier === 'uturn') return { glyph: '\u21b6', label: 'U-turn' };
+  const left = modifier.includes('left');
+  const right = modifier.includes('right');
+  if (left || right) {
+    const branch = type === 'fork' || type === 'merge' || type.includes('ramp') || modifier.includes('slight');
+    return { glyph: branch ? (left ? '\u2196' : '\u2197') : (left ? '\u21b0' : '\u21b1'),
+      label: `${branch ? 'Keep' : 'Turn'} ${left ? 'left' : 'right'}` };
+  }
+  if (modifier === 'straight' && type !== 'continue') return { glyph: '\u2191', label: 'Straight ahead' };
+  return null;
+}
+
+function updateJunctionGuidance(progress, totalMeters) {
+  if (!mapReady) return;
+  refreshTrafficSignals();
+  const meters = progress * totalMeters;
+  const nextIndex = maneuvers.findIndex(step => junctionSymbol(step) && step.startMeters >= meters - 12);
+  if (junctionManeuvers !== maneuvers) {
+    junctionMarkers.forEach(entry => entry.marker.remove());
+    junctionMarkers = [];
+    junctionManeuvers = maneuvers;
+    highlightedJunction = -2;
+    maneuvers.forEach((step, index) => {
+      const symbol = junctionSymbol(step);
+      if (!symbol || !totalMeters || !activeLine.length) return;
+      const point = pointAtProgress(activeLine, cumulative, step.startMeters / totalMeters);
+      const element = document.createElement('div');
+      element.className = 'junction-guide';
+      element.textContent = symbol.glyph;
+      element.title = step.instruction || symbol.label;
+      element.setAttribute('role', 'img');
+      element.setAttribute('aria-label', element.title);
+      const marker = new maplibregl.Marker({ element, anchor: 'bottom', offset: [0, -12], pitchAlignment: 'viewport' })
+        .setLngLat([point.longitude, point.latitude]).addTo(map);
+      junctionMarkers.push({ marker, element, index });
+    });
+  }
+  if (highlightedJunction === nextIndex) return;
+  highlightedJunction = nextIndex;
+  junctionMarkers.forEach(entry => {
+    const ahead = nextIndex >= 0 && entry.index >= nextIndex;
+    entry.element.hidden = !ahead;
+    entry.element.classList.toggle('next-junction', entry.index === nextIndex);
+  });
+  const symbol = nextIndex >= 0 ? junctionSymbol(maneuvers[nextIndex]) : null;
+  const direction = document.querySelector('.direction');
+  direction.textContent = symbol?.glyph || '\u2191';
+  direction.setAttribute('aria-label', symbol?.label || 'Follow route');
+}
+
+function refreshTrafficSignals() {
+  if (!mapReady || !map.getSource('trafficSignals')) return;
+  if (activeLine.length < 2 || map.getZoom() < 14) {
+    if (signalRenderKey) map.getSource('trafficSignals').setData({type: 'FeatureCollection', features: []});
+    signalRenderKey = ''; return;
+  }
+  const center = map.getCenter();
+  const south = Math.floor(center.lat * 50) / 50;
+  const west = Math.floor(center.lng * 50) / 50;
+  const key = `${south},${west}`;
+  let tile = signalTiles.get(key);
+  if (!tile || tile.expires < Date.now()) {
+    tile = { signals: [], expires: Infinity };
+    if (signalTiles.size >= 24) signalTiles.delete(signalTiles.keys().next().value);
+    signalTiles.set(key, tile);
+    fetch(`/api/traffic-signals?south=${south}&west=${west}`, { signal: AbortSignal.timeout(18000) })
+      .then(response => { if (!response.ok) throw new Error('Signals unavailable'); return response.json(); })
+      .then(data => {
+        tile.signals = data.available && Array.isArray(data.signals) ? data.signals : [];
+        tile.expires = Date.now() + (data.available ? 3600000 : 60000);
+      }).catch(() => { tile.expires = Date.now() + 60000; })
+      .finally(() => { signalRenderKey = ''; refreshTrafficSignals(); });
+  }
+  if (signalRenderKey === key && signalRoute === activeLine) return;
+  signalRenderKey = key; signalRoute = activeLine;
+  const nearby = tile.signals.filter(point => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)
+    && nearestPointOnLine(point, activeLine, cumulative).distance <= 20);
+  map.getSource('trafficSignals').setData({ type: 'FeatureCollection', features: nearby.map(point => ({
+    type: 'Feature', geometry: {type: 'Point', coordinates: [point.longitude, point.latitude]}, properties: {id: point.id}
+  })) });
 }
 
 function buildFallbackManeuvers(points) {
