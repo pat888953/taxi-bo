@@ -64,6 +64,8 @@ let liveMotionFrame = null;
 let displayedVehicle = null;
 let lastFixTime = null;
 let replayMotionState = null;
+let liveSpeedCamera = null;
+let liveCameraAuto = true;
 let simulationTimer = null;
 let simulationPoints = [];
 let nightMode = false;
@@ -95,10 +97,12 @@ function followVehicle(point, bearing) {
   const panelBounds = document.querySelector('.journey-panel').getBoundingClientRect();
   const barBounds = document.querySelector('.mobile-drive-bar')?.getBoundingClientRect();
   const panelTop = panelBounds.height ? panelBounds.top : barBounds?.height ? barBounds.top : height;
-  const anchorY = guidanceBottom + (panelTop - guidanceBottom) * 0.62;
+  const liveView = liveWatchId !== null && simulationTimer === null && liveCameraAuto && liveSpeedCamera
+    ? liveSpeedCamera.frame(performance.now()) : null;
+  const anchorY = guidanceBottom + (panelTop - guidanceBottom) * (liveView?.anchor ?? 0.62);
   const offset = Math.max(-height + 1, Math.min(height - 1, 2 * anchorY - height));
   map.jumpTo({ center: [point.longitude, point.latitude], bearing,
-    zoom: CAMERA.zoom, pitch: CAMERA.pitch,
+    zoom: liveView?.zoom ?? CAMERA.zoom, pitch: liveView?.pitch ?? CAMERA.pitch,
     padding: { top: Math.max(0, offset), bottom: Math.max(0, -offset), left: 0, right: 0 } });
 }
 
@@ -147,7 +151,8 @@ function animateLiveVehicle(target, bearing, progress = null) {
     cameraBearing += cameraTurn * (1 - Math.exp(-Math.max(0, time - lastFrame) / 180));
     lastFrame = time;
     followVehicle(displayedVehicle, cameraBearing);
-    liveMotionFrame = t < 1 || Math.abs(headingTurn) > 0.1 || (followingVehicle && Math.abs(cameraTurn) > 0.1) ? requestAnimationFrame(frame) : null;
+    const cameraSettling = typeof liveSpeedCamera !== 'undefined' && liveSpeedCamera && liveCameraAuto && liveSpeedCamera.isSettling();
+    liveMotionFrame = t < 1 || Math.abs(headingTurn) > 0.1 || (followingVehicle && (Math.abs(cameraTurn) > 0.1 || cameraSettling)) ? requestAnimationFrame(frame) : null;
   };
   liveMotionFrame = requestAnimationFrame(frame);
 }
@@ -648,6 +653,8 @@ function startLiveDrive() {
   pauseNavigation();
   stopLiveDrive(false);
   document.querySelector("#driveMode").textContent = "Live GPS";
+  liveCameraAuto = true;
+  document.querySelector('#cameraButton').textContent = 'View: Auto speed';
   followingVehicle = true;
   setJourneyCollapsed(true);
   livePoints = [];
@@ -717,6 +724,8 @@ function toggleSimulatedGps() {
 }
 
 function stopLiveDrive(clearStatus = true) {
+  liveSpeedCamera = null;
+  document.querySelector('#cameraButton').textContent = CAMERA.pitch === 70 ? 'View: Drive' : 'View: Urban';
   const wasSimulation = simulationTimer !== null;
   if (wasSimulation) {
     clearInterval(simulationTimer);
@@ -774,6 +783,14 @@ function handleLivePosition(position) {
     : previous && distanceMeters(previous, point) >= 5 ? bearingBetween(previous, point) : displayedVehicle?.bearing || 0;
   const bearing = onRoute ? routeBearing(snapped.progress) : gpsBearing;
   const reliableOffRoute = !onRoute && point.accuracy <= 60 && snapped.progress < 0.99;
+  if (liveWatchId !== null && simulationTimer === null) {
+    if (!liveSpeedCamera) {
+      liveSpeedCamera = new SpeedAwareCamera({ pitch: map.getPitch(), zoom: map.getZoom(), anchor: .62 }, performance.now());
+    }
+    const meters = snapped.progress * (cumulative.at(-1) || 0);
+    const nextJunction = onRoute ? maneuvers.find(step => junctionSymbol(step) && step.startMeters >= meters - 12) : null;
+    liveSpeedCamera.update(point.speed, point.accuracy, nextJunction ? Math.max(0, nextJunction.startMeters - meters) : Infinity, performance.now());
+  }
 
   offRouteReadings = reliableOffRoute ? offRouteReadings + 1 : 0;
   if (simulationTimer === null && offRouteReadings >= 3 && !rerouteInFlight && Date.now() - lastRerouteAt >= 20000) {
@@ -1539,6 +1556,12 @@ document.querySelector('#overviewButton').addEventListener('click', () => {
  map.fitBounds(bounds, {padding: 100, pitch: 0, bearing: 0});
 });
 document.querySelector('#cameraButton').addEventListener('click', event => {
+ if (liveWatchId !== null && simulationTimer === null) {
+   liveCameraAuto = !liveCameraAuto;
+   event.currentTarget.textContent = liveCameraAuto ? 'View: Auto speed' : 'View: Fixed';
+   if (displayedVehicle) followVehicle(displayedVehicle, displayedVehicle.bearing);
+   return;
+ }
  const close = CAMERA.pitch !== 70;
  CAMERA.pitch = close ? 70 : 45;
  CAMERA.zoom = close ? 19.3 : 17.5;
