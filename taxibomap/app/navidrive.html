@@ -10,7 +10,7 @@
   <link rel="manifest" href="navidrive.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/navidrive-192.png">
   <link rel="apple-touch-icon" href="icons/navidrive-192.png">
-  <link rel="stylesheet" href="navidrive.css?v=20261017guidance2">
+  <link rel="stylesheet" href="navidrive.css?v=20261017compact1">
 </head>
 <body>
   <main>
@@ -19,6 +19,7 @@
     <section class="turn-card" aria-label="Route guidance">
       <span class="direction" aria-hidden="true">↗</span>
       <div class="turn-content"><span id="nextDistance">Ready</span><strong id="nextInstruction">Choose your next journey</strong></div><section id="roadGuidance" class="maneuver-details" hidden aria-label="Lane and road-sign guidance, lanes left to right"></section><small id="routeStatus" role="status">Loading TaxiBo services…</small>
+      <button id="guidanceToggle" class="guidance-toggle" type="button" aria-expanded="false" aria-controls="nextInstruction roadGuidance routeStatus">More</button>
     </section>
     <nav class="map-actions" aria-label="Map controls">
       <button id="recenterButton" type="button">◎ Recenter</button>
@@ -47,7 +48,7 @@
     .night-mode .junction-guide{background:#28382e;color:#fff;border-color:#a5c8ae}
     .night-mode .junction-guide.next-junction{background:#d8bd65;color:#111;border-color:#eadcab}
   </style>
-  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=20261017guidance3"></script>
+  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=20261017compact1"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/navidrive-sw.js"));
@@ -55,3 +56,4 @@
   </script>
 </body>
 </html>
+

@@ -89,3 +89,40 @@
 
 
 #roadGuidance.maneuver-details{display:grid;gap:14px}#roadGuidance[hidden]{display:none}.hde-lane-guidance{margin:0;font-size:18px;line-height:1.4}
+
+/* Compact phone HUD leaves the route visible; full text is one tap away. */
+.guidance-toggle{display:none}
+@media(max-width:780px){
+ .turn-card{top:66px;left:8px;width:calc(100% - 16px);grid-template-columns:38px minmax(0,1fr) 44px;gap:6px 9px;padding:10px;border-radius:13px;max-height:34svh;overflow:auto}
+ .turn-card .direction{min-width:38px;width:38px;height:42px;border-radius:9px;font-size:29px}
+ .turn-card .turn-content{gap:2px}
+ #nextDistance{font-size:19px}
+ #nextInstruction{font-size:17px;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+ .turn-card .guidance-toggle{display:block;grid-column:3;grid-row:1;align-self:start;min-height:44px;padding:4px;font-size:11px;border-radius:8px}
+ .turn-card #roadGuidance.maneuver-details{grid-column:1/-1;grid-template-columns: minmax(0,1fr) minmax(0,1fr);align-items:center;gap:5px 9px;padding-top:7px}
+ #roadGuidance .guidance-source{display:none}
+ #roadGuidance .guidance-source.is-hde{display:block;grid-column:1/-1;font-size:9px;margin:0}
+ .lane-section{gap:3px;min-width:0}
+ .detail-label{font-size:12px;line-height:1.2}
+ .guidance-lanes{gap:3px;flex-wrap:nowrap;overflow-x:auto}
+ .guidance-lane{min-width:30px;min-height:34px;padding:3px 5px;border-radius:6px;flex-shrink:0}
+ .lane-arrow{font-size:22px}
+ .guidance-sign{gap:3px 5px;padding:6px;border-width:1px;border-radius:7px;min-width:0}
+ .sign-label{display:none}
+ .exit-badge{font-size:12px;padding:2px 4px}
+ .sign-destination{font-size:13px;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+ .sign-reference{font-size:11px;padding:1px 3px}
+ .hde-lane-guidance{font-size:14px;line-height:1.25;margin:0}
+ .turn-card #routeStatus{display:none}
+ .turn-card.is-expanded{max-height:60svh}
+ .turn-card.is-expanded #nextInstruction,.turn-card.is-expanded .sign-destination{display:block;overflow:visible;-webkit-line-clamp:unset}
+ .turn-card.is-expanded #roadGuidance.maneuver-details{grid-template-columns:minmax(0,1fr)}
+ .turn-card.is-expanded #routeStatus{display:block;max-height:none}
+ .turn-card.is-expanded #roadGuidance .guidance-source{display:block}
+ .turn-card.is-expanded .sign-label{display:block}
+}
+@media(max-width:780px) and (max-height:450px){
+ .brand{padding:5px 12px}
+ .turn-card{top:49px;width:min(440px,calc(100% - 110px));max-height:42svh}
+ .turn-card.is-expanded{max-height:65svh}
+}

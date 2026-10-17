@@ -21,6 +21,12 @@ const reportTrafficButton = document.querySelector("#reportTraffic");
 const nextDistance = document.querySelector("#nextDistance");
 const nextInstruction = document.querySelector("#nextInstruction");
 const routeStatus = document.querySelector("#routeStatus");
+const guidanceToggle = document.querySelector("#guidanceToggle");
+guidanceToggle?.addEventListener("click", () => {
+  const expanded = document.querySelector(".turn-card").classList.toggle("is-expanded");
+  guidanceToggle.setAttribute("aria-expanded", String(expanded));
+  guidanceToggle.textContent = expanded ? "Less" : "More";
+});
 const etaValue = document.querySelector("#etaValue");
 const distanceValue = document.querySelector("#distanceValue");
 const speedValue = document.querySelector("#speedValue");
