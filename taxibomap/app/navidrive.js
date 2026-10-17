@@ -92,7 +92,9 @@ function followVehicle(point, bearing) {
   if (!followingVehicle) return;
   const height = map.getContainer().clientHeight;
   const guidanceBottom = document.querySelector('.turn-card').getBoundingClientRect().bottom;
-  const panelTop = document.querySelector('.journey-panel').getBoundingClientRect().top;
+  const panelBounds = document.querySelector('.journey-panel').getBoundingClientRect();
+  const barBounds = document.querySelector('.mobile-drive-bar')?.getBoundingClientRect();
+  const panelTop = panelBounds.height ? panelBounds.top : barBounds?.height ? barBounds.top : height;
   const anchorY = guidanceBottom + (panelTop - guidanceBottom) * 0.62;
   const offset = Math.max(-height + 1, Math.min(height - 1, 2 * anchorY - height));
   map.jumpTo({ center: [point.longitude, point.latitude], bearing,
@@ -905,6 +907,7 @@ function tick(now) {
     pausedAt = 0;
     nextDistance.textContent = "Arrived";
     nextInstruction.textContent = "Destination reached";
+    document.querySelector('#driveMode').textContent = 'Arrived';
   }
 }
 

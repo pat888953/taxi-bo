@@ -92,6 +92,25 @@
 
 /* Compact phone HUD leaves the route visible; full text is one tap away. */
 .guidance-toggle{display:none}
+.mobile-drive-bar,.mobile-tools{display:none}
+@media(max-width:780px){
+ .mobile-drive-bar{position:fixed;z-index:5;bottom:0;left:0;right:0;display:grid;grid-template-columns:minmax(0,1fr) 48px 48px;gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:#fffffff5;border-top:1px solid #ccd9d3}
+ .mobile-drive-bar button{min-height:48px;padding:8px;border-radius:10px}
+ #mobileDrive{background:#d7f5a8;border-color:#b5d48b}
+ #mobileDrive.is-running{background:#983529;color:white;border-color:#983529}
+ #mobileRecenter,#mobileToolsToggle{font-size:26px;line-height:1}
+ #mobileTools.mobile-tools{position:fixed;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;z-index:6;bottom:calc(72px + env(safe-area-inset-bottom));right:12px;left:12px;max-height:55svh;overflow:auto;padding:14px;border:1px solid #ccd9d3;border-radius:15px;background:#fff;box-shadow:0 8px 32px #102b2733}
+ #mobileTools[hidden]{display:none}
+ .mobile-tools>strong{grid-column:1/-1;font-size:14px;padding-bottom:4px}
+ #mobileTools button{width:100%;margin:0;min-height:48px;font-size:13px;white-space:normal;order:0;padding:8px}
+ #mobileTools .journey-toggle{display:block!important}
+ .map-actions,.drive-controls,.journey-toggle,.brand #nightMode{display:none!important}
+ .journey-panel{bottom:calc(76px + env(safe-area-inset-bottom));max-height:calc(100svh - 240px)}
+ .journey-collapsed .journey-panel{display:none}
+ .brand{padding:10px 12px}
+ .night-mode .mobile-drive-bar,.night-mode #mobileTools{background:#22292e;color:#dbe1e4;border-color:#505b63}
+ .night-mode #mobileDrive:not(.is-running){background:#365a3c;color:#d5e5d8;border-color:#527253}
+}
 .next-maneuver{grid-column:1/-1;padding:8px 10px;background:#eef4f0;border-left:3px solid #367348;border-radius:5px;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
 .next-maneuver[hidden]{display:none}
 .night-mode .next-maneuver{background:#2c3830;color:#dbe9df;border-color:#8ac899}
