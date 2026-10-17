@@ -63,6 +63,7 @@ let followingVehicle = true;
 let liveMotionFrame = null;
 let displayedVehicle = null;
 let lastFixTime = null;
+let replayMotionState = null;
 let simulationTimer = null;
 let simulationPoints = [];
 let nightMode = false;
@@ -133,14 +134,18 @@ function animateLiveVehicle(target, bearing, progress = null) {
       latitude: from.latitude + (target.latitude - from.latitude) * t,
       longitude: from.longitude + (target.longitude - from.longitude) * t
     };
-    displayedVehicle = { ...point, progress: currentProgress, line: onRoute ? line : null,
-      bearing: onRoute ? routeBearing(currentProgress, line, distances) : from.bearing + turn * t };
+    const targetHeading = onRoute ? routeBearing(currentProgress, line, distances) : from.bearing + turn * t;
+    const previousHeading = displayedVehicle?.bearing ?? targetHeading;
+    const headingTurn = ((targetHeading - previousHeading + 540) % 360) - 180;
+    const elapsed = Math.max(0, time - lastFrame);
+    const vehicleHeading = discontinuity ? targetHeading : previousHeading + headingTurn * (1 - Math.exp(-elapsed / 90));
+    displayedVehicle = { ...point, progress: currentProgress, line: onRoute ? line : null, bearing: vehicleHeading };
     vehicleMarker?.setLngLat([displayedVehicle.longitude, displayedVehicle.latitude]).setRotation(displayedVehicle.bearing);
     const cameraTurn = ((displayedVehicle.bearing - cameraBearing + 540) % 360) - 180;
     cameraBearing += cameraTurn * (1 - Math.exp(-Math.max(0, time - lastFrame) / 180));
     lastFrame = time;
     followVehicle(displayedVehicle, cameraBearing);
-    liveMotionFrame = t < 1 || (followingVehicle && Math.abs(cameraTurn) > 0.1) ? requestAnimationFrame(frame) : null;
+    liveMotionFrame = t < 1 || Math.abs(headingTurn) > 0.1 || (followingVehicle && Math.abs(cameraTurn) > 0.1) ? requestAnimationFrame(frame) : null;
   };
   liveMotionFrame = requestAnimationFrame(frame);
 }
@@ -901,15 +906,27 @@ function tick(now) {
 function updateCamera(progress, immediate) {
   if (!activeLine.length) return;
   const current = pointAtProgress(activeLine, cumulative, progress);
-  const ahead = pointAtProgress(activeLine, cumulative, Math.min(1, progress + 0.024));
-  const bearing = bearingBetween(current, ahead);
+  const roadHeading = routeBearing(progress);
+  const now = performance.now();
+  const reset = immediate || !replayMotionState || replayMotionState.line !== activeLine
+    || now - replayMotionState.time > 1000 || progress < replayMotionState.progress;
+  const elapsed = reset ? 0 : Math.max(0, now - replayMotionState.time);
+  const previousHeading = reset ? roadHeading : replayMotionState.heading;
+  const headingTurn = ((roadHeading - previousHeading + 540) % 360) - 180;
+  // Brief accelerates time; scale steering with it so the arrow keeps up with bends.
+  const steeringTime = 90 / Math.max(1, playbackRate);
+  const bearing = reset ? roadHeading : previousHeading + headingTurn * (1 - Math.exp(-elapsed / steeringTime));
+  const previousCamera = reset ? bearing : replayMotionState.camera;
+  const cameraTurn = ((bearing - previousCamera + 540) % 360) - 180;
+  const cameraBearing = reset ? bearing : previousCamera + cameraTurn * (1 - Math.exp(-elapsed / 200));
+  replayMotionState = { line: activeLine, progress, time: now, heading: bearing, camera: cameraBearing };
   const rawCurrent = rawLine.length ? pointAtProgress(rawLine, rawCumulative, progress) : null;
   const driftMeters = rawCurrent ? distanceMeters(rawCurrent, current) : 0;
 
   vehicleMarker?.setLngLat([current.longitude, current.latitude]).setRotation(bearing);
   map.getSource("rawVehicle").setData(rawCurrent ? pointFeature(rawCurrent, bearing) : emptyPointFeature());
   map.getSource("snapTether").setData(rawCurrent && driftMeters > 12 ? lineFeature([rawCurrent, current]) : lineFeature([]));
-  followVehicle(current, bearing);
+  followVehicle(current, cameraBearing);
 }
 
 function updateNavigationHud(progress) {

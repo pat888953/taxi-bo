@@ -60,6 +60,8 @@ ${extract('routeBearing')}
 let activeLine=[{latitude:22.3,longitude:114.2},{latitude:22.3005,longitude:114.2},{latitude:22.3005,longitude:114.3}];
 let cumulative=buildCumulativeDistances(activeLine),rawLine=[],rawCumulative=[];
 let markerPoint,markerBearing,cameraPoint,cameraBearing;
+let replayMotionState=null, playbackRate=1, now=0;
+const performance={now:()=>now};
 const vehicleMarker={setLngLat(p){markerPoint=p;return this},setRotation(b){markerBearing=b;return this}};
 const map={getSource(){return {setData(){}}}};
 function emptyPointFeature(){return {}}
@@ -71,7 +73,19 @@ updateCamera(progress,false);
 assert.ok(Math.abs(markerBearing)<1,'Replay must face north before the eastbound bend');
 assert.equal(cameraBearing,markerBearing);
 assert.ok(Math.abs(markerPoint[0]-114.2)<1e-9,'Replay remains on the road');
-updateCamera(1,false);
+now=2000;updateCamera(1,false);
 assert.ok(Math.abs(markerBearing-90)<1,'Replay retains road heading at arrival');
 console.log('PASS Replay/Brief local road heading on long routes and arrival');
+// Steering follows a bend progressively; camera turns more gently than the marker.
+now=3000;updateCamera(20/cumulative.at(-1),true);
+now+=16;updateCamera(80/cumulative.at(-1),false);
+assert.ok(markerBearing>0 && markerBearing<90,'steering must not jump straight to east');
+assert.ok(cameraBearing>=0 && cameraBearing<markerBearing,'camera turns independently');
+for(let i=0;i<60;i++){now+=16;updateCamera(80/cumulative.at(-1),false)}
+assert.ok(Math.abs(markerBearing-90)<1,'steering settles along the road');
+assert.ok(Math.abs(markerPoint[1]-22.3005)<1e-9,'steering does not move the marker off route');
+playbackRate=10;now+=16;updateCamera(0,true);
+now+=16;updateCamera(80/cumulative.at(-1),false);
+assert.ok(markerBearing>60,'Brief steering keeps up with accelerated playback');
+console.log('PASS gradual steering, separate camera smoothing, route alignment and Brief speed');
 `,replayContext);
