@@ -92,6 +92,9 @@
 
 /* Compact phone HUD leaves the route visible; full text is one tap away. */
 .guidance-toggle{display:none}
+.next-maneuver{grid-column:1/-1;padding:8px 10px;background:#eef4f0;border-left:3px solid #367348;border-radius:5px;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.next-maneuver[hidden]{display:none}
+.night-mode .next-maneuver{background:#2c3830;color:#dbe9df;border-color:#8ac899}
 .navidrive-vehicle-marker{width:52px;height:76px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
 .navidrive-vehicle-marker::before,.navidrive-vehicle-marker::after{clip-path:polygon(50% 0,94% 96%,50% 79%,6% 96%)}
 .navidrive-vehicle-marker::after{inset:5px}
@@ -99,6 +102,9 @@
  .turn-card{top:66px;left:8px;width:calc(100% - 16px);grid-template-columns:38px minmax(0,1fr) 44px;gap:6px 9px;padding:10px;border-radius:13px;max-height:34svh;overflow:auto}
  .turn-card .direction{min-width:38px;width:38px;height:42px;border-radius:9px;font-size:29px}
  .turn-card .turn-content{gap:2px}
+ .next-maneuver{font-size:14px;padding:6px 8px;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+ .next-maneuver[hidden]{display:none}
+ .turn-card.is-expanded .next-maneuver{display:block;overflow:visible;-webkit-line-clamp:unset}
  #nextDistance{font-size:19px}
  #nextInstruction{font-size:17px;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
  .turn-card .guidance-toggle{display:block;grid-column:3;grid-row:1;align-self:start;min-height:44px;padding:4px;font-size:11px;border-radius:8px}

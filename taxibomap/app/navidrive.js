@@ -652,6 +652,7 @@ function startLiveDrive() {
   liveDriveButton.textContent = "Stop Live";
   liveDriveButton.classList.add("live");
   nextDistance.textContent = "Live";
+  clearUpcomingGuidance();
   nextInstruction.textContent = "Waiting for phone GPS";
   routeStatus.textContent = "Allow location permission on the phone.";
 
@@ -785,8 +786,10 @@ function handleLivePosition(position) {
   map.getSource("rawVehicle").setData(pointFeature(point, bearing));
   map.getSource("snapTether").setData(snapped.distance > 8 ? lineFeature([point, snapped.point]) : lineFeature([]));
 
-  nextDistance.textContent = onRoute ? "On route" : "Off route";
-  nextInstruction.textContent = activeLine.length ? instructionForProgress(snapped.progress, totalLineDistance(activeLine)).text : "Recording live GPS";
+  const guidance = onRoute && activeLine.length ? instructionForProgress(snapped.progress, totalLineDistance(activeLine)) : null;
+  if (!guidance) clearUpcomingGuidance();
+  nextDistance.textContent = guidance ? guidance.distanceText : onRoute ? "Live" : "Off route";
+  nextInstruction.textContent = guidance ? guidance.text : activeLine.length ? "Follow the road safely while checking your route" : "Recording live GPS";
   speedValue.textContent = point.speed === null ? "0" : String(Math.max(0, Math.round(point.speed * 3.6)));
   distanceValue.textContent = activeLine.length ? (totalLineDistance(activeLine) * (1 - snapped.progress) / 1000).toFixed(1) : "--";
   etaValue.textContent = activeLine.length && point.speed > 0 ? String(Math.ceil(totalLineDistance(activeLine) * (1 - snapped.progress) / point.speed / 60)) : "--";
@@ -804,6 +807,7 @@ async function rerouteFromCurrentPosition(point) {
   lastRerouteAt = Date.now();
   offRouteReadings = 0;
   nextDistance.textContent = "Rerouting";
+  clearUpcomingGuidance();
   nextInstruction.textContent = "Finding a new route";
   routeStatus.textContent = "Off route. Recalculating with Valhalla + HDE…";
 
@@ -840,8 +844,9 @@ async function rerouteFromCurrentPosition(point) {
     map.getSource("snapTether").setData(lineFeature([]));
     renderReportOverlays();
     document.querySelector("#journeyName").textContent = activeRoute.name;
-    nextDistance.textContent = "New route";
-    nextInstruction.textContent = instructionForProgress(0, totalLineDistance(activeLine)).text;
+    const guidance = instructionForProgress(0, totalLineDistance(activeLine));
+    nextDistance.textContent = guidance.distanceText;
+    nextInstruction.textContent = guidance.text;
     routeStatus.textContent = `${result.engine}. Route recalculated from your current position.`;
   } catch (error) {
     nextDistance.textContent = "Off route";
@@ -1030,22 +1035,36 @@ function reportsNearRoute() {
   });
 }
 
+function clearUpcomingGuidance() {
+  const upcoming = document.querySelector('#nextManeuver');
+  if (upcoming) { upcoming.hidden = true; upcoming.textContent = ''; }
+  renderRoadGuidance(null);
+}
+
 function instructionForProgress(progress, totalMeters) {
   updateJunctionGuidance(progress, totalMeters);
-  if (!maneuvers.length) {
-    renderRoadGuidance(null);
-    return { text: "Follow the highlighted taxi route", distanceText: formatMeters(totalMeters * (1 - progress)) };
+  const upcoming = document.querySelector('#nextManeuver');
+  const direction = document.querySelector('.direction');
+  const textFor = step => step?.hdeGuidance?.verified === true && step.hdeGuidance.instruction
+    ? step.hdeGuidance.instruction : step?.instruction || 'Follow the route';
+  if (progress >= 1) {
+    clearUpcomingGuidance();
+    if (direction) direction.textContent = '✓';
+    return { text: 'Destination reached', distanceText: 'Arrived' };
   }
-
   const currentMeters = totalMeters * progress;
-  const next = maneuvers.find((maneuver) => junctionSymbol(maneuver) && maneuver.startMeters >= currentMeters - 12)
-    || maneuvers.find((maneuver) => maneuver.endMeters >= currentMeters) || maneuvers.at(-1);
-  const distanceToNext = Math.max(0, next.startMeters - currentMeters);
-  renderRoadGuidance(progress < 1 ? next : null);
-  return {
-    text: next.hdeGuidance?.instruction || next.instruction || "Continue",
-    distanceText: distanceToNext > 25 ? formatMeters(distanceToNext) : "Now"
-  };
+  const junctions = maneuvers.filter(step => junctionSymbol(step) && step.startMeters >= currentMeters - 12);
+  const next = junctions[0];
+  const distance = next ? Math.max(0, next.startMeters - currentMeters) : Infinity;
+  const atJunction = distance <= 25;
+  const following = atJunction ? junctions[1] : next;
+  if (upcoming) {
+    upcoming.hidden = !following;
+    upcoming.textContent = following ? `NEXT · In ${formatMeters(Math.max(0, following.startMeters - currentMeters))} — ${textFor(following)}` : '';
+  }
+  renderRoadGuidance(next ? { ...next, guidancePhase: atJunction ? 'now' : 'next' } : null);
+  if (direction) direction.textContent = atJunction ? junctionSymbol(next).glyph : '↑';
+  return { text: atJunction ? textFor(next) : 'Continue along the current road', distanceText: 'NOW' };
 }
 
 function normalizeManeuvers(value, totalMeters) {
@@ -1081,14 +1100,13 @@ function renderRoadGuidance(maneuver) {
   const signs = { exits: maneuver?.exits, ref: maneuver?.ref, destinations: maneuver?.destinations };
   const hasSigns = signs.exits || signs.destinations || signs.ref;
   const hde = maneuver?.hdeGuidance?.verified === true ? maneuver.hdeGuidance : null;
-  const key = JSON.stringify([lanes, signs, hde, maneuver?.modifier]);
+  const key = JSON.stringify([lanes, signs, hde, maneuver?.modifier, maneuver?.guidancePhase]);
   if (panel.dataset.guidance === key) return;
   panel.dataset.guidance = key;
   panel.replaceChildren();
   panel.hidden = !hde && !lanes.length && !hasSigns;
   const direction = document.querySelector(".direction");
   const arrows = { left: "←", "slight left": "↖", "sharp left": "↙", straight: "↑", right: "→", "slight right": "↗", "sharp right": "↘", uturn: "↶", none: "–" };
-  if (direction) direction.textContent = arrows[maneuver?.modifier?.replaceAll("_", " ")] || "↑";
   if (panel.hidden) return;
   const add = (parent, tag, className, text) => {
     const element = document.createElement(tag);
@@ -1101,7 +1119,7 @@ function renderRoadGuidance(maneuver) {
   add(panel, "span", `guidance-source${hde ? " is-hde" : ""}`, hde ? "TaxiBo HDE · Priority guidance" : "Valhalla · Road guidance");
   if (hde) {
     if (typeof hde.lanes === 'string' && hde.lanes.trim()) {
-      add(panel, 'strong', 'detail-label', 'Lane guidance');
+      add(panel, 'strong', 'detail-label', maneuver.guidancePhase === 'now' ? 'Lanes · This junction' : 'Lanes · Next junction');
       add(panel, 'p', 'hde-lane-guidance', hde.lanes);
     }
     if (typeof hde.signs === 'string' && hde.signs.trim()) {
@@ -1119,7 +1137,7 @@ function renderRoadGuidance(maneuver) {
       const side = recommended.every((index, i) => index === i) ? "left" : recommended.every((index, i) => index === lanes.length - recommended.length + i) ? "right" : "";
       label = side ? `Use ${recommended.length === 1 ? `the ${side} lane` : `the ${recommended.length} ${side} lanes`}` : `Use marked ${recommended.length === 1 ? "lane" : "lanes"}`;
     }
-    add(section, "strong", "detail-label", label);
+    add(section, "strong", "detail-label", `${maneuver.guidancePhase === 'now' ? 'This junction' : 'Next junction'} · ${label}`);
     const row = add(section, "div", "guidance-lanes");
     row.setAttribute("aria-label", "Lane choices from left to right");
     lanes.forEach((lane, index) => {
