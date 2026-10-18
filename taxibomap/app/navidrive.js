@@ -1065,6 +1065,8 @@ function reportsNearRoute() {
 }
 
 function clearUpcomingGuidance() {
+  const original = document.querySelector('#instructionOriginal');
+  if (original) original.textContent = '';
   guidanceApproach = { route: null, step: null };
   const upcoming = document.querySelector('#nextManeuver');
   if (upcoming) { upcoming.hidden = true; upcoming.textContent = ''; }
@@ -1075,12 +1077,11 @@ function instructionForProgress(progress, totalMeters) {
   updateJunctionGuidance(progress, totalMeters);
   const upcoming = document.querySelector('#nextManeuver');
   const direction = document.querySelector('.direction');
-  const textFor = step => step?.hdeGuidance?.verified === true && step.hdeGuidance.instruction
-    ? step.hdeGuidance.instruction : step?.instruction || 'Follow the route';
+  const textFor = drivingInstruction;
   if (progress >= 1) {
     clearUpcomingGuidance();
     if (direction) direction.textContent = '✓';
-    return { text: 'Destination reached', distanceText: 'Arrived' };
+    return { text: '已到達目的地', distanceText: 'Arrived' };
   }
   const currentMeters = totalMeters * progress;
   const junctions = maneuvers.filter(step => junctionSymbol(step) && step.startMeters >= currentMeters - 12);
@@ -1103,11 +1104,42 @@ function instructionForProgress(progress, totalMeters) {
   const showFollowing = following && (!atJunction || following.startMeters - currentMeters <= Math.max(150, hasSpeed ? speed * 30 : 150));
   if (upcoming) {
     upcoming.hidden = !showFollowing;
-    upcoming.textContent = showFollowing ? `${atJunction ? 'Then' : seconds <= 180 ? 'Prepare · In' : 'In'} ${formatMeters(Math.max(0, following.startMeters - currentMeters))} · ${textFor(following)}` : '';
+    upcoming.textContent = showFollowing ? `${atJunction ? 'NEXT · 隨後' : seconds <= 180 ? 'NEXT · 準備於' : 'NEXT · 前方'} ${formatMeters(Math.max(0, following.startMeters - currentMeters))} · ${textFor(following)}` : '';
   }
   renderRoadGuidance(approaching ? { ...next, guidancePhase: atJunction ? 'now' : 'next' } : null);
   if (direction) direction.textContent = approaching ? junctionSymbol(next).glyph : '↑';
-  return { text: approaching ? textFor(next) : 'Continue along the current road', distanceText: atJunction ? 'NOW' : approaching ? `In ${formatMeters(distance)}` : 'NOW' };
+  const original = document.querySelector('#instructionOriginal');
+  if (original) original.textContent = next?.hdeGuidance?.verified === true ? next.hdeGuidance.instruction || next.instruction : next?.instruction || '';
+  return { text: approaching ? textFor(next) : '沿目前道路繼續行駛', distanceText: atJunction ? 'NOW' : approaching ? `NEXT · ${formatMeters(distance)}` : 'NOW' };
+}
+
+function signLanguages(value) {
+  const full = String(value || '').trim();
+  const chinese = (full.match(/[\u3400-\u9fff\uf900-\ufaff]+/g) || []).join('、');
+  const english = full.replace(/[\u3400-\u9fff\uf900-\ufaff]+/g, ' ').replace(/[、，（）]/g, ' ').replace(/\s+/g, ' ').trim();
+  return { chinese, english, full };
+}
+
+function drivingInstruction(step) {
+  if (!step) return '沿路線繼續行駛';
+  // Verified local knowledge must retain its exact instructions and exceptions.
+  if (step.hdeGuidance?.verified === true && step.hdeGuidance.instruction) return step.hdeGuidance.instruction;
+  const type = String(step.type || '').replaceAll('_', ' ');
+  const modifier = String(step.modifier || '').replaceAll('_', ' ');
+  const side = modifier.includes('left') ? '左' : modifier.includes('right') ? '右' : '';
+  const road = signLanguages(step.name).chinese;
+  const onto = road ? `，駛入${road}` : '';
+  if (modifier === 'uturn') return '在前方掉頭';
+  if (type === 'arrive') return '到達目的地';
+  if (type === 'roundabout' || type === 'rotary') return `駛入迴旋處${onto}`;
+  if (type === 'exit roundabout' || type === 'exit rotary') return `駛出迴旋處${onto}`;
+  if (type === 'off ramp') return `${side ? `靠${side}` : ''}駛出${step.exits ? `，走 ${step.exits} 號出口` : '出口'}${onto}`;
+  if (type === 'on ramp') return `${side ? `靠${side}` : ''}駛入匝道${onto}`;
+  if (type === 'merge') return `${side ? `向${side}` : ''}匯入車流${onto}`;
+  if (type === 'fork') return `${side ? `靠${side}` : '繼續'}行駛${onto}`;
+  if (side && ['turn','end of road','continue'].includes(type)) return `${modifier.includes('slight') ? '稍向' : modifier.includes('sharp') ? '急向' : '向'}${side}轉${onto}`;
+  if (type === 'depart' || modifier === 'straight' || type === 'continue') return `繼續直行${onto}`;
+  return /[\u3400-\u9fff]/.test(step.instruction || '') ? step.instruction : '沿路線繼續行駛';
 }
 
 function normalizeManeuvers(value, totalMeters) {
@@ -1119,6 +1151,7 @@ function normalizeManeuvers(value, totalMeters) {
     cursor += distance;
     return {
       type: step.type || step.maneuver?.type || '',
+      name: step.name || '',
       modifier: step.modifier || step.maneuver?.modifier || '',
       instruction: cleanInstruction(step.instruction || describeClientStep(step, index)),
       durationSeconds: Number(step.duration) || 0,
@@ -1159,27 +1192,33 @@ function renderRoadGuidance(maneuver) {
     parent.append(element);
     return element;
   };
+  const addDestination = (parent, value) => {
+    const names = signLanguages(value);
+    const block = add(parent, 'div', 'sign-names');
+    add(block, 'strong', 'sign-destination', names.chinese || names.full);
+    if (names.chinese && /[A-Za-z]/.test(names.english)) add(block, 'small', 'sign-english', names.english);
+  };
   
   add(panel, "span", `guidance-source${hde ? " is-hde" : ""}`, hde ? "TaxiBo HDE · Priority guidance" : "Valhalla · Road guidance");
   if (hde) {
     if (typeof hde.lanes === 'string' && hde.lanes.trim()) {
-      add(panel, 'strong', 'detail-label', 'Lane guidance');
+      add(panel, 'strong', 'detail-label', '行車線指示');
       add(panel, 'p', 'hde-lane-guidance', hde.lanes);
     }
     if (typeof hde.signs === 'string' && hde.signs.trim()) {
       const sign = add(panel, 'div', 'guidance-sign');
-      add(sign, 'span', 'sign-label', 'Follow signs for');
-      add(sign, 'strong', 'sign-destination', hde.signs);
+      add(sign, 'span', 'sign-label', '留意前方路牌');
+      addDestination(sign, hde.signs);
     }
     return;
   }
   if (lanes.length) {
     const section = add(panel, "div", "lane-section");
     const recommended = lanes.map((lane, index) => lane.active === true || (lane.active == null && lane.valid === true) ? index : -1).filter((index) => index >= 0);
-    let label = "Lane choices";
+    let label = "行車線選擇";
     if (recommended.length) {
       const side = recommended.every((index, i) => index === i) ? "left" : recommended.every((index, i) => index === lanes.length - recommended.length + i) ? "right" : "";
-      label = side ? `Use ${recommended.length === 1 ? `the ${side} lane` : `the ${recommended.length} ${side} lanes`}` : `Use marked ${recommended.length === 1 ? "lane" : "lanes"}`;
+      label = side ? `使用${side === 'left' ? '左' : '右'}方${recommended.length === 1 ? '' : ` ${recommended.length} 條`}行車線` : '使用綠色標示的行車線';
     }
     add(section, "strong", "detail-label", label);
     const row = add(section, "div", "guidance-lanes");
@@ -1194,9 +1233,9 @@ function renderRoadGuidance(maneuver) {
   }
   if (hasSigns) {
     const sign = add(panel, "div", "guidance-sign");
-    add(sign, "span", "sign-label", "Follow signs for");
-    if (signs.exits) add(sign, "strong", "exit-badge", `Exit ${signs.exits}`);
-    if (signs.destinations) add(sign, "strong", "sign-destination", signs.destinations);
+    add(sign, "span", "sign-label", "留意前方路牌");
+    if (signs.exits) add(sign, "strong", "exit-badge", `出口 ${signs.exits}`);
+    if (signs.destinations) addDestination(sign, signs.destinations);
     if (signs.ref) add(sign, "span", "sign-reference", signs.ref);
   }
 }

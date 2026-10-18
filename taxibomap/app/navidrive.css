@@ -165,3 +165,8 @@
 #roadGuidance>.lane-section,#roadGuidance>.detail-label{order:2;text-align:center}
 #roadGuidance>.hde-lane-guidance{order:3;text-align:center}
 #roadGuidance .guidance-lanes{width:fit-content;max-width:100%;margin-inline:auto}
+.sign-names{min-width:0;flex:1 1 160px}
+.sign-english{display:block;font-size:11px;font-weight:400;line-height:1.25;margin-top:3px;color:#e0eee5}
+.instruction-original{display:none;grid-column:1/-1;font-size:12px;line-height:1.35;color:#587064}
+.turn-card.is-expanded .instruction-original:not(:empty){display:block}
+.night-mode .instruction-original{color:#b1bec1}
