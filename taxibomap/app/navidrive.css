@@ -113,6 +113,9 @@
 }
 .next-maneuver{grid-column:1/-1;padding:8px 10px;background:#eef4f0;border-left:3px solid #367348;border-radius:5px;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
 .next-maneuver[hidden]{display:none}
+.turn-card[data-phase="approach"] #nextDistance,.turn-card[data-phase="turn"] #nextDistance{font-size:15px;letter-spacing:0}
+.turn-card[data-phase="approach"] .turn-content,.turn-card[data-phase="turn"] .turn-content{display:grid;gap:2px}
+.turn-card[data-phase="approach"] #nextInstruction,.turn-card[data-phase="turn"] #nextInstruction{font-size:17px;line-height:1.25}
 .night-mode .next-maneuver{background:#2c3830;color:#dbe9df;border-color:#8ac899}
 .navidrive-vehicle-marker{width:52px;height:76px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
 .navidrive-vehicle-marker::before,.navidrive-vehicle-marker::after{clip-path:polygon(50% 0,94% 96%,50% 79%,6% 96%)}

@@ -26,6 +26,11 @@ guidanceToggle?.addEventListener("click", () => {
   const expanded = document.querySelector(".turn-card").classList.toggle("is-expanded");
   guidanceToggle.setAttribute("aria-expanded", String(expanded));
   guidanceToggle.textContent = expanded ? "Less" : "More";
+  if (activeLine.length && maneuvers.length) {
+    const guidance = instructionForProgress(latestProgress, totalLineDistance(activeLine));
+    nextDistance.textContent = guidance.distanceText;
+    nextInstruction.textContent = guidance.text;
+  }
 });
 const etaValue = document.querySelector("#etaValue");
 const distanceValue = document.querySelector("#distanceValue");
@@ -64,6 +69,8 @@ let liveMotionFrame = null;
 let displayedVehicle = null;
 let lastFixTime = null;
 let replayMotionState = null;
+let guidanceApproach = { route: null, step: null };
+let guidanceSpeed = null;
 let liveSpeedCamera = null;
 let liveCameraAuto = true;
 let simulationTimer = null;
@@ -724,6 +731,7 @@ function toggleSimulatedGps() {
 }
 
 function stopLiveDrive(clearStatus = true) {
+  guidanceSpeed = null;
   liveSpeedCamera = null;
   document.querySelector('#cameraButton').textContent = CAMERA.pitch === 70 ? 'View: Drive' : 'View: Urban';
   const wasSimulation = simulationTimer !== null;
@@ -763,6 +771,7 @@ function handleLivePosition(position) {
     speed: Number.isFinite(position.coords.speed) ? position.coords.speed : null,
     recordedAt: new Date().toISOString()
   };
+  guidanceSpeed = point.accuracy <= 60 && Number.isFinite(point.speed) && point.speed >= 1 ? point.speed : null;
 
   if (!isInsideHongKong(point)) {
     routeStatus.textContent = "GPS point is outside Hong Kong test area.";
@@ -1056,6 +1065,7 @@ function reportsNearRoute() {
 }
 
 function clearUpcomingGuidance() {
+  guidanceApproach = { route: null, step: null };
   const upcoming = document.querySelector('#nextManeuver');
   if (upcoming) { upcoming.hidden = true; upcoming.textContent = ''; }
   renderRoadGuidance(null);
@@ -1077,14 +1087,27 @@ function instructionForProgress(progress, totalMeters) {
   const next = junctions[0];
   const distance = next ? Math.max(0, next.startMeters - currentMeters) : Infinity;
   const atJunction = distance <= 25;
-  const following = atJunction ? junctions[1] : next;
+  const currentStep = maneuvers.find(step => step.startMeters <= currentMeters && step.endMeters > currentMeters);
+  const estimatedSpeed = currentStep?.durationSeconds > 0 ? (currentStep.endMeters - currentStep.startMeters) / currentStep.durationSeconds : null;
+  const speed = guidanceSpeed ?? estimatedSpeed;
+  const hasSpeed = Number.isFinite(speed) && speed >= 1;
+  const seconds = hasSpeed ? distance / Math.min(40, speed) : Infinity;
+  const complex = (next?.lanes?.length || 0) >= 4 || (junctions[1] && junctions[1].startMeters - next.startMeters <= 150);
+  const revealDistance = hasSpeed ? Math.max(150, Math.min(1500, speed * (complex ? 90 : 60))) : complex ? 400 : 250;
+  if (guidanceApproach.route !== maneuvers || guidanceApproach.step !== next) guidanceApproach = { route: maneuvers, step: next, visible: false };
+  if (next && distance <= revealDistance) guidanceApproach.visible = true;
+  const card = document.querySelector('.turn-card');
+  const approaching = !!next && (guidanceApproach.visible || atJunction || card?.classList?.contains('is-expanded'));
+  if (card) card.dataset.phase = atJunction ? 'turn' : approaching ? 'approach' : 'cruise';
+  const following = atJunction ? junctions[1] : !approaching ? next : null;
+  const showFollowing = following && (!atJunction || following.startMeters - currentMeters <= Math.max(150, hasSpeed ? speed * 30 : 150));
   if (upcoming) {
-    upcoming.hidden = !following;
-    upcoming.textContent = following ? `NEXT · In ${formatMeters(Math.max(0, following.startMeters - currentMeters))} — ${textFor(following)}` : '';
+    upcoming.hidden = !showFollowing;
+    upcoming.textContent = showFollowing ? `${atJunction ? 'Then' : seconds <= 180 ? 'Prepare · In' : 'In'} ${formatMeters(Math.max(0, following.startMeters - currentMeters))} · ${textFor(following)}` : '';
   }
-  renderRoadGuidance(next ? { ...next, guidancePhase: atJunction ? 'now' : 'next' } : null);
-  if (direction) direction.textContent = atJunction ? junctionSymbol(next).glyph : '↑';
-  return { text: atJunction ? textFor(next) : 'Continue along the current road', distanceText: 'NOW' };
+  renderRoadGuidance(approaching ? { ...next, guidancePhase: atJunction ? 'now' : 'next' } : null);
+  if (direction) direction.textContent = approaching ? junctionSymbol(next).glyph : '↑';
+  return { text: approaching ? textFor(next) : 'Continue along the current road', distanceText: atJunction ? 'NOW' : approaching ? `In ${formatMeters(distance)}` : 'NOW' };
 }
 
 function normalizeManeuvers(value, totalMeters) {
@@ -1098,6 +1121,7 @@ function normalizeManeuvers(value, totalMeters) {
       type: step.type || step.maneuver?.type || '',
       modifier: step.modifier || step.maneuver?.modifier || '',
       instruction: cleanInstruction(step.instruction || describeClientStep(step, index)),
+      durationSeconds: Number(step.duration) || 0,
       lanes: Array.isArray(step.lanes) ? step.lanes : [],
       destinations: typeof step.destinations === 'string' ? step.destinations : '',
       exits: typeof step.exits === 'string' ? step.exits : '',
@@ -1139,7 +1163,7 @@ function renderRoadGuidance(maneuver) {
   add(panel, "span", `guidance-source${hde ? " is-hde" : ""}`, hde ? "TaxiBo HDE · Priority guidance" : "Valhalla · Road guidance");
   if (hde) {
     if (typeof hde.lanes === 'string' && hde.lanes.trim()) {
-      add(panel, 'strong', 'detail-label', maneuver.guidancePhase === 'now' ? 'Lanes · This junction' : 'Lanes · Next junction');
+      add(panel, 'strong', 'detail-label', 'Lane guidance');
       add(panel, 'p', 'hde-lane-guidance', hde.lanes);
     }
     if (typeof hde.signs === 'string' && hde.signs.trim()) {
@@ -1157,7 +1181,7 @@ function renderRoadGuidance(maneuver) {
       const side = recommended.every((index, i) => index === i) ? "left" : recommended.every((index, i) => index === lanes.length - recommended.length + i) ? "right" : "";
       label = side ? `Use ${recommended.length === 1 ? `the ${side} lane` : `the ${recommended.length} ${side} lanes`}` : `Use marked ${recommended.length === 1 ? "lane" : "lanes"}`;
     }
-    add(section, "strong", "detail-label", `${maneuver.guidancePhase === 'now' ? 'This junction' : 'Next junction'} · ${label}`);
+    add(section, "strong", "detail-label", label);
     const row = add(section, "div", "guidance-lanes");
     row.setAttribute("aria-label", "Lane choices from left to right");
     lanes.forEach((lane, index) => {
