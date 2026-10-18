@@ -22,10 +22,12 @@ const nextDistance = document.querySelector("#nextDistance");
 const nextInstruction = document.querySelector("#nextInstruction");
 const routeStatus = document.querySelector("#routeStatus");
 const guidanceToggle = document.querySelector("#guidanceToggle");
+document.querySelector('#cruiseStrip')?.addEventListener('click', () => guidanceToggle.click());
 guidanceToggle?.addEventListener("click", () => {
   const expanded = document.querySelector(".turn-card").classList.toggle("is-expanded");
   guidanceToggle.setAttribute("aria-expanded", String(expanded));
   guidanceToggle.textContent = expanded ? "Less" : "More";
+  document.querySelector('#cruiseStrip')?.setAttribute('aria-expanded', String(expanded));
   if (activeLine.length && maneuvers.length) {
     const guidance = instructionForProgress(latestProgress, totalLineDistance(activeLine));
     nextDistance.textContent = guidance.distanceText;
@@ -731,6 +733,7 @@ function toggleSimulatedGps() {
 }
 
 function stopLiveDrive(clearStatus = true) {
+  clearUpcomingGuidance();
   guidanceSpeed = null;
   liveSpeedCamera = null;
   document.querySelector('#cameraButton').textContent = CAMERA.pitch === 70 ? 'View: Drive' : 'View: Urban';
@@ -774,6 +777,7 @@ function handleLivePosition(position) {
   guidanceSpeed = point.accuracy <= 60 && Number.isFinite(point.speed) && point.speed >= 1 ? point.speed : null;
 
   if (!isInsideHongKong(point)) {
+    clearUpcomingGuidance();
     routeStatus.textContent = "GPS point is outside Hong Kong test area.";
     return;
   }
@@ -818,6 +822,11 @@ function handleLivePosition(position) {
   if (!guidance) clearUpcomingGuidance();
   nextDistance.textContent = guidance ? guidance.distanceText : onRoute ? "Live" : "Off route";
   nextInstruction.textContent = guidance ? guidance.text : activeLine.length ? "Follow the road safely while checking your route" : "Recording live GPS";
+  if (rerouteInFlight) {
+    clearUpcomingGuidance();
+    nextDistance.textContent = 'Rerouting';
+    nextInstruction.textContent = '正在重新規劃路線';
+  }
   speedValue.textContent = point.speed === null ? "0" : String(Math.max(0, Math.round(point.speed * 3.6)));
   distanceValue.textContent = activeLine.length ? (totalLineDistance(activeLine) * (1 - snapped.progress) / 1000).toFixed(1) : "--";
   etaValue.textContent = activeLine.length && point.speed > 0 ? String(Math.ceil(totalLineDistance(activeLine) * (1 - snapped.progress) / point.speed / 60)) : "--";
@@ -1065,6 +1074,8 @@ function reportsNearRoute() {
 }
 
 function clearUpcomingGuidance() {
+  const card = document.querySelector('.turn-card');
+  if (card) card.dataset.phase = 'notice';
   const original = document.querySelector('#instructionOriginal');
   if (original) original.textContent = '';
   guidanceApproach = { route: null, step: null };
@@ -1080,6 +1091,8 @@ function instructionForProgress(progress, totalMeters) {
   const textFor = drivingInstruction;
   if (progress >= 1) {
     clearUpcomingGuidance();
+    const card = document.querySelector('.turn-card');
+    if (card) card.dataset.phase = 'arrived';
     if (direction) direction.textContent = '✓';
     return { text: '已到達目的地', distanceText: 'Arrived' };
   }
@@ -1100,6 +1113,8 @@ function instructionForProgress(progress, totalMeters) {
   const card = document.querySelector('.turn-card');
   const approaching = !!next && (guidanceApproach.visible || atJunction || card?.classList?.contains('is-expanded'));
   if (card) card.dataset.phase = atJunction ? 'turn' : approaching ? 'approach' : 'cruise';
+  const strip = document.querySelector('#cruiseStrip');
+  if (strip) strip.textContent = next ? `↑ 沿路前行 · NEXT ${formatMeters(distance)}` : '↑ 沿路前行 · 路線導航中';
   const following = atJunction ? junctions[1] : !approaching ? next : null;
   const showFollowing = following && (!atJunction || following.startMeters - currentMeters <= Math.max(150, hasSpeed ? speed * 30 : 150));
   if (upcoming) {

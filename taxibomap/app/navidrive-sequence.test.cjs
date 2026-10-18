@@ -7,7 +7,8 @@ function extract(name) {
   return source.slice(start, source.indexOf('\nfunction ', start + 1));
 }
 const upcoming = { hidden: true, textContent: '' }, arrow = {}, card = {dataset:{}};
-const context = vm.createContext({ document: { querySelector: s => s === '#instructionOriginal' ? null : s === '#nextManeuver' ? upcoming : s === '.turn-card' ? card : arrow } });
+const strip = {};
+const context = vm.createContext({ document: { querySelector: s => s === '#cruiseStrip' ? strip : s === '#instructionOriginal' ? null : s === '#nextManeuver' ? upcoming : s === '.turn-card' ? card : arrow } });
 vm.runInContext(`
 let maneuvers = [
  {type:'depart',startMeters:0,endMeters:400,instruction:'Start'},
@@ -28,6 +29,8 @@ let guidance = context.instructionForProgress(.1, 1000);
 assert.equal(guidance.text, '沿目前道路繼續行駛');
 assert.match(upcoming.textContent, /前方 300 m · 向左轉/);
 assert.equal(arrow.textContent, '↑');
+assert.match(strip.textContent,/NEXT 300 m/);
+assert.equal(card.dataset.phase,'cruise');
 assert.equal(vm.runInContext('rendered', context), null);
 guidance=context.instructionForProgress(.2,1000);
 assert.equal(guidance.text,'向左轉');
@@ -54,6 +57,7 @@ assert.equal(guidance.text, 'Take the signed local exit');
 context.instructionForProgress(1, 1000);
 assert.equal(upcoming.hidden, true);
 assert.equal(vm.runInContext('rendered',context),null);
+assert.equal(card.dataset.phase,'arrived');
 vm.runInContext('maneuvers=[]',context);
 guidance = context.instructionForProgress(.2, 1000);
 assert.equal(guidance.text, '沿目前道路繼續行駛');

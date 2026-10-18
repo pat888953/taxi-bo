@@ -170,3 +170,10 @@
 .instruction-original{display:none;grid-column:1/-1;font-size:12px;line-height:1.35;color:#587064}
 .turn-card.is-expanded .instruction-original:not(:empty){display:block}
 .night-mode .instruction-original{color:#b1bec1}
+.cruise-strip{display:none}
+@media(max-width:780px){
+ .turn-card[data-phase="cruise"]:not(.is-expanded){display:block;width:fit-content;max-width:calc(100% - 16px);padding:0;max-height:none;border-radius:12px}
+ .turn-card[data-phase="cruise"]:not(.is-expanded)>:not(.cruise-strip){display:none!important}
+ .turn-card[data-phase="cruise"]:not(.is-expanded)>.cruise-strip{display:block;width:100%;min-height:44px;padding:8px 12px;border:0;font-size:13px;line-height:1.3;text-align:left;white-space:normal}
+ .turn-card[data-phase="notice"] #routeStatus{display:block}
+}

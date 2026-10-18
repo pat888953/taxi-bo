@@ -10,13 +10,14 @@
   <link rel="manifest" href="navidrive.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/navidrive-192.png">
   <link rel="apple-touch-icon" href="icons/navidrive-192.png">
-  <link rel="stylesheet" href="navidrive.css?v=20261018language1">
+  <link rel="stylesheet" href="navidrive.css?v=20261018cruise1">
 </head>
 <body>
   <main>
     <div id="navMap" aria-label="Hong Kong driving map"></div>
     <header class="brand"><a href="index.html" aria-label="Back to TaxiBo recorder">TaxiBo<span>NaviDrive</span></a><span id="driveMode">Ready / replay</span><button id="nightMode" type="button" aria-pressed="false">Night</button></header>
     <section class="turn-card" aria-label="Route guidance">
+      <button id="cruiseStrip" class="cruise-strip" type="button" aria-label="Open driving details" aria-expanded="false" aria-controls="nextInstruction nextManeuver roadGuidance">↑ 沿路前行</button>
       <span class="direction" aria-hidden="true">↗</span>
       <div class="turn-content"><span id="nextDistance">Ready</span><strong id="nextInstruction">Choose your next journey</strong></div><section id="roadGuidance" class="maneuver-details" hidden aria-label="Lane and road-sign guidance, lanes left to right"></section><small id="routeStatus" role="status">Loading TaxiBo services…</small>
       <div id="nextManeuver" class="next-maneuver" hidden></div>
@@ -51,7 +52,7 @@
     .night-mode .junction-guide.next-junction{background:#d8bd65;color:#111;border-color:#eadcab}
   </style>
   <script src="speed-camera.js?v=20261017speed1"></script>
-  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=20261018language1"></script>
+  <script src="maplibre-loader.js" data-navigation="navidrive.js?v=20261018cruise1"></script>
   <script src="mobile-controls.js?v=20261017controls1"></script>
   <script>
     if ("serviceWorker" in navigator) {
@@ -60,6 +61,7 @@
   </script>
 </body>
 </html>
+
 
 
 
