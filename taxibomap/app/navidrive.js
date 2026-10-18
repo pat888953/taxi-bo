@@ -1,6 +1,7 @@
 const STORAGE_KEY = "taxiboStreetMapRoutesV2";
 const REPORT_STORAGE_KEY = "taxiboStreetMapReportsV1";
 const HK_CENTER = [114.1694, 22.3193];
+const basemap = new NaviBasemap();
 const CAMERA = {
   zoom: 19.3,
   pitch: 70,
@@ -87,8 +88,7 @@ function applyNightMode() {
   nightButton.setAttribute('aria-pressed', String(nightMode));
   document.querySelector('meta[name="theme-color"]').content = nightMode ? '#171b20' : '#102b27';
   if (mapReady) {
-    map.setPaintProperty('osmRaster', 'raster-brightness-max', nightMode ? 0.25 : 1);
-    map.setPaintProperty('osmRaster', 'raster-saturation', nightMode ? -0.65 : 0);
+    basemap.apply(map,nightMode);
     map.setPaintProperty('activeRouteCasing', 'line-color', nightMode ? '#577268' : '#ffffff');
   }
 }
@@ -250,13 +250,25 @@ async function initializeNavigation() {
     return;
   }
 
-  map = createNavigationMap();
+  const basemapStyle = await basemap.load();
+  map = createNavigationMap(basemapStyle);
+  const basemapTimeout = setTimeout(() => {
+    if (!mapReady && basemap.mode === 'vector') {
+      basemap.mode = 'classic';
+      basemap.apply(map,nightMode);
+    }
+  },15000);
   map.on('dragstart', () => { followingVehicle = false; });
   map.on("error", (event) => {
+    if (basemap.handleError(event,map,nightMode)) {
+      routeStatus.textContent = 'Vector tiles unavailable. Switched to Classic map.';
+      return;
+    }
     const message = event?.error?.message || "Map tile/source error.";
     routeStatus.textContent = message.includes("tile") ? "Map tiles are not loading. Check internet access." : message;
   });
   map.on("load", async () => {
+    clearTimeout(basemapTimeout);
     mapReady = true;
     addNavigationLayers();
     applyNightMode();
@@ -266,7 +278,7 @@ async function initializeNavigation() {
   });
 }
 
-function createNavigationMap() {
+function createNavigationMap(basemapStyle) {
   return new maplibregl.Map({
     container: "navMap",
     center: HK_CENTER,
@@ -276,22 +288,7 @@ function createNavigationMap() {
     maxZoom: 22,
     maxPitch: 80,
     attributionControl: true,
-    style: {
-      version: 8,
-      sources: {
-        osmRaster: {
-          type: "raster",
-          tiles: [
-            "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          ],
-          tileSize: 256,
-          attribution: "&copy; OpenStreetMap"
-        }
-      },
-      layers: [{ id: "osmRaster", type: "raster", source: "osmRaster" }]
-    }
+    style: basemapStyle
   });
 }
 
@@ -1645,6 +1642,9 @@ document.querySelector('#cameraButton').addEventListener('click', event => {
  CAMERA.zoom = close ? 19.3 : 17.5;
  event.currentTarget.textContent = close ? 'View: Drive' : 'View: Urban';
  updateCamera(latestProgress, true);
+});
+document.querySelector('#basemapButton').addEventListener('click',()=>{
+  if(mapReady) basemap.toggle(map,nightMode);
 });
 window.addEventListener('pagehide', () => { pauseNavigation(); stopLiveDrive(); });
 

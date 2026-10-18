@@ -15,7 +15,7 @@ document.body.append(mobileTools, mobileBar);
 const drive = mobileBar.querySelector('#mobileDrive');
 const toggle = mobileBar.querySelector('#mobileToolsToggle');
 const phone = window.matchMedia('(max-width: 780px)');
-const moved = ['toggleJourney', 'startNav', 'briefNav', 'simulateGps', 'pauseNav', 'saveDrive', 'reportTraffic', 'overviewButton', 'cameraButton', 'nightMode'].map(id => {
+const moved = ['toggleJourney', 'startNav', 'briefNav', 'simulateGps', 'pauseNav', 'saveDrive', 'reportTraffic', 'overviewButton', 'cameraButton', 'basemapButton', 'nightMode'].map(id => {
   const element = document.getElementById(id);
   const placeholder = document.createComment(`Original position of ${id}`);
   element.before(placeholder);

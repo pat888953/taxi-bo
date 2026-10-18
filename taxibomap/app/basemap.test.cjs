@@ -1,0 +1,22 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(`${__dirname}/basemap.js`,'utf8');
+const style={version:8,glyphs:'https://example.com/fonts/{fontstack}/{range}.pbf',sources:{openmaptiles:{type:'vector',attribution:'© OpenMapTiles © OpenStreetMap contributors'}},layers:[{id:'land',type:'fill',source:'openmaptiles',paint:{'fill-color':'#fff'}}]};
+const button={setAttribute(){}};
+const context=vm.createContext({localStorage:{getItem(){return null},setItem(){}},document:{querySelector(){return button}},AbortSignal,fetch:async()=>({ok:true,json:async()=>structuredClone(style)})});
+vm.runInContext(source+';globalThis.Basemap=NaviBasemap',context);
+(async()=>{
+ const base=new context.Basemap();const merged=await base.load();
+ assert.ok(merged.sources.openmaptiles.attribution.includes('OpenMapTiles'));
+ assert.ok(merged.sources.osmRaster);assert.equal(merged.layers[0].id,'osmRaster');
+ const visibility={},paint={};const map={setLayoutProperty(id,p,v){visibility[id]=v},setPaintProperty(id,p,v){paint[id+':'+p]=v}};
+ base.apply(map,false);assert.equal(visibility.osmRaster,'none');assert.equal(visibility.land,'visible');
+ base.toggle(map,false);assert.equal(visibility.osmRaster,'visible');assert.equal(visibility.land,'none');
+ base.toggle(map,true);assert.notEqual(paint['land:fill-color'],'#fff');
+ base.apply(map,false);assert.equal(paint['land:fill-color'],'#fff');
+ for(let i=0;i<3;i++)base.handleError({sourceId:'openmaptiles'},map,false);
+ assert.equal(base.mode,'classic');
+ context.fetch=async()=>{throw Error('offline')};
+ const offline=new context.Basemap();const fallback=await offline.load();
+ assert.equal(offline.mode,'classic');assert.equal(fallback.layers.length,1);
+ console.log('PASS vector style, attribution, Classic switch, night colours, tile errors and offline fallback');
+})().catch(error=>{console.error(error);process.exitCode=1});
