@@ -157,3 +157,11 @@
  .turn-card{top:49px;width:min(440px,calc(100% - 110px));max-height:42svh}
  .turn-card.is-expanded{max-height:65svh}
 }
+
+/* Give the road sign its own row, with lane choices centered underneath. */
+.turn-card #roadGuidance.maneuver-details{grid-template-columns:minmax(0,1fr);gap:6px}
+#roadGuidance>.guidance-source{order:0}
+#roadGuidance>.guidance-sign{order:1;width:100%}
+#roadGuidance>.lane-section,#roadGuidance>.detail-label{order:2;text-align:center}
+#roadGuidance>.hde-lane-guidance{order:3;text-align:center}
+#roadGuidance .guidance-lanes{width:fit-content;max-width:100%;margin-inline:auto}
